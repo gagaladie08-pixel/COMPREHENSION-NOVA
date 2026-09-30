@@ -30,7 +30,7 @@ class RecordMathTest {
     fun `plus longue serie consecutive`() {
         val series = s(0 to 3, 1 to 4, 3 to 2, 4 to 6, 5 to 5, 6 to 9)
         assertEquals(4 to "2026-01-07", RecordMath.longestStreak(series, 10))
-        assertEquals(3 to "2026-01-06", RecordMath.longestStreak(series, 5))
+        assertEquals(2 to "2026-01-02", RecordMath.longestStreak(series, 5))
     }
 
     @Test
