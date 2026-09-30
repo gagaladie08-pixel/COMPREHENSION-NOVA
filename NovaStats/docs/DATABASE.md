@@ -61,9 +61,25 @@ Service / Import ──► scrobbles (CONFIRMED)
         certifications (+ history, dates rétroactives = date de la N-ième écoute)
         pantheon_status (+ history)
                         │
-                        ▼  (à venir) SnapshotEngine
-        snapshots → billboard_history → hall_of_fame → records_cache → nova_awards
+                        ▼  BillboardEngine.rebuildAll() (import) / refreshCurrent() (à chaque écoute)
+        snapshots (+ snapshot_tracks / artists / albums) → hall_of_fame (+ badges, notifications_feed)
+                        ▼  (à venir)
+        billboard_history → records_cache → nova_awards
 ```
+
+## Billboard (snapshots) — v2 du schéma
+
+- Une ligne `snapshots` par **(type, date d'ancrage)** : `DAILY` = le jour, `WEEKLY` et `GLOBAL` = lundi ISO,
+  `MONTHLY` = 1er du mois, `YEARLY` = 1er janvier. Global = total all-time arrêté chaque fin de semaine.
+- Les périodes passées sont **figées** ; la période courante (LIVE) est recalculée à chaque écoute.
+- Chaque snapshot ne dépend que des snapshots strictement antérieurs → recalcul idempotent.
+- `days_in_chart` sert de **compteur générique de périodes** dans le chart (jours / semaines / mois / années selon
+  le type du snapshot) ; `weeks_in_chart` et `months_in_chart` reçoivent la même valeur.
+- `is_plays_peak` (ajouté par `MIGRATION_1_2`) : nouveau record personnel d'écoutes sur une période → badge PEAK.
+- Égalités départagées par le temps d'écoute cumulé. Limites : Hot 100 → 75 en Daily ; Artist 50 → 25 ; Albums 75 → 50.
+- Hall of Fame évalué uniquement sur les périodes closes : `DIRECT_DEBUT` (entrée directe #1 hebdo/mensuel),
+  `LONG_RUN` (3 semaines / 2 mois consécutifs #1), `TRIPLE_DEBUT` (#1 simultané Daily + Weekly + Monthly),
+  `LEGENDARY_RUN` (10 semaines #1 au total).
 
 ## Écarts volontaires par rapport à la spec
 

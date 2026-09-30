@@ -73,7 +73,9 @@ app/src/main/java/com/novastats/app/
 | 📊 Stats | 🟡 Classements Top 300 × 5 périodes + bandeau (popups détaillées à venir) |
 | 💎 Certifications | 🟡 Règles + calcul + dates rétroactives (écran à venir) |
 | 👑 Panthéon | 🟡 Règles + calcul (écran à venir) |
-| 🏆 Billboard · 🏛️ Hall of Fame · 🏅 Records · 🏆 Nova Awards | ⬜ Tables prêtes, moteur de snapshots à écrire |
+| 🏆 Billboard | ✅ Hot 100 / Artist 50 / 75 Albums × 5 périodes, snapshots figés, navigation historique, fiche détaillée, recherche |
+| 🏛️ Hall of Fame | 🟡 Alimenté par le Billboard (Direct Debut, Long Run, Triple Debut, Legendary Run) — écran à venir |
+| 🏅 Records · 🏆 Nova Awards | ⬜ Tables prêtes |
 | 🎨 15 thèmes | ✅ Palettes + sélecteur |
 | ⚙️ Paramètres | 🟡 Détection, apparence, données, service |
 | 🌐 APIs (cascade 9 sources) | ⬜ Clés câblées, clients à écrire |
