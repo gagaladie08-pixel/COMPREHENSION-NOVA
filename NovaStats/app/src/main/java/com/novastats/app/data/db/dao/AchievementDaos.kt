@@ -35,6 +35,32 @@ data class CertificationNews(@Embedded val h: CertificationHistoryEntity, val na
 data class PantheonNews(@Embedded val h: PantheonHistoryEntity, val name: String?)
 data class HallOfFameNews(@Embedded val h: HallOfFameEntity, val name: String?)
 
+/** Entrée Hall of Fame avec nom / sous-titre (artiste) / image. */
+data class HallOfFameRow(
+    @Embedded val h: HallOfFameEntity,
+    val name: String?,
+    val subtitle: String?,
+    @androidx.room.ColumnInfo(name = "image_url") val imageUrl: String?
+)
+
+/** Statut Panthéon + infos artiste. */
+data class PantheonRow(
+    @Embedded val s: PantheonStatusEntity,
+    val name: String,
+    @androidx.room.ColumnInfo(name = "photo_url") val photoUrl: String?,
+    @androidx.room.ColumnInfo(name = "play_count") val playCount: Int
+)
+
+/** Une certification rattachée à son artiste (titres via l'artiste principal, albums via l'artiste). */
+data class ArtistCertRow(
+    @androidx.room.ColumnInfo(name = "artist_id") val artistId: Long,
+    @androidx.room.ColumnInfo(name = "entity_type") val entityType: String,
+    @androidx.room.ColumnInfo(name = "entity_id") val entityId: Long,
+    val level: String,
+    val multiplier: Int,
+    val name: String?
+)
+
 /** Ligne d'un record (Top 10) avec les infos d'affichage de l'entité. */
 data class RecordRow(
     @Embedded val r: RecordCacheEntity,
@@ -54,6 +80,9 @@ interface CertificationDao {
     @Query("SELECT COUNT(*) FROM certifications") fun countFlow(): Flow<Int>
     @Query("SELECT * FROM certification_history") suspend fun allHistory(): List<CertificationHistoryEntity>
     @Query("SELECT * FROM certifications") suspend fun allCurrent(): List<CertificationEntity>
+    @Query("SELECT * FROM certifications") fun allCurrentFlow(): Flow<List<CertificationEntity>>
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM'")
+    fun artistCertRows(): Flow<List<ArtistCertRow>>
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM certification_history h ORDER BY h.certified_at DESC LIMIT :limit")
     fun latestHistory(limit: Int = 10): Flow<List<CertificationNews>>
@@ -71,6 +100,8 @@ interface PantheonDao {
     @Query("SELECT * FROM pantheon_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun history(artistId: Long): List<PantheonHistoryEntity>
     @Query("SELECT * FROM pantheon_history") suspend fun allHistory(): List<PantheonHistoryEntity>
     @Query("SELECT * FROM pantheon_status") suspend fun allCurrent(): List<PantheonStatusEntity>
+    @Query("SELECT p.*, a.name AS name, a.photo_url AS photo_url, a.play_count AS play_count FROM pantheon_status p JOIN artists a ON a.artist_id = p.artist_id ORDER BY p.status_date DESC")
+    fun rows(): Flow<List<PantheonRow>>
     @Query("SELECT h.*, (SELECT name FROM artists WHERE artist_id = h.artist_id) AS name FROM pantheon_history h ORDER BY h.date_reached DESC LIMIT :limit")
     fun latestHistory(limit: Int = 10): Flow<List<PantheonNews>>
     @Query("DELETE FROM pantheon_status") suspend fun clear()
@@ -84,6 +115,7 @@ interface SnapshotDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertArtists(rows: List<SnapshotArtistEntity>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAlbums(rows: List<SnapshotAlbumEntity>)
     @Query("SELECT * FROM snapshots WHERE type = :type AND date = :date") suspend fun find(type: String, date: String): SnapshotEntity?
+    @Query("SELECT MAX(date) FROM snapshots WHERE type = :type") suspend fun latestDate(type: String): String?
     @Query("SELECT * FROM snapshots WHERE type = :type ORDER BY date DESC") fun byType(type: String): Flow<List<SnapshotEntity>>
     @Query("SELECT * FROM snapshots WHERE type = :type AND date < :date ORDER BY date DESC LIMIT 1") suspend fun previous(type: String, date: String): SnapshotEntity?
     @Query("SELECT * FROM snapshot_tracks WHERE snapshot_id = :snapshotId ORDER BY position") fun tracks(snapshotId: Long): Flow<List<SnapshotTrackEntity>>
@@ -120,6 +152,9 @@ interface HallOfFameDao {
     @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType") suspend fun exists(entityId: Long, entityType: String, period: String, entryType: String): Int
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
     @Query("SELECT * FROM hall_of_fame") suspend fun all(): List<HallOfFameEntity>
+    @Query("SELECT * FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType ORDER BY entry_date") suspend fun ofEntity(entityId: Long, entityType: String): List<HallOfFameEntity>
+    @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name, CASE h.entity_type WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT a.name FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = h.entity_id) ELSE NULL END AS subtitle, CASE h.entity_type WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = h.entity_id) ELSE (SELECT photo_url FROM artists WHERE artist_id = h.entity_id) END AS image_url FROM hall_of_fame h WHERE h.period_type = :period AND h.entity_type = :entityType ORDER BY h.entry_date DESC")
+    fun rows(period: String, entityType: String): Flow<List<HallOfFameRow>>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM hall_of_fame h ORDER BY h.created_at DESC LIMIT :limit")
     fun latest(limit: Int = 10): Flow<List<HallOfFameNews>>
     @Query("DELETE FROM hall_of_fame") suspend fun clear()

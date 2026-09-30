@@ -72,9 +72,9 @@ app/src/main/java/com/novastats/app/
 | 🏠 Accueil | ✅ 8 sections : lecture en cours (pochette, progression, source, statut), aujourd'hui, top du moment, actualités, prochaines certifs, records, récents, streak |
 | 📊 Stats | ✅ Titres/Artistes/Albums × 5 périodes (Weekly = 7 jours glissants), recherche, bandeau, popups détaillées (appui long) |
 | 💎 Certifications | 🟡 Règles + calcul + dates rétroactives (écran à venir) |
-| 👑 Panthéon | 🟡 Règles + calcul (écran à venir) |
-| 🏆 Billboard | ✅ Hot 100 / Artist 50 / 75 Albums × 5 périodes, snapshots figés, navigation historique, fiche détaillée, recherche |
-| 🏛️ Hall of Fame | 🟡 Alimenté par le Billboard (Direct Debut, Long Run, Triple Debut, Legendary Run) — écran à venir |
+| 👑 Panthéon | ✅ Liste par statut (Mythique en tête), recherche, progression vers le statut suivant, « Bientôt dans le Panthéon », parcours dans la fiche artiste |
+| 🏆 Billboard | ✅ Hot 100 / Artist 50 / 75 Albums × 5 périodes, LIVE = dernière période close (la période en cours n'a jamais de snapshot), rattrapage automatique des snapshots manquants, navigation historique, fiche détaillée, recherche |
+| 🏛️ Hall of Fame | ✅ Weekly / Monthly / Global × Chansons / Artistes / Albums, une carte par entité avec tous ses badges (Direct Debut, Long Run, Triple Debut, Legendary Run), tri par prestige puis durée de règne |
 | 🏅 Records | ✅ 24 records (`domain/Records.kt` + `RecordsEngine`), recalculés après chaque écoute / import, popup 90 % avec Périodes · Sections · Sous-sections |
 | 🏆 Nova Awards | ⬜ Tables prêtes |
 | 🎨 15 thèmes | ✅ Palettes + sélecteur |

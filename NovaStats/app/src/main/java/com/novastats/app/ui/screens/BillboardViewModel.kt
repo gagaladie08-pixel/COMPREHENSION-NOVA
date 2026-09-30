@@ -59,7 +59,7 @@ data class ChartSummary(
 data class BillboardUiState(
     val chart: Chart = Chart.HOT_100,
     val period: Period = Period.WEEKLY,
-    val anchor: LocalDate = BillboardDates.anchor(Period.WEEKLY, Dates.today()),
+    val anchor: LocalDate = BillboardDates.latest(Period.WEEKLY, Dates.today()),
     val query: String = "",
     val isCurrent: Boolean = true,
     val hasAnyData: Boolean = false,
@@ -92,7 +92,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val chart = MutableStateFlow(Chart.HOT_100)
     private val period = MutableStateFlow(Period.WEEKLY)
-    private val anchor = MutableStateFlow(BillboardDates.anchor(Period.WEEKLY, Dates.today()))
+    private val anchor = MutableStateFlow(BillboardDates.latest(Period.WEEKLY, Dates.today()))
     private val query = MutableStateFlow("")
 
     private val hasAnyData: Flow<Boolean> = db.scrobbleDao().countConfirmedFlow().map { it > 0 }
@@ -135,7 +135,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     val history: StateFlow<EntityHistory?> = _history
 
     init {
-        // Garantit l'existence des snapshots LIVE (nouveau jour / nouvelle semaine sans écoute encore)
+        // Publie les snapshots manquants (nouveau jour / nouvelle semaine) — la période en cours n'a pas de snapshot
         viewModelScope.launch(Dispatchers.IO) { runCatching { app.billboard.refreshCurrent() } }
     }
 
@@ -145,7 +145,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectPeriod(p: Period) {
         period.value = p
-        anchor.value = BillboardDates.anchor(p, Dates.today())
+        anchor.value = BillboardDates.latest(p, Dates.today())
     }
 
     fun previousPeriod() { anchor.value = BillboardDates.previous(period.value, anchor.value) }
@@ -155,8 +155,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun goToDate(date: LocalDate) {
-        val d = if (date.isAfter(Dates.today())) Dates.today() else date
-        anchor.value = BillboardDates.anchor(period.value, d)
+        val latest = BillboardDates.latest(period.value, Dates.today())
+        anchor.value = minOf(BillboardDates.anchor(period.value, date), latest)
     }
 
     fun search(q: String) { query.value = q }

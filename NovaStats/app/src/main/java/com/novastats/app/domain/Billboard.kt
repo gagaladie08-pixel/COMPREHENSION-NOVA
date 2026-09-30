@@ -55,17 +55,23 @@ object BillboardDates {
         Period.YEARLY -> anchor.plusYears(1)
     }
 
-    /** La période ancrée sur [anchor] contient-elle aujourd'hui ? (→ badge LIVE, flèche → grisée) */
-    fun isCurrent(period: Period, anchor: LocalDate, today: LocalDate = Dates.today()) = anchor(period, today) == anchor
+    /**
+     * Dernière période PUBLIÉE : la période en cours n'a pas de snapshot (comme le vrai Billboard).
+     * Daily → hier · Weekly/Global → semaine dernière · Monthly → mois dernier · Yearly → année dernière.
+     */
+    fun latest(period: Period, today: LocalDate = Dates.today()): LocalDate = previous(period, anchor(period, today))
+
+    /** [anchor] est-elle la dernière période publiée ? (→ badge LIVE, flèche → grisée) */
+    fun isCurrent(period: Period, anchor: LocalDate, today: LocalDate = Dates.today()) = latest(period, today) == anchor
 
     /** La période est-elle terminée (snapshot figé) ? */
     fun isClosed(period: Period, anchor: LocalDate, today: LocalDate = Dates.today()) = range(period, anchor, today).to < today
 
-    /** Toutes les ancres entre la première écoute et aujourd'hui, dans l'ordre chronologique. */
+    /** Toutes les ancres publiées entre la première écoute et la dernière période close, dans l'ordre chronologique. */
     fun allAnchors(period: Period, firstDate: LocalDate, today: LocalDate = Dates.today()): List<LocalDate> {
         val out = mutableListOf<LocalDate>()
         var a = anchor(period, firstDate)
-        val last = anchor(period, today)
+        val last = latest(period, today)
         while (!a.isAfter(last)) { out += a; a = next(period, a) }
         return out
     }

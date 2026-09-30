@@ -62,6 +62,8 @@ import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonStatus
+import com.novastats.app.data.db.entity.PantheonHistoryEntity
+import com.novastats.app.data.db.entity.HallOfFameEntity
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
@@ -253,8 +255,12 @@ private fun ArtistPopup(artistId: Long, onDismiss: () -> Unit) {
     var periodTotal by remember { mutableStateOf(0) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
 
+    var history by remember { mutableStateOf<List<PantheonHistoryEntity>>(emptyList()) }
+    var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
     LaunchedEffect(artistId) {
         artist = db.artistDao().getById(artistId)
+        history = db.pantheonDao().history(artistId)
+        hof = db.hallOfFameDao().ofEntity(artistId, "ARTIST")
         topTracks = db.trackDao().topOfArtist(artistId, 5)
         albums = db.albumDao().ofArtist(artistId)
         totalAllTime = db.scrobbleDao().countConfirmed()
@@ -292,6 +298,17 @@ private fun ArtistPopup(artistId: Long, onDismiss: () -> Unit) {
             StatPill(formatDuration(a.totalDurationMs), "temps", accent = theme.secondary)
             StatPill("${a.distinctTracks}", "titres", accent = theme.accent)
             StatPill("${a.distinctAlbums}", "albums", accent = theme.glowSecondary)
+        }
+        if (history.isNotEmpty()) {
+            PopupSectionTitle("👑 Parcours au Panthéon")
+            history.forEach { h ->
+                val st = PantheonStatus.fromDb(h.status)
+                InfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶")
+            }
+        }
+        if (hof.isNotEmpty()) {
+            PopupSectionTitle("🏛️ Hall of Fame")
+            hof.forEach { e -> InfoRow("${e.entryType.replace('_', ' ')} · ${e.periodType.lowercase().replaceFirstChar { it.uppercase() }}", formatDate(java.time.LocalDate.parse(e.entryDate).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())) }
         }
         PopupSectionTitle("📊 Positions actuelles")
         PositionsTable(ranks)

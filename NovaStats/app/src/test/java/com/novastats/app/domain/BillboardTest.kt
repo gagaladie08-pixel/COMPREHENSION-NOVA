@@ -33,10 +33,15 @@ class BillboardTest {
     }
 
     @Test
-    fun `période courante et close`() {
+    fun `dernière période publiée et close`() {
         val today = d("2026-09-30")
-        assertTrue(BillboardDates.isCurrent(Period.WEEKLY, d("2026-09-28"), today))
-        assertFalse(BillboardDates.isCurrent(Period.WEEKLY, d("2026-09-21"), today))
+        // La période en cours n'est jamais publiée : la dernière est la semaine / le jour / le mois précédent
+        assertEquals(d("2026-09-21"), BillboardDates.latest(Period.WEEKLY, today))
+        assertEquals(d("2026-09-29"), BillboardDates.latest(Period.DAILY, today))
+        assertEquals(d("2026-08-01"), BillboardDates.latest(Period.MONTHLY, today))
+        assertEquals(d("2025-01-01"), BillboardDates.latest(Period.YEARLY, today))
+        assertTrue(BillboardDates.isCurrent(Period.WEEKLY, d("2026-09-21"), today))
+        assertFalse(BillboardDates.isCurrent(Period.WEEKLY, d("2026-09-28"), today))
         assertFalse(BillboardDates.isClosed(Period.WEEKLY, d("2026-09-28"), today))
         assertTrue(BillboardDates.isClosed(Period.WEEKLY, d("2026-09-21"), today))
         assertTrue(BillboardDates.isClosed(Period.DAILY, d("2026-09-29"), today))
@@ -46,8 +51,9 @@ class BillboardTest {
     @Test
     fun `toutes les ancres`() {
         val anchors = BillboardDates.allAnchors(Period.WEEKLY, d("2026-09-10"), d("2026-09-30"))
-        assertEquals(listOf(d("2026-09-07"), d("2026-09-14"), d("2026-09-21"), d("2026-09-28")), anchors)
-        assertEquals(3, BillboardDates.allAnchors(Period.MONTHLY, d("2026-07-15"), d("2026-09-30")).size)
+        assertEquals(listOf(d("2026-09-07"), d("2026-09-14"), d("2026-09-21")), anchors)
+        assertEquals(2, BillboardDates.allAnchors(Period.MONTHLY, d("2026-07-15"), d("2026-09-30")).size)
+        assertTrue(BillboardDates.allAnchors(Period.MONTHLY, d("2026-09-15"), d("2026-09-30")).isEmpty())
     }
 
     @Test
