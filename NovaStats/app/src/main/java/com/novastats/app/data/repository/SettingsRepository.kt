@@ -31,16 +31,34 @@ class SettingsRepository(private val context: Context) {
         val FIRST_LAUNCH_DONE = booleanPreferencesKey("first_launch_done")
     }
 
-    /** Apps musicales reconnues par défaut (opt-in : l'utilisateur confirme dans les paramètres). */
-    val defaultWhitelist = setOf(
-        "com.spotify.music", "com.google.android.apps.youtube.music", "com.apple.android.music",
-        "deezer.android.app", "com.aspiro.tidal", "com.amazon.mp3", "com.soundcloud.android",
-        "com.google.android.youtube", "com.boomplay.music" , "com.transsion.boomplayer"
+    /**
+     * Apps musicales connues (proposées dans l'écran Whitelist).
+     * Par défaut la whitelist est VIDE = toutes les apps média sont suivies.
+     */
+    val knownMusicApps = linkedMapOf(
+        "com.spotify.music" to "Spotify",
+        "com.google.android.apps.youtube.music" to "YouTube Music",
+        "com.google.android.youtube" to "YouTube",
+        "com.apple.android.music" to "Apple Music",
+        "deezer.android.app" to "Deezer",
+        "com.afmobi.boomplayer" to "Boomplay",
+        "com.aspiro.tidal" to "Tidal",
+        "com.amazon.mp3" to "Amazon Music",
+        "com.soundcloud.android" to "SoundCloud",
+        "com.audiomack" to "Audiomack",
+        "com.shazam.android" to "Shazam",
+        "com.maxmpz.audioplayer" to "Poweramp",
+        "com.samsung.android.app.music.chn" to "Samsung Music",
+        "com.sec.android.app.music" to "Samsung Music",
+        "com.miui.player" to "Mi Music",
+        "com.transsion.tpen" to "Vishaplayer",
+        "com.transsion.music" to "Boomplayer (Transsion)",
+        "org.videolan.vlc" to "VLC"
     )
 
     val themeId: Flow<String> = context.dataStore.data.map { it[Keys.THEME] ?: NovaThemes.DEFAULT.id }
     val thresholdSec: Flow<Int> = context.dataStore.data.map { it[Keys.THRESHOLD] ?: ScrobbleRules.DEFAULT_THRESHOLD_SEC }
-    val whitelist: Flow<Set<String>> = context.dataStore.data.map { it[Keys.WHITELIST] ?: defaultWhitelist }
+    val whitelist: Flow<Set<String>> = context.dataStore.data.map { it[Keys.WHITELIST] ?: emptySet() }
     val blacklistArtists: Flow<Set<String>> = context.dataStore.data.map { it[Keys.BLACKLIST_ARTISTS] ?: emptySet() }
     val blacklistKeywords: Flow<Set<String>> = context.dataStore.data.map { it[Keys.BLACKLIST_KEYWORDS] ?: setOf("podcast", "episode", "épisode") }
     val filterLongTracks: Flow<Boolean> = context.dataStore.data.map { it[Keys.FILTER_LONG_TRACKS] ?: true }

@@ -39,7 +39,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.text.font.FontFamily
+import com.novastats.app.service.DetectionState
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.importer.LegacyBackupImporter
 import com.novastats.app.domain.ScrobbleRules
@@ -180,21 +183,43 @@ fun SettingsScreen() {
         SectionTitle("🛡️ Service")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                val enabled = NovaListenerService.isEnabled(context)
+                // Statut recalculé à chaque retour dans l'app (après l'écran Android d'accès aux notifications)
+                var accessGranted by remember { mutableStateOf(NovaListenerService.isEnabled(context)) }
+                LifecycleResumeEffect(Unit) {
+                    accessGranted = NovaListenerService.isEnabled(context)
+                    onPauseOrDispose { }
+                }
+                val detection by DetectionState.state.collectAsStateWithLifecycle()
+                val running = accessGranted && detection.listenerConnected
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (enabled) "🟢" else "🔴")
+                    Text(if (running) "🟢" else if (accessGranted) "🟠" else "🔴")
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (enabled) "Service actif" else "Service inactif", color = theme.text, fontWeight = FontWeight.SemiBold)
-                        Text("Accès aux notifications requis pour détecter la musique", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            when {
+                                running -> "Service actif"
+                                accessGranted -> "Accès accordé, service pas encore connecté"
+                                else -> "Service inactif"
+                            },
+                            color = theme.text, fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            when {
+                                running -> "MediaSession : ${if (detection.mediaSessionAvailable) "OK" else "indisponible (fallback notifications)"}"
+                                accessGranted -> "Relance l'app ou désactive/réactive l'accès aux notifications"
+                                else -> "Accès aux notifications requis pour détecter la musique"
+                            },
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (enabled) theme.surface else theme.primary, contentColor = if (enabled) theme.text else MaterialTheme.colorScheme.onPrimary)
-                ) { Text(if (enabled) "Gérer l'accès aux notifications" else "Activer la détection") }
+                    colors = ButtonDefaults.buttonColors(containerColor = if (accessGranted) theme.surface else theme.primary, contentColor = if (accessGranted) theme.text else MaterialTheme.colorScheme.onPrimary)
+                ) { Text(if (accessGranted) "Gérer l'accès aux notifications" else "Activer la détection") }
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
@@ -206,6 +231,33 @@ fun SettingsScreen() {
             }
         }
 
+        /* ---------- 🔎 Diagnostic détection ---------- */
+        SectionTitle("🔎 Diagnostic détection")
+        NovaCard {
+            val detection by DetectionState.state.collectAsStateWithLifecycle()
+            Column(Modifier.padding(16.dp)) {
+                DiagLine("Listener connecté", if (detection.listenerConnected) "oui" else "non")
+                DiagLine("MediaSession", if (detection.mediaSessionAvailable) "disponible" else "indisponible")
+                DiagLine("Sessions média actives", detection.activeSessions.ifEmpty { listOf("aucune") }.joinToString(", "))
+                if (detection.ignoredSessions.isNotEmpty()) DiagLine("Ignorées (whitelist)", detection.ignoredSessions.joinToString(", "))
+                DiagLine("Dernier titre capté", detection.lastTrack ?: "—")
+                detection.lastError?.let { DiagLine("Dernière erreur", it, error = true) }
+                Spacer(Modifier.height(8.dp))
+                Text("Journal", color = theme.text, fontWeight = FontWeight.SemiBold)
+                if (detection.log.isEmpty()) {
+                    Text(
+                        "Vide : le service n'a pas démarré. Vérifie l'accès aux notifications puis relance l'app. " +
+                            "Si le journal reste vide, ton téléphone (Xiaomi/Huawei/Oppo/Tecno…) bloque peut-être le service : " +
+                            "autorise le démarrage automatique de NovaStats dans ses paramètres.",
+                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                detection.log.forEach {
+                    Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
         /* ---------- ℹ️ À propos ---------- */
         SectionTitle("ℹ️ À propos")
         NovaCard {
@@ -214,6 +266,15 @@ fun SettingsScreen() {
                 Text("100 % local · aucune donnée envoyée · export JSON", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
+}
+
+@Composable
+private fun DiagLine(label: String, value: String, error: Boolean = false) {
+    val theme = Nova.theme
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(150.dp))
+        Text(value, color = if (error) Color(0xFFE74C3C) else theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
     }
 }
 

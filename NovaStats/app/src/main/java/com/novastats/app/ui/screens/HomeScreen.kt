@@ -53,7 +53,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     val streak by db.dailyStreakDao().latest().collectAsStateWithLifecycle(initialValue = null)
     val totalScrobbles by db.scrobbleDao().countConfirmedFlow().collectAsStateWithLifecycle(initialValue = 0)
 
-    if (totalScrobbles == 0 && nowPlaying?.trackId == null) {
+    if (totalScrobbles == 0 && nowPlaying?.rawTitle == null) {
         Column(Modifier.fillMaxSize()) {
             EmptyState("🎵", "Bienvenue sur NovaStats", "Lance de la musique ou importe ton backup JSON depuis ⚙️ Réglages → Données.\nTon classement s'enrichit à chaque écoute.")
         }
