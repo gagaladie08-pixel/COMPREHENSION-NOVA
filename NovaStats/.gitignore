@@ -14,3 +14,6 @@ build/
 .DS_Store
 /app/release
 /app/debug
+
+# Clé debug volontairement versionnée (signature stable des APK GitHub Actions)
+!keystore/debug.p12

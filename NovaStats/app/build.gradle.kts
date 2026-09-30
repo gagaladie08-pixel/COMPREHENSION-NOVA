@@ -39,8 +39,25 @@ android {
         buildConfigField("String", "THEAUDIODB_API_KEY", apiKey("THEAUDIODB_API_KEY"))
     }
 
+    // Clé de signature debug STABLE, versionnée dans le dépôt : sans elle, chaque exécution de GitHub Actions
+    // génère une clé différente et Android refuse la mise à jour ("package en conflit").
+    // Ce n'est pas un secret (mot de passe "android", comme la clé debug standard d'Android).
+    signingConfigs {
+        create("novaDebug") {
+            storeFile = rootProject.file("keystore/debug.p12")
+            storeType = "PKCS12"
+            storePassword = "android"
+            keyAlias = "novadebug"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("novaDebug")
+        }
         release {
+            signingConfig = signingConfigs.getByName("novaDebug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
