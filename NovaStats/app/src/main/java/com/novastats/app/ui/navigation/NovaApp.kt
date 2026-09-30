@@ -28,6 +28,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.novastats.app.ui.screens.BillboardScreen
 import com.novastats.app.ui.screens.HomeScreen
 import com.novastats.app.ui.screens.PlaceholderScreen
 import com.novastats.app.ui.screens.SettingsScreen
@@ -93,7 +94,7 @@ fun NovaApp() {
         ) {
             composable(NovaTab.HOME.route) { HomeScreen(onOpenTab = { navController.navigate(it.route) }) }
             composable(NovaTab.STATS.route) { StatsScreen() }
-            composable(NovaTab.BILLBOARD.route) { PlaceholderScreen(NovaTab.BILLBOARD, "Nova Hot 100 · Nova Artist 50 · Nova 75 Albums") }
+            composable(NovaTab.BILLBOARD.route) { BillboardScreen() }
             composable(NovaTab.RECORDS.route) { PlaceholderScreen(NovaTab.RECORDS, "Les 24 records") }
             composable(NovaTab.CERTIFICATIONS.route) { PlaceholderScreen(NovaTab.CERTIFICATIONS, "Argent · Or · Platine · Diamant") }
             composable(NovaTab.HALL_OF_FAME.route) { PlaceholderScreen(NovaTab.HALL_OF_FAME, "Direct Debut · Long Run · Triple Debut · Legendary Run") }

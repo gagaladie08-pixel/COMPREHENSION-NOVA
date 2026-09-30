@@ -315,7 +315,7 @@ class NovaListenerService : NotificationListenerService() {
             DetectionState.log("💾 Enregistré (${listened / 1000}s) : ${s.key.display}")
             // TODO(perf) : remplacer par une mise à jour incrémentale (titre/artiste/album + jour courant)
             // et un check de certification / Panthéon ciblé. Le rebuild complet est correct mais coûteux.
-            app.rebuilder.rebuildAll()
+            app.rebuilder.rebuildAll(fullBillboard = false)
         }
     }
 

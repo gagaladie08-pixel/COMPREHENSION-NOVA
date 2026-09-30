@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.novastats.app.data.db.NovaDatabase
+import com.novastats.app.data.repository.BillboardEngine
 import com.novastats.app.data.repository.LibraryRepository
 import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.data.repository.StatsRebuilder
@@ -17,6 +18,7 @@ class NovaStatsApp : Application() {
     val settings: SettingsRepository by lazy { SettingsRepository(this) }
     val library: LibraryRepository by lazy { LibraryRepository(database) }
     val rebuilder: StatsRebuilder by lazy { StatsRebuilder(database) }
+    val billboard: BillboardEngine by lazy { BillboardEngine(database) }
 
     override fun onCreate() {
         super.onCreate()

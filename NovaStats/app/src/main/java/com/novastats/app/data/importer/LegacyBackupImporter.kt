@@ -139,7 +139,7 @@ object LegacyBackupImporter {
         }
 
         onProgress("Recalcul des statistiques…")
-        StatsRebuilder(db).rebuildAll(onProgress)
+        StatsRebuilder(db).rebuildAll(onProgress = onProgress)
 
         val report = ImportReport(
             songsInFile = backup.songs.size,

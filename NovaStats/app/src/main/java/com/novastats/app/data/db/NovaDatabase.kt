@@ -4,9 +4,12 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.novastats.app.data.db.dao.AlbumDao
 import com.novastats.app.data.db.dao.ApiCacheDao
 import com.novastats.app.data.db.dao.ArtistDao
+import com.novastats.app.data.db.dao.BillboardDao
 import com.novastats.app.data.db.dao.BillboardHistoryDao
 import com.novastats.app.data.db.dao.CertificationDao
 import com.novastats.app.data.db.dao.DailyPlayDao
@@ -60,7 +63,7 @@ import com.novastats.app.data.db.entity.*
         // Import/Export
         MigrationLogEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -77,6 +80,7 @@ abstract class NovaDatabase : RoomDatabase() {
     abstract fun nowPlayingDao(): NowPlayingDao
     abstract fun snapshotDao(): SnapshotDao
     abstract fun billboardHistoryDao(): BillboardHistoryDao
+    abstract fun billboardDao(): BillboardDao
     abstract fun certificationDao(): CertificationDao
     abstract fun hallOfFameDao(): HallOfFameDao
     abstract fun pantheonDao(): PantheonDao
@@ -90,11 +94,20 @@ abstract class NovaDatabase : RoomDatabase() {
     companion object {
         const val NAME = "novastats.db"
 
+        /** v2 : badge PEAK (record personnel d'écoutes) sur les snapshots. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf("snapshot_tracks", "snapshot_artists", "snapshot_albums").forEach {
+                    db.execSQL("ALTER TABLE $it ADD COLUMN is_plays_peak INTEGER NOT NULL DEFAULT 0")
+                }
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                // Version 1 : pas encore de migrations. À remplacer par addMigrations() dès la v2.
+                .addMigrations(MIGRATION_1_2)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

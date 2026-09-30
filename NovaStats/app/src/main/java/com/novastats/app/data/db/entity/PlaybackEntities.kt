@@ -128,6 +128,7 @@ data class SnapshotTrackEntity(
     val movement: Int? = null,
     @ColumnInfo(name = "is_new") val isNew: Boolean = false,
     @ColumnInfo(name = "is_reentry") val isReentry: Boolean = false,
+    /** Nombre de périodes passées dans CE chart (unité = période du snapshot : jours, semaines, mois, années) */
     @ColumnInfo(name = "days_in_chart") val daysInChart: Int = 0,
     @ColumnInfo(name = "weeks_in_chart") val weeksInChart: Int = 0,
     @ColumnInfo(name = "months_in_chart") val monthsInChart: Int = 0,
@@ -136,7 +137,9 @@ data class SnapshotTrackEntity(
     @ColumnInfo(name = "times_at_peak") val timesAtPeak: Int = 1,
     @ColumnInfo(name = "debut_position") val debutPosition: Int,
     @ColumnInfo(name = "debut_date") val debutDate: String,
-    @ColumnInfo(name = "variation_plays") val variationPlays: Int = 0
+    @ColumnInfo(name = "variation_plays") val variationPlays: Int = 0,
+    /** Nouveau record personnel d'écoutes sur une période (badge PEAK) */
+    @ColumnInfo(name = "is_plays_peak", defaultValue = "0") val isPlaysPeak: Boolean = false
 )
 
 /** Table 13 — snapshot_artists */
@@ -165,7 +168,8 @@ data class SnapshotArtistEntity(
     @ColumnInfo(name = "debut_date") val debutDate: String,
     @ColumnInfo(name = "variation_plays") val variationPlays: Int = 0,
     @ColumnInfo(name = "distinct_tracks") val distinctTracks: Int = 0,
-    @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0
+    @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0,
+    @ColumnInfo(name = "is_plays_peak", defaultValue = "0") val isPlaysPeak: Boolean = false
 )
 
 /** Table 14 — snapshot_albums */
@@ -193,5 +197,6 @@ data class SnapshotAlbumEntity(
     @ColumnInfo(name = "debut_position") val debutPosition: Int,
     @ColumnInfo(name = "debut_date") val debutDate: String,
     @ColumnInfo(name = "variation_plays") val variationPlays: Int = 0,
-    @ColumnInfo(name = "distinct_tracks") val distinctTracks: Int = 0
+    @ColumnInfo(name = "distinct_tracks") val distinctTracks: Int = 0,
+    @ColumnInfo(name = "is_plays_peak", defaultValue = "0") val isPlaysPeak: Boolean = false
 )

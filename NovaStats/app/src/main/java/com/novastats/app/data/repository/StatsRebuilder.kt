@@ -28,7 +28,11 @@ import kotlinx.coroutines.flow.first
  */
 class StatsRebuilder(private val db: NovaDatabase) {
 
-    suspend fun rebuildAll(onProgress: (String) -> Unit = {}) {
+    /**
+     * @param fullBillboard true = reconstruit tous les snapshots (import) ; false = ne recalcule que la période
+     *                      courante (après une écoute).
+     */
+    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}) {
         onProgress("Agrégats titres / artistes / albums…")
         db.withTransaction {
             db.trackDao().recomputeAggregates()
@@ -56,6 +60,10 @@ class StatsRebuilder(private val db: NovaDatabase) {
 
         onProgress("Panthéon…")
         rebuildPantheon()
+
+        onProgress("Billboard…")
+        val billboard = BillboardEngine(db)
+        if (fullBillboard) billboard.rebuildAll(onProgress) else billboard.refreshCurrent()
     }
 
     /* ---------------- Streaks ---------------- */
