@@ -136,6 +136,13 @@ interface ApiCacheDao {
     @Upsert suspend fun upsertReliability(row: ApiReliabilityEntity)
     @Query("SELECT * FROM api_reliability ORDER BY current_priority") fun reliability(): Flow<List<ApiReliabilityEntity>>
     @Query("SELECT * FROM api_reliability WHERE api_name = :name") suspend fun reliabilityFor(name: String): ApiReliabilityEntity?
+    @Query("SELECT * FROM api_reliability") suspend fun allReliability(): List<ApiReliabilityEntity>
+    /** URLs à ne plus jamais proposer pour cette entité (stratégie 11). */
+    @Query("SELECT cached_url FROM api_cache WHERE entity_type = :entityType AND entity_id = :entityId AND is_blacklisted = 1 AND cached_url IS NOT NULL")
+    suspend fun blacklistedUrls(entityType: String, entityId: Long): List<String>
+    @Query("DELETE FROM api_cache WHERE entity_type = :entityType AND entity_id = :entityId AND data_type = :dataType AND is_blacklisted = 0")
+    suspend fun clearEntity(entityType: String, entityId: Long, dataType: String)
+    @Query("SELECT COUNT(*) FROM api_cache WHERE is_rejected = 0 AND source != 'NONE' AND expires_at > :now") fun cachedCount(now: Long = System.currentTimeMillis()): Flow<Int>
 }
 
 @Dao

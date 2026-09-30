@@ -316,6 +316,7 @@ class NovaListenerService : NotificationListenerService() {
             // TODO(perf) : remplacer par une mise à jour incrémentale (titre/artiste/album + jour courant)
             // et un check de certification / Panthéon ciblé. Le rebuild complet est correct mais coûteux.
             app.rebuilder.rebuildAll(fullBillboard = false)
+            EnrichmentWorker.enqueue(this)
         }
     }
 

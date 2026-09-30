@@ -8,13 +8,22 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// Lecture des clés API depuis local.properties (jamais commité).
-// Flux : local.properties → BuildConfig → ApiKeys.kt
+// Lecture des clés API. Priorité : variable d'environnement (GitHub Secrets) > local.properties > api_keys.properties.
+// Flux : clé → BuildConfig → ApiKeys.kt → cascade d'APIs
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
-fun apiKey(name: String): String = "\"${localProps.getProperty(name, "")}\""
+val fallbackProps = Properties().apply {
+    val f = rootProject.file("api_keys.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun apiKey(name: String): String {
+    val value = System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: localProps.getProperty(name)?.takeIf { it.isNotBlank() }
+        ?: fallbackProps.getProperty(name, "")
+    return "\"${value.trim()}\""
+}
 
 android {
     namespace = "com.novastats.app"

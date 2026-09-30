@@ -43,6 +43,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.font.FontFamily
 import com.novastats.app.service.DetectionState
+import com.novastats.app.service.EnrichmentWorker
+import com.novastats.app.data.api.EnrichmentState
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.importer.LegacyBackupImporter
 import com.novastats.app.domain.ScrobbleRules
@@ -86,6 +88,7 @@ fun SettingsScreen() {
                 val report = withContext(Dispatchers.IO) {
                     val backup = context.contentResolver.openInputStream(uri)!!.use { LegacyBackupImporter.parse(it) }
                     LegacyBackupImporter.import(app.database, backup, threshold) { importStatus = it }
+                    EnrichmentWorker.enqueue(context)
                 }
                 importStatus = report.summary()
             } catch (e: Exception) {
@@ -254,6 +257,71 @@ fun SettingsScreen() {
                 }
                 detection.log.forEach {
                     Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
+        /* ---------- 🌐 APIs & enrichissement ---------- */
+        SectionTitle("🌐 APIs — pochettes, photos, bios")
+        NovaCard {
+            val enrich by EnrichmentState.state.collectAsStateWithLifecycle()
+            val autoEnrich by settings.autoEnrich.collectAsStateWithLifecycle(initialValue = true)
+            val wifiOnly by settings.enrichWifiOnly.collectAsStateWithLifecycle(initialValue = false)
+            val missingTracks by app.database.trackDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
+            val missingArtists by app.database.artistDao().missingPhotoCount().collectAsStateWithLifecycle(initialValue = 0)
+            val missingAlbums by app.database.albumDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
+            val reliability by app.database.apiCacheDao().reliability().collectAsStateWithLifecycle(initialValue = emptyList())
+            val sources = remember { app.enricher.configuredSources() }
+
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "Cascade de 9 sources : iTunes → Spotify → Last.fm → MusicBrainz → TheAudioDB → Deezer → Discogs → Google (dernier recours). " +
+                        "Artistes : Fanart.tv → TheAudioDB → Spotify → Last.fm → Deezer → Google.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    StatPill("$missingTracks", "titres sans pochette")
+                    StatPill("$missingAlbums", "albums", accent = theme.secondary)
+                    StatPill("$missingArtists", "artistes sans photo", accent = theme.accent)
+                }
+                Spacer(Modifier.height(8.dp))
+                ToggleRow("Enrichissement automatique", "Après chaque écoute et une fois par jour", autoEnrich) { scope.launch { settings.setAutoEnrich(it) } }
+                ToggleRow("Wi-Fi uniquement", "Pas de requêtes API en données mobiles", wifiOnly) { scope.launch { settings.setEnrichWifiOnly(it) } }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { EnrichmentWorker.enqueue(context, manual = true) },
+                    enabled = !enrich.running,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (enrich.running) "Enrichissement en cours…" else "🌐 Enrichir maintenant") }
+                if (enrich.running) {
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = theme.primary)
+                    Text("${enrich.current ?: ""} · ${enrich.processed} traités, ${enrich.found} trouvés", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("Sources", color = theme.text, fontWeight = FontWeight.SemiBold)
+                sources.forEach { (src, configured) ->
+                    val r = reliability.firstOrNull { it.apiName == src.label }
+                    val stats = if (r == null || r.successCount + r.failCount == 0) "pas encore utilisée"
+                    else "${r.successRate.toInt()} % de succès (${r.successCount}/${r.successCount + r.failCount})"
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Dot(if (configured) Color(0xFF2ECC71) else Color(0xFF95A5A6))
+                        Spacer(Modifier.width(8.dp))
+                        Text("${src.emoji} ${src.label}", color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(130.dp))
+                        Text(
+                            if (configured) stats else "clé manquante",
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                if (enrich.log.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Journal", color = theme.text, fontWeight = FontWeight.SemiBold)
+                    enrich.log.take(15).forEach {
+                        Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                    }
                 }
             }
         }

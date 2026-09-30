@@ -29,6 +29,10 @@ class SettingsRepository(private val context: Context) {
         val TRACK_MUTED = booleanPreferencesKey("track_when_muted")
         val WATCHDOG = booleanPreferencesKey("watchdog_enabled")
         val FIRST_LAUNCH_DONE = booleanPreferencesKey("first_launch_done")
+        val AUTO_ENRICH = booleanPreferencesKey("auto_enrich")
+        val ENRICH_WIFI_ONLY = booleanPreferencesKey("enrich_wifi_only")
+        val GOOGLE_QUOTA_DAY = stringPreferencesKey("google_quota_day")
+        val GOOGLE_QUOTA_COUNT = intPreferencesKey("google_quota_count")
     }
 
     /**
@@ -78,4 +82,26 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTrackWhenMuted(v: Boolean) = context.dataStore.edit { it[Keys.TRACK_MUTED] = v }
     suspend fun setWatchdog(v: Boolean) = context.dataStore.edit { it[Keys.WATCHDOG] = v }
     suspend fun setFirstLaunchDone() = context.dataStore.edit { it[Keys.FIRST_LAUNCH_DONE] = true }
+
+    /* ---- Enrichissement APIs ---- */
+    val autoEnrich: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_ENRICH] ?: true }
+    val enrichWifiOnly: Flow<Boolean> = context.dataStore.data.map { it[Keys.ENRICH_WIFI_ONLY] ?: false }
+    suspend fun setAutoEnrich(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_ENRICH] = v }
+    suspend fun setEnrichWifiOnly(v: Boolean) = context.dataStore.edit { it[Keys.ENRICH_WIFI_ONLY] = v }
+
+    /** Quota Google Custom Search : 100 requêtes/jour gratuites — on s'arrête à [GOOGLE_DAILY_CAP]. */
+    suspend fun tryConsumeGoogleQuota(today: String): Boolean {
+        var allowed = false
+        context.dataStore.edit { p ->
+            val count = if (p[Keys.GOOGLE_QUOTA_DAY] == today) p[Keys.GOOGLE_QUOTA_COUNT] ?: 0 else 0
+            if (count < GOOGLE_DAILY_CAP) {
+                allowed = true
+                p[Keys.GOOGLE_QUOTA_DAY] = today
+                p[Keys.GOOGLE_QUOTA_COUNT] = count + 1
+            }
+        }
+        return allowed
+    }
+
+    companion object { const val GOOGLE_DAILY_CAP = 80 }
 }

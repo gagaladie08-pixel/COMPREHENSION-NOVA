@@ -3,11 +3,13 @@ package com.novastats.app
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.novastats.app.data.api.MetadataEnricher
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.repository.BillboardEngine
 import com.novastats.app.data.repository.LibraryRepository
 import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.data.repository.StatsRebuilder
+import com.novastats.app.service.EnrichmentWorker
 
 /**
  * Point d'entrée : conteneur de dépendances minimal (pas de Hilt pour l'instant — simple et lisible).
@@ -19,11 +21,13 @@ class NovaStatsApp : Application() {
     val library: LibraryRepository by lazy { LibraryRepository(database) }
     val rebuilder: StatsRebuilder by lazy { StatsRebuilder(database) }
     val billboard: BillboardEngine by lazy { BillboardEngine(database) }
+    val enricher: MetadataEnricher by lazy { MetadataEnricher(database, settings) }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannels()
+        EnrichmentWorker.schedulePeriodic(this)
     }
 
     private fun createNotificationChannels() {

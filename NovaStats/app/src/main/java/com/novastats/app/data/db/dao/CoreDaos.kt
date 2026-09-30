@@ -56,6 +56,18 @@ interface TrackDao {
     @Query("SELECT COUNT(*) FROM tracks")
     suspend fun count(): Int
 
+    /** Titres sans pochette, hors ceux déjà tentés récemment (cache négatif api_cache). Les plus écoutés d'abord. */
+    @Query(
+        """
+        SELECT * FROM tracks WHERE cover_url IS NULL AND track_id NOT IN
+            (SELECT entity_id FROM api_cache WHERE entity_type = 'TRACK' AND data_type = 'COVER' AND expires_at > :now)
+        ORDER BY play_count DESC LIMIT :limit
+        """
+    )
+    suspend fun missingCover(now: Long, limit: Int): List<TrackEntity>
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+
     /**
      * Classement Global (all-time). Tri : écoutes puis temps d'écoute (règle d'égalité).
      */
@@ -138,6 +150,17 @@ interface ArtistDao {
 
     @Query(
         """
+        SELECT * FROM artists WHERE photo_url IS NULL AND is_merged = 0 AND artist_id NOT IN
+            (SELECT entity_id FROM api_cache WHERE entity_type = 'ARTIST' AND data_type = 'PHOTO' AND expires_at > :now)
+        ORDER BY play_count DESC LIMIT :limit
+        """
+    )
+    suspend fun missingPhoto(now: Long, limit: Int): List<ArtistEntity>
+
+    @Query("SELECT COUNT(*) FROM artists WHERE photo_url IS NULL AND is_merged = 0") fun missingPhotoCount(): Flow<Int>
+
+    @Query(
+        """
         SELECT a.*, a.play_count AS period_plays, a.total_duration_ms AS period_duration_ms
         FROM artists a WHERE a.play_count > 0 AND a.is_merged = 0
         ORDER BY a.play_count DESC, a.total_duration_ms DESC LIMIT :limit
@@ -196,6 +219,20 @@ interface AlbumDao {
 
     @Query("SELECT * FROM albums WHERE title = :title AND artist_id = :artistId LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artistId: Long): AlbumEntity?
+
+    @Query(
+        """
+        SELECT * FROM albums WHERE cover_url IS NULL AND album_id NOT IN
+            (SELECT entity_id FROM api_cache WHERE entity_type = 'ALBUM' AND data_type = 'COVER' AND expires_at > :now)
+        ORDER BY play_count DESC LIMIT :limit
+        """
+    )
+    suspend fun missingCover(now: Long, limit: Int): List<AlbumEntity>
+
+    @Query("SELECT COUNT(*) FROM albums WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+    /** Pochette d'album connue → appliquée aux titres de l'album qui n'en ont pas. */
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND cover_url IS NULL")
+    suspend fun propagateCoverToTracks(albumId: Long, url: String, source: String)
 
     @Query("SELECT COUNT(*) FROM albums")
     fun countFlow(): Flow<Int>

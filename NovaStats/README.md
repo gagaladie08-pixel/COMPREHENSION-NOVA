@@ -78,7 +78,7 @@ app/src/main/java/com/novastats/app/
 | 🏅 Records · 🏆 Nova Awards | ⬜ Tables prêtes |
 | 🎨 15 thèmes | ✅ Palettes + sélecteur |
 | ⚙️ Paramètres | 🟡 Détection, apparence, données, service |
-| 🌐 APIs (cascade 9 sources) | ⬜ Clés câblées, clients à écrire |
+| 🌐 APIs (cascade 9 sources) | ✅ iTunes · Spotify · Last.fm · MusicBrainz/CAA · TheAudioDB · Deezer · Discogs · Fanart.tv · Google ; score de confiance, consensus, cache 6 mois/1 mois/négatif 7 j, fiabilité dynamique, worker en arrière-plan |
 | ✏️ Éditeur de données | ⬜ Tables prêtes |
 
 ## Sécurité

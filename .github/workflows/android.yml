@@ -43,6 +43,16 @@ jobs:
 
       - name: Compiler l'APK debug
         run: gradle :app:assembleDebug --no-daemon --stacktrace
+        env:
+          # Facultatif : si ces secrets existent, ils remplacent api_keys.properties
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          FANART_API_KEY: ${{ secrets.FANART_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_ENGINE_ID: ${{ secrets.GOOGLE_ENGINE_ID }}
+          DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
+          THEAUDIODB_API_KEY: ${{ secrets.THEAUDIODB_API_KEY }}
 
       - name: Renommer l'APK
         id: apk
