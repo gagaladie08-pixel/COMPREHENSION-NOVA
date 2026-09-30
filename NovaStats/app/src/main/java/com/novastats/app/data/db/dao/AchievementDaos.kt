@@ -35,6 +35,14 @@ data class CertificationNews(@Embedded val h: CertificationHistoryEntity, val na
 data class PantheonNews(@Embedded val h: PantheonHistoryEntity, val name: String?)
 data class HallOfFameNews(@Embedded val h: HallOfFameEntity, val name: String?)
 
+/** Ligne d'un record (Top 10) avec les infos d'affichage de l'entité. */
+data class RecordRow(
+    @Embedded val r: RecordCacheEntity,
+    val name: String?,
+    val subtitle: String?,
+    @androidx.room.ColumnInfo(name = "image_url") val imageUrl: String?
+)
+
 @Dao
 interface CertificationDao {
     @Upsert suspend fun upsert(cert: CertificationEntity)
@@ -44,6 +52,8 @@ interface CertificationDao {
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") suspend fun current(entityId: Long, type: String): CertificationEntity?
     @Query("SELECT * FROM certification_history WHERE entity_id = :entityId AND entity_type = :type ORDER BY certified_at") suspend fun history(entityId: Long, type: String): List<CertificationHistoryEntity>
     @Query("SELECT COUNT(*) FROM certifications") fun countFlow(): Flow<Int>
+    @Query("SELECT * FROM certification_history") suspend fun allHistory(): List<CertificationHistoryEntity>
+    @Query("SELECT * FROM certifications") suspend fun allCurrent(): List<CertificationEntity>
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM certification_history h ORDER BY h.certified_at DESC LIMIT :limit")
     fun latestHistory(limit: Int = 10): Flow<List<CertificationNews>>
@@ -59,6 +69,8 @@ interface PantheonDao {
     @Query("SELECT * FROM pantheon_status ORDER BY CASE current_status WHEN 'MYTHIQUE' THEN 0 WHEN 'LEGENDE' THEN 1 WHEN 'MEGASTAR' THEN 2 WHEN 'SUPERSTAR' THEN 3 ELSE 4 END, status_date")
     fun all(): Flow<List<PantheonStatusEntity>>
     @Query("SELECT * FROM pantheon_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun history(artistId: Long): List<PantheonHistoryEntity>
+    @Query("SELECT * FROM pantheon_history") suspend fun allHistory(): List<PantheonHistoryEntity>
+    @Query("SELECT * FROM pantheon_status") suspend fun allCurrent(): List<PantheonStatusEntity>
     @Query("SELECT h.*, (SELECT name FROM artists WHERE artist_id = h.artist_id) AS name FROM pantheon_history h ORDER BY h.date_reached DESC LIMIT :limit")
     fun latestHistory(limit: Int = 10): Flow<List<PantheonNews>>
     @Query("DELETE FROM pantheon_status") suspend fun clear()
@@ -107,6 +119,7 @@ interface HallOfFameDao {
     @Query("SELECT * FROM hall_of_fame WHERE period_type = :period AND entity_type = :entityType ORDER BY entry_date DESC") fun list(period: String, entityType: String): Flow<List<HallOfFameEntity>>
     @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType") suspend fun exists(entityId: Long, entityType: String, period: String, entryType: String): Int
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
+    @Query("SELECT * FROM hall_of_fame") suspend fun all(): List<HallOfFameEntity>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM hall_of_fame h ORDER BY h.created_at DESC LIMIT :limit")
     fun latest(limit: Int = 10): Flow<List<HallOfFameNews>>
     @Query("DELETE FROM hall_of_fame") suspend fun clear()
@@ -116,8 +129,32 @@ interface HallOfFameDao {
 @Dao
 interface RecordDao {
     @Insert suspend fun insertAll(rows: List<RecordCacheEntity>)
-    @Query("SELECT * FROM records_cache WHERE record_type = :type AND (:period IS NULL OR period_type = :period) AND category = :category AND (:sub IS NULL OR subcategory = :sub) ORDER BY value DESC LIMIT 10")
-    fun top10(type: String, period: String?, category: String, sub: String?): Flow<List<RecordCacheEntity>>
+
+    /** Top 10 d'un record (avec nom / sous-titre / image de l'entité). Tri décroissant, ou croissant si [asc]. */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT a.name FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.record_type = :type AND ((:period IS NULL AND r.period_type IS NULL) OR r.period_type = :period)
+          AND r.category = :category AND ((:sub IS NULL AND r.subcategory IS NULL) OR r.subcategory = :sub)
+        ORDER BY CASE WHEN :asc THEN r.value END ASC, CASE WHEN :asc THEN NULL ELSE r.value END DESC
+        LIMIT 10
+        """
+    )
+    fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean): Flow<List<RecordRow>>
+
+    @Query("SELECT COUNT(*) FROM records_cache") fun countFlow(): Flow<Int>
+    @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
+    @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>
     @Query("DELETE FROM records_cache WHERE record_type = :type") suspend fun clearType(type: String)
     @Query("DELETE FROM records_cache") suspend fun clear()
 }
@@ -146,6 +183,7 @@ interface ApiCacheDao {
     suspend fun valid(entityType: String, entityId: Long, dataType: String, now: Long = System.currentTimeMillis()): ApiCacheEntity?
     @Query("UPDATE api_cache SET is_rejected = 1, is_blacklisted = 1 WHERE id = :id") suspend fun blacklist(id: Long)
     @Query("DELETE FROM api_cache WHERE expires_at <= :now AND is_blacklisted = 0") suspend fun purgeExpired(now: Long = System.currentTimeMillis())
+    @Query("DELETE FROM api_cache WHERE is_blacklisted = 0") suspend fun clearAll()
     @Upsert suspend fun upsertReliability(row: ApiReliabilityEntity)
     @Query("SELECT * FROM api_reliability ORDER BY current_priority") fun reliability(): Flow<List<ApiReliabilityEntity>>
     @Query("SELECT * FROM api_reliability WHERE api_name = :name") suspend fun reliabilityFor(name: String): ApiReliabilityEntity?
@@ -163,7 +201,9 @@ interface EditorDao {
     @Insert suspend fun insertEdit(row: EditHistoryEntity): Long
     @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT :limit") fun history(limit: Int = 50): Flow<List<EditHistoryEntity>>
     @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT 1") suspend fun last(): EditHistoryEntity?
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT 50") suspend fun historyList(): List<EditHistoryEntity>
     @Query("DELETE FROM edit_history WHERE id = :id") suspend fun deleteEdit(id: Long)
+    @Query("DELETE FROM edit_history") suspend fun clearHistory()
     @Query("DELETE FROM edit_history WHERE id NOT IN (SELECT id FROM edit_history ORDER BY created_at DESC LIMIT 50)") suspend fun trimTo50()
     @Upsert suspend fun upsertCorrection(row: UserCorrectionEntity)
     @Query("SELECT * FROM user_corrections WHERE original_value = :original AND correction_type = :type") suspend fun correction(original: String, type: String): UserCorrectionEntity?

@@ -31,6 +31,7 @@ import androidx.navigation.compose.rememberNavController
 import com.novastats.app.ui.screens.BillboardScreen
 import com.novastats.app.ui.screens.HomeScreen
 import com.novastats.app.ui.screens.PlaceholderScreen
+import com.novastats.app.ui.screens.RecordsScreen
 import com.novastats.app.ui.screens.SettingsScreen
 import com.novastats.app.ui.screens.StatsScreen
 import com.novastats.app.ui.theme.Nova
@@ -49,7 +50,7 @@ enum class NovaTab(val route: String, val label: String, val emoji: String, val 
 }
 
 /** Onglets visibles dans la barre (les autres restent accessibles par navigation). */
-private val bottomTabs = listOf(NovaTab.HOME, NovaTab.STATS, NovaTab.BILLBOARD, NovaTab.CERTIFICATIONS, NovaTab.PANTHEON, NovaTab.SETTINGS)
+private val bottomTabs = listOf(NovaTab.HOME, NovaTab.STATS, NovaTab.BILLBOARD, NovaTab.RECORDS, NovaTab.CERTIFICATIONS, NovaTab.SETTINGS)
 
 @Composable
 fun NovaApp() {
@@ -95,7 +96,7 @@ fun NovaApp() {
             composable(NovaTab.HOME.route) { HomeScreen(onOpenTab = { navController.navigate(it.route) }) }
             composable(NovaTab.STATS.route) { StatsScreen() }
             composable(NovaTab.BILLBOARD.route) { BillboardScreen() }
-            composable(NovaTab.RECORDS.route) { PlaceholderScreen(NovaTab.RECORDS, "Les 24 records") }
+            composable(NovaTab.RECORDS.route) { RecordsScreen() }
             composable(NovaTab.CERTIFICATIONS.route) { PlaceholderScreen(NovaTab.CERTIFICATIONS, "Argent · Or · Platine · Diamant") }
             composable(NovaTab.HALL_OF_FAME.route) { PlaceholderScreen(NovaTab.HALL_OF_FAME, "Direct Debut · Long Run · Triple Debut · Legendary Run") }
             composable(NovaTab.PANTHEON.route) { PlaceholderScreen(NovaTab.PANTHEON, "Star → Superstar → Megastar → Légende → Mythique") }

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -33,6 +34,20 @@ class SettingsRepository(private val context: Context) {
         val ENRICH_WIFI_ONLY = booleanPreferencesKey("enrich_wifi_only")
         val GOOGLE_QUOTA_DAY = stringPreferencesKey("google_quota_day")
         val GOOGLE_QUOTA_COUNT = intPreferencesKey("google_quota_count")
+        val NOTIF_DISABLED = stringSetPreferencesKey("notif_disabled")
+        val AUTO_BACKUP = booleanPreferencesKey("auto_backup")
+        val LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
+        val HAPTICS = booleanPreferencesKey("haptics")
+        val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
+    }
+
+    /** Clés des 11 notifications (cahier des charges — toutes actives par défaut). */
+    object Notif {
+        const val CERT_SILVER = "CERT_SILVER"; const val CERT_GOLD = "CERT_GOLD"; const val CERT_PLATINUM = "CERT_PLATINUM"; const val CERT_DIAMOND = "CERT_DIAMOND"
+        const val CERT_MULTIPLIERS = "CERT_MULTIPLIERS"
+        const val P_STAR = "P_STAR"; const val P_SUPERSTAR = "P_SUPERSTAR"; const val P_MEGASTAR = "P_MEGASTAR"; const val P_LEGENDE = "P_LEGENDE"; const val P_MYTHIQUE = "P_MYTHIQUE"
+        const val HOF = "HOF"
+        val ALL = listOf(CERT_SILVER, CERT_GOLD, CERT_PLATINUM, CERT_DIAMOND, CERT_MULTIPLIERS, P_STAR, P_SUPERSTAR, P_MEGASTAR, P_LEGENDE, P_MYTHIQUE, HOF)
     }
 
     /**
@@ -82,6 +97,22 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTrackWhenMuted(v: Boolean) = context.dataStore.edit { it[Keys.TRACK_MUTED] = v }
     suspend fun setWatchdog(v: Boolean) = context.dataStore.edit { it[Keys.WATCHDOG] = v }
     suspend fun setFirstLaunchDone() = context.dataStore.edit { it[Keys.FIRST_LAUNCH_DONE] = true }
+
+    /* ---- Notifications ---- */
+    /** Notifications désactivées (toutes actives par défaut). */
+    val disabledNotifications: Flow<Set<String>> = context.dataStore.data.map { it[Keys.NOTIF_DISABLED] ?: emptySet() }
+    suspend fun setNotificationEnabled(key: String, enabled: Boolean) = context.dataStore.edit {
+        val cur = it[Keys.NOTIF_DISABLED] ?: emptySet()
+        it[Keys.NOTIF_DISABLED] = if (enabled) cur - key else cur + key
+    }
+
+    /* ---- Premium / avancé ---- */
+    val autoBackup: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_BACKUP] ?: false }
+    val lastBackupAt: Flow<Long?> = context.dataStore.data.map { it[Keys.LAST_BACKUP_AT] }
+    val haptics: Flow<Boolean> = context.dataStore.data.map { it[Keys.HAPTICS] ?: true }
+    suspend fun setAutoBackup(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_BACKUP] = v }
+    suspend fun setLastBackupAt(v: Long) = context.dataStore.edit { it[Keys.LAST_BACKUP_AT] = v }
+    suspend fun setHaptics(v: Boolean) = context.dataStore.edit { it[Keys.HAPTICS] = v }
 
     /* ---- Enrichissement APIs ---- */
     val autoEnrich: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_ENRICH] ?: true }

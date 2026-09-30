@@ -149,6 +149,35 @@ interface BillboardDao {
     )
     suspend fun albumHistory(type: String, id: Long): List<PriorRow>
 
+    /* ===== Séries complètes d'un type de chart (moteur des Records) ===== */
+
+    @Query(
+        """
+        SELECT st.track_id AS entity_id, s.date AS date, st.position AS position, st.play_count AS play_count
+        FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id
+        WHERE s.type = :type ORDER BY s.date, st.position
+        """
+    )
+    suspend fun allTrackRows(type: String): List<PriorRow>
+
+    @Query(
+        """
+        SELECT sa.artist_id AS entity_id, s.date AS date, sa.position AS position, sa.play_count AS play_count
+        FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id
+        WHERE s.type = :type ORDER BY s.date, sa.position
+        """
+    )
+    suspend fun allArtistRows(type: String): List<PriorRow>
+
+    @Query(
+        """
+        SELECT sa.album_id AS entity_id, s.date AS date, sa.position AS position, sa.play_count AS play_count
+        FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id
+        WHERE s.type = :type ORDER BY s.date, sa.position
+        """
+    )
+    suspend fun allAlbumRows(type: String): List<PriorRow>
+
     /* ===== Lignes d'affichage d'un snapshot ===== */
 
     @Query(

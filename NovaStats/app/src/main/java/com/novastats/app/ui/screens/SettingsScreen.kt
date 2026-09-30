@@ -2,10 +2,14 @@ package com.novastats.app.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,110 +21,298 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.text.font.FontFamily
+import com.novastats.app.BuildConfig
+import com.novastats.app.NovaStatsApp
+import com.novastats.app.data.api.EnrichmentState
+import com.novastats.app.data.importer.BackupExporter
+import com.novastats.app.data.importer.LegacyBackupImporter
+import com.novastats.app.data.repository.SettingsRepository
+import com.novastats.app.domain.ScrobbleRules
+import com.novastats.app.service.BackupWorker
 import com.novastats.app.service.DetectionState
 import com.novastats.app.service.EnrichmentWorker
-import com.novastats.app.data.api.EnrichmentState
-import com.novastats.app.NovaStatsApp
-import com.novastats.app.data.importer.LegacyBackupImporter
-import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.service.NovaListenerService
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaThemes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.Locale
+
+/** Sous-pages de ⚙️ Paramètres. */
+enum class SettingsPage(val emoji: String, val title: String, val subtitle: String) {
+    DETECTION("🎵", "Détection", "Seuil, apps sources, blacklist, filtres"),
+    APPEARANCE("🎨", "Apparence", "15 thèmes néon · retour haptique"),
+    NOTIFICATIONS("🔔", "Notifications", "Certifications, Panthéon, Hall of Fame"),
+    DATA("🗄️", "Données", "Export / import JSON, sauvegarde auto, suppression"),
+    EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
+    SERVICE("🛡️", "Service & diagnostic", "État du service, batterie, journal"),
+    APIS("🌐", "APIs & enrichissement", "Pochettes, photos — 9 sources"),
+    ABOUT("ℹ️", "À propos", "Version, nouveautés, crédits")
+}
 
 /**
- * ⚙️ Paramètres — sections : Détection · Apparence (15 thèmes) · Données (import JSON) · Service · À propos.
+ * ⚙️ Paramètres — écran d'accueil (résumé + liste) et sous-pages. Retour Android ferme la sous-page.
  */
 @Composable
 fun SettingsScreen() {
+    var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    BackHandler(enabled = page != null) { page = null }
+    val current = page
+    if (current == null) SettingsHome { page = it }
+    else Column(Modifier.fillMaxSize()) {
+        SubPageHeader(current) { page = null }
+        when (current) {
+            SettingsPage.DETECTION -> DetectionPage()
+            SettingsPage.APPEARANCE -> AppearancePage()
+            SettingsPage.NOTIFICATIONS -> NotificationsPage()
+            SettingsPage.DATA -> DataPage()
+            SettingsPage.EDITOR -> DataEditorScreen()
+            SettingsPage.SERVICE -> ServicePage()
+            SettingsPage.APIS -> ApisPage()
+            SettingsPage.ABOUT -> AboutPage()
+        }
+    }
+}
+
+@Composable
+private fun SubPageHeader(page: SettingsPage, onBack: () -> Unit) {
+    val theme = Nova.theme
+    Row(
+        Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.25f), Color.Transparent))).padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(onClick = onBack) { Text("‹ Paramètres", color = theme.primary, fontWeight = FontWeight.Bold) }
+        Spacer(Modifier.weight(1f))
+        Text("${page.emoji} ${page.title}", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.width(12.dp))
+    }
+}
+
+/* ================================ ACCUEIL ================================ */
+
+@Composable
+private fun SettingsHome(onOpen: (SettingsPage) -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as NovaStatsApp
+    val theme = Nova.theme
+    val scrobbles by app.database.scrobbleDao().countConfirmedFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val tracks by app.database.trackDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val artists by app.database.artistDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val certs by app.database.certificationDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val firstAt by app.database.scrobbleDao().firstScrobbleAt().collectAsStateWithLifecycle(initialValue = null)
+    val lastBackup by app.settings.lastBackupAt.collectAsStateWithLifecycle(initialValue = null)
+    var accessGranted by remember { mutableStateOf(NovaListenerService.isEnabled(context)) }
+    LifecycleResumeEffect(Unit) { accessGranted = NovaListenerService.isEnabled(context); onPauseOrDispose { } }
+    val detection by DetectionState.state.collectAsStateWithLifecycle()
+    val running = accessGranted && detection.listenerConnected
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text("⚙️ Paramètres", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)
+            Text("NovaStats ${BuildConfig.VERSION_NAME} · 100 % local", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (running) "🟢" else if (accessGranted) "🟠" else "🔴")
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        when { running -> "Détection active"; accessGranted -> "Service pas encore connecté"; else -> "Détection inactive — appuie sur Service" },
+                        color = theme.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    StatPill(formatCount(scrobbles), "écoutes")
+                    StatPill(formatCount(tracks), "titres", accent = theme.secondary)
+                    StatPill(formatCount(artists), "artistes", accent = theme.accent)
+                    StatPill(formatCount(certs), "certifs", accent = theme.glowSecondary)
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Depuis ${formatDate(firstAt)} · base ${dbSizeLabel(context)} · dernière sauvegarde ${lastBackup?.let { formatDate(it) } ?: "jamais"}",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        SettingsPage.entries.forEach { p -> NavRow(p) { onOpen(p) } }
+    }
+}
+
+@Composable
+private fun NavRow(p: SettingsPage, onClick: () -> Unit) {
+    val theme = Nova.theme
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(theme.surface)
+            .border(1.dp, theme.primary.copy(alpha = 0.18f), RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(theme.primary.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) { Text(p.emoji, fontSize = 20.sp) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(p.title, color = theme.text, fontWeight = FontWeight.SemiBold)
+            Text(p.subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        Text("›", color = theme.primary, fontSize = 24.sp)
+    }
+}
+
+private fun dbSizeLabel(context: android.content.Context): String {
+    val f = context.getDatabasePath("novastats.db")
+    val bytes = f.length() + File(f.path + "-wal").length()
+    return when {
+        bytes < 1024 * 1024 -> "${bytes / 1024} Ko"
+        else -> String.format(Locale.FRANCE, "%.1f Mo", bytes / 1024.0 / 1024.0)
+    }
+}
+
+/* ================================ DÉTECTION ================================ */
+
+private val KNOWN_PLAYERS = linkedMapOf(
+    "com.spotify.music" to "Spotify", "com.google.android.apps.youtube.music" to "YouTube Music", "com.google.android.youtube" to "YouTube",
+    "deezer.android.app" to "Deezer", "com.apple.android.music" to "Apple Music", "com.soundcloud.android" to "SoundCloud",
+    "com.sec.android.app.music" to "Samsung Music", "com.amazon.mp3" to "Amazon Music", "com.aspiro.tidal" to "TIDAL",
+    "com.maxmpz.audioplayer" to "Poweramp", "com.shazam.android" to "Shazam", "com.boomplay.app" to "Boomplay", "com.audiomack" to "Audiomack"
+)
+
+@Composable
+private fun DetectionPage() {
     val context = LocalContext.current
     val app = context.applicationContext as NovaStatsApp
     val settings = app.settings
     val scope = rememberCoroutineScope()
     val theme = Nova.theme
-
-    val themeId by settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)
     val threshold by settings.thresholdSec.collectAsStateWithLifecycle(initialValue = ScrobbleRules.DEFAULT_THRESHOLD_SEC)
     val filterLong by settings.filterLongTracks.collectAsStateWithLifecycle(initialValue = true)
     val trackMuted by settings.trackWhenMuted.collectAsStateWithLifecycle(initialValue = false)
-    val watchdog by settings.watchdogEnabled.collectAsStateWithLifecycle(initialValue = true)
-    val scrobbles by app.database.scrobbleDao().countConfirmedFlow().collectAsStateWithLifecycle(initialValue = 0)
-    val tracks by app.database.trackDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
-    val artists by app.database.artistDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
-    val certs by app.database.certificationDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
-
-    var importing by remember { mutableStateOf(false) }
-    var importStatus by remember { mutableStateOf<String?>(null) }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        importing = true
-        importStatus = "Lecture du fichier…"
-        scope.launch {
-            try {
-                val report = withContext(Dispatchers.IO) {
-                    val backup = context.contentResolver.openInputStream(uri)!!.use { LegacyBackupImporter.parse(it) }
-                    LegacyBackupImporter.import(app.database, backup, threshold) { importStatus = it }
-                }
-                EnrichmentWorker.enqueue(context)
-                importStatus = report.summary()
-            } catch (e: Exception) {
-                importStatus = "❌ Import échoué : ${e.message}"
-            } finally {
-                importing = false
-            }
-        }
-    }
+    val whitelist by settings.whitelist.collectAsStateWithLifecycle(initialValue = emptySet())
+    val blArtists by settings.blacklistArtists.collectAsStateWithLifecycle(initialValue = emptySet())
+    val blKeywords by settings.blacklistKeywords.collectAsStateWithLifecycle(initialValue = emptySet())
+    val sources by app.database.scrobbleDao().distinctSources().collectAsStateWithLifecycle(initialValue = emptyList())
+    val detection by DetectionState.state.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-
-        /* ---------- 🎵 Détection ---------- */
-        SectionTitle("🎵 Détection")
+        SectionTitle("⏱️ Seuil de scrobble")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                Text("Seuil de scrobble", color = theme.text, fontWeight = FontWeight.SemiBold)
-                Text("Durée minimale pour compter une écoute (hot-reload)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("Durée minimale d'écoute pour compter une lecture (appliqué immédiatement).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ScrobbleRules.ALLOWED_THRESHOLDS_SEC.forEach { s ->
                         FilterChip(selected = threshold == s, onClick = { scope.launch { settings.setThreshold(s) } }, label = { Text("${s}s") })
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                ToggleRow("Filtre titres > 10 min", "Confirmation à la première détection (podcasts)", filterLong) { scope.launch { settings.setFilterLongTracks(it) } }
+                Spacer(Modifier.height(8.dp))
+                ToggleRow("Filtre titres > 10 min", "Ignore podcasts / mixes longs à la première détection", filterLong) { scope.launch { settings.setFilterLongTracks(it) } }
                 ToggleRow("Tracking volume = 0 %", "Continuer à compter quand le son est coupé", trackMuted) { scope.launch { settings.setTrackWhenMuted(it) } }
             }
         }
 
-        /* ---------- 🎨 Apparence ---------- */
-        SectionTitle("🎨 Apparence — 15 thèmes")
+        SectionTitle("📱 Applications sources")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    if (whitelist.isEmpty()) "Toutes les applications sont écoutées. Coche des apps pour n'écouter qu'elles."
+                    else "${whitelist.size} app(s) autorisée(s) — les autres sont ignorées.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(6.dp))
+                val candidates = (KNOWN_PLAYERS.keys + sources + detection.activeSessions + detection.ignoredSessions + whitelist).distinct()
+                candidates.forEach { pkg ->
+                    val label = KNOWN_PLAYERS[pkg] ?: runCatching { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+                    val seen = pkg in sources || pkg in detection.activeSessions
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(label, color = theme.text, style = MaterialTheme.typography.bodyMedium)
+                            Text(pkg + if (seen) " · détectée" else "", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Switch(checked = pkg in whitelist, onCheckedChange = { on -> scope.launch { settings.setWhitelist(if (on) whitelist + pkg else whitelist - pkg) } })
+                    }
+                }
+            }
+        }
+
+        SectionTitle("⛔ Blacklist")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                ChipEditor("Artistes ignorés", "Nom exact d'un artiste (ex. un podcast)", blArtists) { scope.launch { settings.setBlacklistArtists(it) } }
+                Spacer(Modifier.height(12.dp))
+                ChipEditor("Mots-clés ignorés", "Si le titre ou l'artiste contient ce mot (podcast, épisode…)", blKeywords) { scope.launch { settings.setBlacklistKeywords(it) } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChipEditor(title: String, hint: String, values: Set<String>, onChange: (Set<String>) -> Unit) {
+    val theme = Nova.theme
+    var input by remember { mutableStateOf("") }
+    Text(title, color = theme.text, fontWeight = FontWeight.SemiBold)
+    Text(hint, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(value = input, onValueChange = { input = it }, singleLine = true, modifier = Modifier.weight(1f), placeholder = { Text("Ajouter…") })
+        TextButton(onClick = { val v = input.trim(); if (v.isNotEmpty()) { onChange(values + v); input = "" } }) { Text("＋", color = theme.primary, fontSize = 22.sp) }
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column {
+            values.sorted().chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { v -> FilterChip(selected = true, onClick = { onChange(values - v) }, label = { Text("$v ✕") }) }
+                }
+            }
+        }
+    }
+    if (values.isEmpty()) Text("— aucun —", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+}
+
+/* ================================ APPARENCE ================================ */
+
+@Composable
+private fun AppearancePage() {
+    val app = LocalContext.current.applicationContext as NovaStatsApp
+    val settings = app.settings
+    val scope = rememberCoroutineScope()
+    val theme = Nova.theme
+    val themeId by settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)
+    val haptics by settings.haptics.collectAsStateWithLifecycle(initialValue = true)
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        SectionTitle("🎨 Thèmes — ${NovaThemes.ALL.size}")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
                 NovaThemes.ALL.chunked(5).forEach { row ->
@@ -135,78 +327,261 @@ fun SettingsScreen() {
                                     Modifier.size(40.dp).background(t.background, CircleShape)
                                         .border(if (selected) 3.dp else 1.dp, if (selected) theme.accent else t.textSecondary.copy(alpha = 0.4f), CircleShape),
                                     verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Row { Dot(t.primary); Dot(t.secondary); Dot(t.accent) }
-                                }
+                                ) { Row { Dot(t.primary); Dot(t.secondary); Dot(t.accent) } }
                                 Text(t.emoji, style = MaterialTheme.typography.bodySmall)
-                                Text(t.name, style = MaterialTheme.typography.labelSmall, color = if (selected) theme.primary else theme.textSecondary, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                Text(t.name, style = MaterialTheme.typography.labelSmall, color = if (selected) theme.primary else theme.textSecondary, maxLines = 2, textAlign = TextAlign.Center)
                             }
                         }
                     }
                 }
+                val current = NovaThemes.ALL.firstOrNull { it.id == themeId } ?: NovaThemes.DEFAULT
+                Spacer(Modifier.height(8.dp))
+                Text("${current.emoji} ${current.name} — ${current.effects}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }
+        SectionTitle("✨ Confort")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                ToggleRow("Retour haptique", "Vibration légère sur les actions importantes", haptics) { scope.launch { settings.setHaptics(it) } }
+            }
+        }
+    }
+}
 
-        /* ---------- 🗄️ Données ---------- */
-        SectionTitle("🗄️ Données")
+/* ================================ NOTIFICATIONS ================================ */
+
+@Composable
+private fun NotificationsPage() {
+    val context = LocalContext.current
+    val app = context.applicationContext as NovaStatsApp
+    val settings = app.settings
+    val scope = rememberCoroutineScope()
+    val theme = Nova.theme
+    val disabled by settings.disabledNotifications.collectAsStateWithLifecycle(initialValue = emptySet())
+    val feed by app.database.notificationFeedDao().recent(10).collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val groups = listOf(
+        "🏆 Certifications" to listOf(
+            SettingsRepository.Notif.CERT_SILVER to "🥉 Argent (25 écoutes · album 50)", SettingsRepository.Notif.CERT_GOLD to "🥈 Or (50 · 100)",
+            SettingsRepository.Notif.CERT_PLATINUM to "🥇 Platine (100 · 200)", SettingsRepository.Notif.CERT_DIAMOND to "💎 Diamant (350 · 700)",
+            SettingsRepository.Notif.CERT_MULTIPLIERS to "✖️ Multi-Diamant (2x, 3x…)"
+        ),
+        "👑 Panthéon" to listOf(
+            SettingsRepository.Notif.P_STAR to "⭐ Star", SettingsRepository.Notif.P_SUPERSTAR to "🌟 Superstar", SettingsRepository.Notif.P_MEGASTAR to "💫 Megastar",
+            SettingsRepository.Notif.P_LEGENDE to "👑 Légende", SettingsRepository.Notif.P_MYTHIQUE to "🔱 Mythique"
+        ),
+        "🏛️ Hall of Fame" to listOf(SettingsRepository.Notif.HOF to "Nouvelle intronisation (Direct Debut, Long Run, Triple Debut, Legendary Run)")
+    )
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                val allOn = disabled.isEmpty()
+                ToggleRow("Tout activer", "Interrupteur général des ${SettingsRepository.Notif.ALL.size} notifications", allOn) { on ->
+                    scope.launch { SettingsRepository.Notif.ALL.forEach { settings.setNotificationEnabled(it, on) } }
+                }
+                Button(
+                    onClick = { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) },
+                    modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("🔔 Réglages Android (son, importance)") }
+            }
+        }
+        groups.forEach { (title, items) ->
+            SectionTitle(title)
+            NovaCard {
+                Column(Modifier.padding(16.dp)) {
+                    items.forEach { (key, label) ->
+                        ToggleRow(label, if (key in disabled) "désactivée" else "activée", key !in disabled) { on -> scope.launch { settings.setNotificationEnabled(key, on) } }
+                    }
+                }
+            }
+        }
+        SectionTitle("🕘 Dernières notifications")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                if (feed.isEmpty()) Text("Aucune pour l'instant — elles apparaîtront ici et sur l'Accueil.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                feed.forEach { n -> Text("• ${n.message}", color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+            }
+        }
+    }
+}
+
+/* ================================ DONNÉES ================================ */
+
+@Composable
+private fun DataPage() {
+    val context = LocalContext.current
+    val app = context.applicationContext as NovaStatsApp
+    val settings = app.settings
+    val scope = rememberCoroutineScope()
+    val theme = Nova.theme
+    val threshold by settings.thresholdSec.collectAsStateWithLifecycle(initialValue = ScrobbleRules.DEFAULT_THRESHOLD_SEC)
+    val autoBackup by settings.autoBackup.collectAsStateWithLifecycle(initialValue = false)
+    val lastBackup by settings.lastBackupAt.collectAsStateWithLifecycle(initialValue = null)
+    val scrobbles by app.database.scrobbleDao().countConfirmedFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val tracks by app.database.trackDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val artists by app.database.artistDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val albums by app.database.albumDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+    val records by app.database.recordDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
+
+    var working by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var pendingExport by remember { mutableStateOf<String?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmText by remember { mutableStateOf("") }
+
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        working = true; status = "Lecture du fichier…"
+        scope.launch {
+            try {
+                val report = withContext(Dispatchers.IO) {
+                    val text = context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+                    val version = BackupExporter.formatVersion(text)
+                    if (BackupExporter.isNewerThanSupported(version)) error("Ce fichier vient d'une version plus récente de NovaStats ($version). Mets à jour l'app avant d'importer.")
+                    val backup = LegacyBackupImporter.parse(text.byteInputStream())
+                    LegacyBackupImporter.import(app.database, backup, threshold) { status = it }
+                }
+                EnrichmentWorker.enqueue(context)
+                status = report.summary()
+            } catch (e: Exception) { status = "❌ Import échoué : ${e.message}" } finally { working = false }
+        }
+    }
+    val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val text = pendingExport
+        if (uri == null || text == null) { pendingExport = null; return@rememberLauncherForActivityResult }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) } } }
+                .onSuccess { status = "✅ Export enregistré (${text.length / 1024} Ko)"; settings.setLastBackupAt(System.currentTimeMillis()) }
+                .onFailure { status = "❌ Export échoué : ${it.message}" }
+            pendingExport = null
+        }
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         NovaCard {
             Column(Modifier.padding(16.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                     StatPill(formatCount(scrobbles), "écoutes")
                     StatPill(formatCount(tracks), "titres", accent = theme.secondary)
                     StatPill(formatCount(artists), "artistes", accent = theme.accent)
-                    StatPill(formatCount(certs), "certifs", accent = theme.glowSecondary)
-                }
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = { picker.launch(arrayOf("application/json", "application/octet-stream", "*/*")) },
-                    enabled = !importing,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
-                ) { Text(if (importing) "Import en cours…" else "📥 Importer un backup JSON (v1 / NovaStats)") }
-                if (importing) {
-                    Spacer(Modifier.height(8.dp))
-                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = theme.accent)
-                }
-                importStatus?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    StatPill(formatCount(albums), "albums", accent = theme.glowSecondary)
                 }
                 Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = { scope.launch { importStatus = "Recalcul…"; withContext(Dispatchers.IO) { app.rebuilder.rebuildAll { importStatus = it } }; importStatus = "✅ Statistiques recalculées" } },
-                    enabled = !importing && scrobbles > 0,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
-                ) { Text("🔄 Recalculer toutes les statistiques") }
+                Text("Base SQLite : ${dbSizeLabel(context)} · ${formatCount(records)} entrées de records en cache", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                if (working) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(Modifier.fillMaxWidth(), color = theme.accent) }
+                status?.let { Spacer(Modifier.height(8.dp)); Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall) }
             }
         }
 
-        /* ---------- 🛡️ Service ---------- */
+        SectionTitle("📤 Export / 📥 Import JSON")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Text("Format NovaStats v2 : compatible avec l'ancien format v1 (songs + plays) et enrichi (artistes, albums, certifications, Panthéon, Hall of Fame, historique).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        working = true; status = "Préparation de l'export…"
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { BackupExporter.build(app.database, BuildConfig.VERSION_NAME) } }
+                                .onSuccess { (text, s) -> pendingExport = text; status = "${s.songs} titres · ${s.plays} écoutes · ${s.bytes / 1024} Ko"; saver.launch(BackupExporter.fileName()) }
+                                .onFailure { status = "❌ ${it.message}" }
+                            working = false
+                        }
+                    },
+                    enabled = !working && scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
+                ) { Text("📤 Exporter mes données (JSON)") }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { importer.launch(arrayOf("application/json", "application/octet-stream", "*/*")) },
+                    enabled = !working, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("📥 Importer un backup JSON (v1 / v2)") }
+                Text("L'import fusionne avec l'existant : doublons ignorés, puis recalcul complet (Billboard, certifs, records…).", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+
+        SectionTitle("💾 Sauvegarde automatique")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                ToggleRow("Sauvegarde quotidienne", "Export JSON dans Android/data/com.novastats.app/files/backups (7 conservés)", autoBackup) { scope.launch { settings.setAutoBackup(it) } }
+                Text("Dernière sauvegarde : ${lastBackup?.let { formatDate(it) } ?: "jamais"}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                val files = remember(lastBackup) { BackupWorker.existing(context) }
+                if (files.isNotEmpty()) Text("${files.size} fichier(s) · dernier : ${files.first().name}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = { BackupWorker.runNow(context); status = "💾 Sauvegarde lancée en arrière-plan" },
+                    enabled = scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("💾 Sauvegarder maintenant") }
+            }
+        }
+
+        SectionTitle("🔧 Maintenance")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Button(
+                    onClick = { working = true; scope.launch { status = "Recalcul…"; withContext(Dispatchers.IO) { app.rebuilder.rebuildAll { status = it } }; status = "✅ Statistiques recalculées"; working = false } },
+                    enabled = !working && scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("🔄 Recalculer toutes les statistiques") }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { scope.launch { withContext(Dispatchers.IO) { app.database.apiCacheDao().clearAll() }; status = "🧹 Cache API vidé — le prochain enrichissement réinterrogera les sources" } },
+                    enabled = !working, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("🧹 Vider le cache API") }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { confirmDelete = true; confirmText = "" },
+                    enabled = !working, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE74C3C).copy(alpha = 0.85f), contentColor = Color.White)
+                ) { Text("🗑️ Supprimer toutes les données") }
+            }
+        }
+    }
+
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false }, containerColor = theme.surface, titleContentColor = theme.text, textContentColor = theme.textSecondary,
+        title = { Text("⚠️ Tout supprimer ?") },
+        text = {
+            Column {
+                Text("Écoutes, titres, artistes, certifications, records… seront effacés définitivement. Pense à exporter d'abord.\n\nÉcris SUPPRIMER pour confirmer.")
+                OutlinedTextField(value = confirmText, onValueChange = { confirmText = it }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = confirmText.trim().equals("SUPPRIMER", ignoreCase = true), onClick = {
+                confirmDelete = false; working = true
+                scope.launch {
+                    withContext(Dispatchers.IO) { app.database.clearAllTables() }
+                    status = "🗑️ Toutes les données ont été supprimées"; working = false
+                }
+            }) { Text("Supprimer", color = Color(0xFFE74C3C), fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annuler", color = theme.textSecondary) } }
+    )
+}
+
+/* ================================ SERVICE ================================ */
+
+@Composable
+private fun ServicePage() {
+    val context = LocalContext.current
+    val app = context.applicationContext as NovaStatsApp
+    val settings = app.settings
+    val scope = rememberCoroutineScope()
+    val theme = Nova.theme
+    val watchdog by settings.watchdogEnabled.collectAsStateWithLifecycle(initialValue = true)
+    var accessGranted by remember { mutableStateOf(NovaListenerService.isEnabled(context)) }
+    LifecycleResumeEffect(Unit) { accessGranted = NovaListenerService.isEnabled(context); onPauseOrDispose { } }
+    val detection by DetectionState.state.collectAsStateWithLifecycle()
+    val running = accessGranted && detection.listenerConnected
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         SectionTitle("🛡️ Service")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                // Statut recalculé à chaque retour dans l'app (après l'écran Android d'accès aux notifications)
-                var accessGranted by remember { mutableStateOf(NovaListenerService.isEnabled(context)) }
-                LifecycleResumeEffect(Unit) {
-                    accessGranted = NovaListenerService.isEnabled(context)
-                    onPauseOrDispose { }
-                }
-                val detection by DetectionState.state.collectAsStateWithLifecycle()
-                val running = accessGranted && detection.listenerConnected
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (running) "🟢" else if (accessGranted) "🟠" else "🔴")
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            when {
-                                running -> "Service actif"
-                                accessGranted -> "Accès accordé, service pas encore connecté"
-                                else -> "Service inactif"
-                            },
-                            color = theme.text, fontWeight = FontWeight.SemiBold
-                        )
+                        Text(when { running -> "Service actif"; accessGranted -> "Accès accordé, service pas encore connecté"; else -> "Service inactif" }, color = theme.text, fontWeight = FontWeight.SemiBold)
                         Text(
                             when {
                                 running -> "MediaSession : ${if (detection.mediaSessionAvailable) "OK" else "indisponible (fallback notifications)"}"
@@ -219,25 +594,20 @@ fun SettingsScreen() {
                 }
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }, modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = if (accessGranted) theme.surface else theme.primary, contentColor = if (accessGranted) theme.text else MaterialTheme.colorScheme.onPrimary)
                 ) { Text(if (accessGranted) "Gérer l'accès aux notifications" else "Activer la détection") }
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }, modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
                 ) { Text("🔋 Désactiver l'optimisation batterie") }
                 Spacer(Modifier.height(8.dp))
                 ToggleRow("Watchdog", "Vérification toutes les 5 min + relance auto", watchdog) { scope.launch { settings.setWatchdog(it) } }
             }
         }
-
-        /* ---------- 🔎 Diagnostic détection ---------- */
         SectionTitle("🔎 Diagnostic détection")
         NovaCard {
-            val detection by DetectionState.state.collectAsStateWithLifecycle()
             Column(Modifier.padding(16.dp)) {
                 DiagLine("Listener connecté", if (detection.listenerConnected) "oui" else "non")
                 DiagLine("MediaSession", if (detection.mediaSessionAvailable) "disponible" else "indisponible")
@@ -247,36 +617,40 @@ fun SettingsScreen() {
                 detection.lastError?.let { DiagLine("Dernière erreur", it, error = true) }
                 Spacer(Modifier.height(8.dp))
                 Text("Journal", color = theme.text, fontWeight = FontWeight.SemiBold)
-                if (detection.log.isEmpty()) {
-                    Text(
-                        "Vide : le service n'a pas démarré. Vérifie l'accès aux notifications puis relance l'app. " +
-                            "Si le journal reste vide, ton téléphone (Xiaomi/Huawei/Oppo/Tecno…) bloque peut-être le service : " +
-                            "autorise le démarrage automatique de NovaStats dans ses paramètres.",
-                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                detection.log.forEach {
-                    Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                }
+                if (detection.log.isEmpty()) Text(
+                    "Vide : le service n'a pas démarré. Vérifie l'accès aux notifications puis relance l'app. Si le journal reste vide, ton téléphone (Xiaomi/Huawei/Oppo/Tecno…) bloque peut-être le service : autorise le démarrage automatique de NovaStats.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                detection.log.forEach { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
             }
         }
+    }
+}
 
-        /* ---------- 🌐 APIs & enrichissement ---------- */
-        SectionTitle("🌐 APIs — pochettes, photos, bios")
+/* ================================ APIs ================================ */
+
+@Composable
+private fun ApisPage() {
+    val context = LocalContext.current
+    val app = context.applicationContext as NovaStatsApp
+    val settings = app.settings
+    val scope = rememberCoroutineScope()
+    val theme = Nova.theme
+    val enrich by EnrichmentState.state.collectAsStateWithLifecycle()
+    val autoEnrich by settings.autoEnrich.collectAsStateWithLifecycle(initialValue = true)
+    val wifiOnly by settings.enrichWifiOnly.collectAsStateWithLifecycle(initialValue = false)
+    val missingTracks by app.database.trackDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
+    val missingArtists by app.database.artistDao().missingPhotoCount().collectAsStateWithLifecycle(initialValue = 0)
+    val missingAlbums by app.database.albumDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
+    val reliability by app.database.apiCacheDao().reliability().collectAsStateWithLifecycle(initialValue = emptyList())
+    val sources = remember { app.enricher.configuredSources() }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        SectionTitle("🌐 Enrichissement")
         NovaCard {
-            val enrich by EnrichmentState.state.collectAsStateWithLifecycle()
-            val autoEnrich by settings.autoEnrich.collectAsStateWithLifecycle(initialValue = true)
-            val wifiOnly by settings.enrichWifiOnly.collectAsStateWithLifecycle(initialValue = false)
-            val missingTracks by app.database.trackDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
-            val missingArtists by app.database.artistDao().missingPhotoCount().collectAsStateWithLifecycle(initialValue = 0)
-            val missingAlbums by app.database.albumDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
-            val reliability by app.database.apiCacheDao().reliability().collectAsStateWithLifecycle(initialValue = emptyList())
-            val sources = remember { app.enricher.configuredSources() }
-
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Cascade de 9 sources : iTunes → Spotify → Last.fm → MusicBrainz → TheAudioDB → Deezer → Discogs → Google (dernier recours). " +
-                        "Artistes : Fanart.tv → TheAudioDB → Spotify → Last.fm → Deezer → Google.",
+                    "Cascade de 9 sources : iTunes → Spotify → Last.fm → MusicBrainz → TheAudioDB → Deezer → Discogs → Google (dernier recours). Artistes : Fanart.tv → TheAudioDB → Spotify → Last.fm → Deezer → Google.",
                     color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(8.dp))
@@ -290,52 +664,94 @@ fun SettingsScreen() {
                 ToggleRow("Wi-Fi uniquement", "Pas de requêtes API en données mobiles", wifiOnly) { scope.launch { settings.setEnrichWifiOnly(it) } }
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    onClick = { EnrichmentWorker.enqueue(context, manual = true) },
-                    enabled = !enrich.running,
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
-                    modifier = Modifier.fillMaxWidth()
+                    onClick = { EnrichmentWorker.enqueue(context, manual = true) }, enabled = !enrich.running,
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary), modifier = Modifier.fillMaxWidth()
                 ) { Text(if (enrich.running) "Enrichissement en cours…" else "🌐 Enrichir maintenant") }
                 if (enrich.running) {
                     Spacer(Modifier.height(6.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = theme.primary)
                     Text("${enrich.current ?: ""} · ${enrich.processed} traités, ${enrich.found} trouvés", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
-                Spacer(Modifier.height(10.dp))
-                Text("Sources", color = theme.text, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        SectionTitle("📡 Sources")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
                 sources.forEach { (src, configured) ->
                     val r = reliability.firstOrNull { it.apiName == src.label }
-                    val stats = if (r == null || r.successCount + r.failCount == 0) "pas encore utilisée"
-                    else "${r.successRate.toInt()} % de succès (${r.successCount}/${r.successCount + r.failCount})"
+                    val stats = if (r == null || r.successCount + r.failCount == 0) "pas encore utilisée" else "${r.successRate.toInt()} % de succès (${r.successCount}/${r.successCount + r.failCount})"
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Dot(if (configured) Color(0xFF2ECC71) else Color(0xFF95A5A6))
                         Spacer(Modifier.width(8.dp))
                         Text("${src.emoji} ${src.label}", color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(130.dp))
-                        Text(
-                            if (configured) stats else "clé manquante",
-                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)
-                        )
+                        Text(if (configured) stats else "clé manquante", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     }
                 }
                 if (enrich.log.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text("Journal", color = theme.text, fontWeight = FontWeight.SemiBold)
-                    enrich.log.take(15).forEach {
-                        Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                    }
+                    enrich.log.take(15).forEach { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
                 }
-            }
-        }
-
-        /* ---------- ℹ️ À propos ---------- */
-        SectionTitle("ℹ️ À propos")
-        NovaCard {
-            Column(Modifier.padding(16.dp)) {
-                Text("NovaStats 0.1.0", color = theme.text, fontWeight = FontWeight.Bold)
-                Text("100 % local · aucune donnée envoyée · export JSON", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
 }
+
+/* ================================ À PROPOS ================================ */
+
+private val CHANGELOG = listOf(
+    "0.2.0" to listOf(
+        "🏅 Onglet Records complet : 24 records, popup 90 % avec périodes / sections / sous-sections",
+        "⚙️ Paramètres refaits : sous-pages, notifications (11 interrupteurs), blacklist, apps sources",
+        "📤 Export JSON v2 (compatible v1) · 💾 sauvegarde auto quotidienne · 🗑️ suppression totale",
+        "🛠️ Éditeur de données : renommer, fusionner, changer artiste/album, supprimer une écoute, Undo",
+        "🔔 Notifications de succès (certifs, Panthéon, Hall of Fame) après chaque écoute"
+    ),
+    "0.1.x" to listOf(
+        "🏠 Accueil 8 sections · 📊 Stats complètes avec popups et recherche",
+        "📈 Billboard Daily/Weekly/Monthly/Yearly/Global, Hall of Fame",
+        "🌐 Cascade de 9 APIs pour pochettes et photos",
+        "🎧 Détection MediaSession + fallback notifications, import JSON v1"
+    )
+)
+
+@Composable
+private fun AboutPage() {
+    val theme = Nova.theme
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        NovaCard {
+            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🎧", fontSize = 48.sp)
+                Text("NovaStats", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                Text("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", color = theme.textSecondary)
+                Spacer(Modifier.height(8.dp))
+                Text("Tes statistiques d'écoute, façon Billboard. 100 % local : aucune donnée n'est envoyée, hors requêtes d'images vers les APIs publiques.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            }
+        }
+        SectionTitle("🆕 Nouveautés")
+        CHANGELOG.forEach { (v, lines) ->
+            NovaCard {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Version $v", color = theme.primary, fontWeight = FontWeight.Bold)
+                    lines.forEach { Text("• $it", color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+                }
+            }
+        }
+        SectionTitle("🙏 Crédits & licences")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                listOf(
+                    "Kotlin · Jetpack Compose · Room · WorkManager · DataStore (Apache 2.0)",
+                    "Coil (Apache 2.0) · Retrofit / OkHttp (Apache 2.0) · kotlinx.serialization (Apache 2.0)",
+                    "Données images : iTunes, Spotify, Last.fm, MusicBrainz / Cover Art Archive, TheAudioDB, Deezer, Discogs, Fanart.tv, Google",
+                    "Cahier des charges & idée : le fichier DEBUT — merci ✨"
+                ).forEach { Text("• $it", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+            }
+        }
+    }
+}
+
+/* ================================ Helpers ================================ */
 
 @Composable
 private fun DiagLine(label: String, value: String, error: Boolean = false) {

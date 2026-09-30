@@ -102,9 +102,11 @@ fun DetailPopupHost(target: DetailTarget?, onDismiss: () -> Unit) {
 
 /** Squelette commun : overlay, carte, bandeau, scroll interne, bouton FERMER, fade. */
 @Composable
-private fun PopupScaffold(
+internal fun PopupScaffold(
     borderColor: Color,
     onDismiss: () -> Unit,
+    heightFraction: Float = 0.86f,
+    fixedHeight: Boolean = false,
     banner: @Composable () -> Unit,
     content: @Composable () -> Unit
 ) {
@@ -118,9 +120,9 @@ private fun PopupScaffold(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
                 contentAlignment = Alignment.Center
             ) {
-                val maxH = (LocalConfiguration.current.screenHeightDp * 0.86f).dp
+                val maxH = (LocalConfiguration.current.screenHeightDp * heightFraction).dp
                 Column(
-                    Modifier.fillMaxWidth(0.92f).heightIn(max = maxH)
+                    (if (fixedHeight) Modifier.fillMaxWidth(0.92f).height(maxH) else Modifier.fillMaxWidth(0.92f).heightIn(max = maxH))
                         .shadow(24.dp, RoundedCornerShape(16.dp), ambientColor = borderColor, spotColor = borderColor)
                         .clip(RoundedCornerShape(16.dp))
                         .background(theme.surface)

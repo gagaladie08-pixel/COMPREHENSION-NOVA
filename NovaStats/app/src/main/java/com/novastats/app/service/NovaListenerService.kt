@@ -43,6 +43,9 @@ class NovaListenerService : NotificationListenerService() {
     private var controllers = emptyMap<String, MediaController>()
     private val callbacks = HashMap<String, MediaController.Callback>()
     private var whitelist: Set<String> = emptySet()
+    private var blacklistArtists: Set<String> = emptySet()
+    private var blacklistKeywords: Set<String> = emptySet()
+    private var filterLongTracks = true
     private var activePackage: String? = null
 
     private val app get() = application as NovaStatsApp
@@ -57,6 +60,9 @@ class NovaListenerService : NotificationListenerService() {
         DetectionState.log("Service créé")
         scope.launch {
             launch { app.settings.thresholdSec.collect { tracker.updateThreshold(it); DetectionState.log("Seuil : ${it}s") } }
+            launch { app.settings.blacklistArtists.collect { blacklistArtists = it.map { a -> a.trim().lowercase() }.toSet() } }
+            launch { app.settings.filterLongTracks.collect { filterLongTracks = it } }
+            launch { app.settings.blacklistKeywords.collect { blacklistKeywords = it.map { k -> k.trim().lowercase() }.filter { k -> k.isNotEmpty() }.toSet() } }
             launch {
                 app.settings.whitelist.collect {
                     whitelist = it
@@ -113,6 +119,14 @@ class NovaListenerService : NotificationListenerService() {
     }
 
     private fun isAllowed(pkg: String) = whitelist.isEmpty() || pkg in whitelist
+
+    /** Blacklist artistes (nom exact, insensible à la casse) et mots-clés (contenus dans le titre ou l'artiste : podcast, épisode…). */
+    private fun isBlacklisted(title: String, artist: String?): Boolean {
+        val a = artist?.trim()?.lowercase()
+        if (a != null && a in blacklistArtists) return true
+        val hay = (title + " " + (artist ?: "")).lowercase()
+        return blacklistKeywords.any { hay.contains(it) }
+    }
 
     private fun bindControllers(list: List<MediaController>) {
         val wanted = list.filter { isAllowed(it.packageName) }.associateBy { it.packageName }
@@ -175,11 +189,17 @@ class NovaListenerService : NotificationListenerService() {
             val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
                 ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { it > 0 }
+            val tooLong = filterLongTracks && durationMs != null && durationMs > 10 * 60_000L
+            if (isBlacklisted(title, artist) || tooLong) {
+                if (tracker.current != null) { handle(tracker.onPlayerGone()); DetectionState.log(if (tooLong) "⏭️ > 10 min ignoré (filtre) : $title" else "⛔ Blacklist : $title — ${artist ?: ""}") }
+                return
+            }
             val key = ScrobbleTracker.TrackKey(
                 title = title,
                 artist = artist,
                 album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM),
-                durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { it > 0 },
+                durationMs = durationMs,
                 sourceApp = c.packageName,
                 albumArtist = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             )
@@ -219,6 +239,7 @@ class NovaListenerService : NotificationListenerService() {
             if (!template.contains("MediaStyle") && !hasMediaSession) return
             val title = extras.getCharSequence("android.title")?.toString()?.takeIf { it.isNotBlank() } ?: return
             val artist = extras.getCharSequence("android.text")?.toString()
+            if (isBlacklisted(title, artist)) return
             val key = ScrobbleTracker.TrackKey(title, artist, null, null, sbn.packageName)
             if (tracker.current?.key == key) return
             DetectionState.lastTrack(key.display)
@@ -320,7 +341,8 @@ class NovaListenerService : NotificationListenerService() {
             DetectionState.log("💾 Enregistré (${listened / 1000}s) : ${s.key.display}")
             // TODO(perf) : remplacer par une mise à jour incrémentale (titre/artiste/album + jour courant)
             // et un check de certification / Panthéon ciblé. Le rebuild complet est correct mais coûteux.
-            app.rebuilder.rebuildAll(fullBillboard = false)
+            val news = app.rebuilder.rebuildAll(fullBillboard = false)
+            runCatching { AchievementNotifier.notify(this, news) }.onFailure { DetectionState.error(it) }
             EnrichmentWorker.enqueue(this)
         }
     }

@@ -159,6 +159,24 @@ interface TrackDao {
     @Query("SELECT COUNT(*) FROM tracks WHERE play_count > 0")
     suspend fun countPlayed(): Int
 
+    @Query("SELECT * FROM tracks WHERE play_count > 0")
+    suspend fun allPlayed(): List<TrackEntity>
+
+    /* ---- Éditeur de données ---- */
+    @Query("SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t ORDER BY t.play_count DESC, t.title LIMIT :limit")
+    fun allForEditor(limit: Int = 2000): Flow<List<RankedTrack>>
+
+    @Query("SELECT t.*, (SELECT name FROM artists WHERE artist_id = t.artist_id) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t WHERE t.needs_review = 1 OR t.confidence_score < 70 ORDER BY t.confidence_score, t.play_count DESC")
+    fun needingReview(): Flow<List<RankedTrack>>
+
+    @Query("UPDATE tracks SET title = :title WHERE track_id = :id") suspend fun rename(id: Long, title: String)
+    @Query("UPDATE tracks SET album_id = :albumId WHERE track_id = :id") suspend fun setAlbum(id: Long, albumId: Long?)
+    @Query("UPDATE tracks SET artist_id = :artistId WHERE track_id = :id") suspend fun setPrimaryArtist(id: Long, artistId: Long)
+    @Query("UPDATE tracks SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
+    @Query("UPDATE tracks SET album_id = :into WHERE album_id = :from") suspend fun moveAlbum(from: Long, into: Long)
+    @Query("UPDATE tracks SET needs_review = 0, confidence_score = 100 WHERE track_id = :id") suspend fun markReviewed(id: Long)
+    @Query("DELETE FROM tracks WHERE track_id = :id") suspend fun delete(id: Long)
+
     /** Recalcule les agrégats des titres à partir des scrobbles confirmés (après import / édition). */
     @Query(
         """
@@ -283,6 +301,14 @@ interface ArtistDao {
     )
     suspend fun playsForPeriod(artistId: Long, from: String, to: String): Int
 
+    @Query("SELECT * FROM artists WHERE is_merged = 0 ORDER BY play_count DESC, name")
+    fun allForEditor(): Flow<List<ArtistEntity>>
+    @Query("SELECT * FROM artists WHERE is_merged = 0 ORDER BY play_count DESC") suspend fun allPlayedList(): List<ArtistEntity>
+
+    @Query("UPDATE artists SET name = :name WHERE artist_id = :id") suspend fun rename(id: Long, name: String)
+    @Query("UPDATE artists SET photo_url = :url, photo_source = 'USER' WHERE artist_id = :id") suspend fun setPhoto(id: Long, url: String?)
+    @Query("UPDATE artists SET is_merged = 1, merged_into_id = :into, play_count = 0 WHERE artist_id = :from") suspend fun markMerged(from: Long, into: Long)
+
     @Query("UPDATE artists SET pantheon_status = :status, pantheon_date = :date WHERE artist_id = :artistId")
     suspend fun setPantheonStatus(artistId: Long, status: String, date: Long)
 }
@@ -363,6 +389,17 @@ interface AlbumDao {
     @Query("SELECT al.*, a.name AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.play_count > 0 ORDER BY al.play_count DESC LIMIT :limit")
     fun mostPlayed(limit: Int = 100): Flow<List<RankedAlbum>>
 
+    @Query("SELECT * FROM albums") suspend fun all(): List<AlbumEntity>
+
+    /* ---- Éditeur de données ---- */
+    @Query("SELECT al.*, a.name AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al JOIN artists a ON a.artist_id = al.artist_id ORDER BY al.play_count DESC, al.title")
+    fun allForEditor(): Flow<List<RankedAlbum>>
+
+    @Query("UPDATE albums SET title = :title WHERE album_id = :id") suspend fun rename(id: Long, title: String)
+    @Query("UPDATE albums SET cover_url = :url, cover_source = 'USER' WHERE album_id = :id") suspend fun setCover(id: Long, url: String?)
+    @Query("UPDATE albums SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
+    @Query("DELETE FROM albums WHERE album_id = :id") suspend fun delete(id: Long)
+
     /** Écoutes d'un album = somme des écoutes de tous ses titres. */
     @Query(
         """
@@ -387,4 +424,11 @@ interface TrackLinkDao {
 
     @Query("SELECT artist_id FROM track_artists WHERE track_id = :trackId ORDER BY is_primary DESC")
     suspend fun artistIdsForTrack(trackId: Long): List<Long>
+
+    @Query("SELECT * FROM track_artists") suspend fun allTrackArtists(): List<TrackArtistEntity>
+    @Query("DELETE FROM track_artists WHERE artist_id = :from AND track_id IN (SELECT track_id FROM track_artists WHERE artist_id = :into)") suspend fun dropDuplicateLinks(from: Long, into: Long)
+    @Query("UPDATE track_artists SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
+    @Query("DELETE FROM track_artists WHERE track_id = :trackId") suspend fun clearTrackArtists(trackId: Long)
+    @Query("DELETE FROM track_albums WHERE track_id = :trackId") suspend fun clearTrackAlbums(trackId: Long)
+    @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
 }

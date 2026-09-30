@@ -28,11 +28,20 @@ import kotlinx.coroutines.flow.first
  */
 class StatsRebuilder(private val db: NovaDatabase) {
 
+    /** Nouveauté détectée après un recalcul (pour les notifications). */
+    data class Achievement(val kind: String, val entityType: String, val entityId: Long, val level: String, val name: String)
+
     /**
      * @param fullBillboard true = reconstruit tous les snapshots (import) ; false = ne recalcule que la période
      *                      courante (après une écoute).
+     * @return les nouvelles certifications / statuts Panthéon / entrées Hall of Fame apparus pendant ce recalcul
+     *         (vide après un import complet, pour ne pas inonder de notifications).
      */
-    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}) {
+    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> {
+        val certsBefore: Map<Pair<String, Long>, Int> = if (fullBillboard) emptyMap() else db.certificationDao().allCurrent().associate { (it.entityType to it.entityId) to it.toDomain().rank }
+        val pantheonBefore: Map<Long, String> = if (fullBillboard) emptyMap() else db.pantheonDao().allCurrent().associate { it.artistId to it.currentStatus }
+        val hofBefore: Set<List<String>> = if (fullBillboard) emptySet() else db.hallOfFameDao().all().map { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }.toSet()
+
         onProgress("Agrégats titres / artistes / albums…")
         db.withTransaction {
             db.trackDao().recomputeAggregates()
@@ -64,6 +73,35 @@ class StatsRebuilder(private val db: NovaDatabase) {
         onProgress("Billboard…")
         val billboard = BillboardEngine(db)
         if (fullBillboard) billboard.rebuildAll(onProgress) else billboard.refreshCurrent()
+
+        onProgress("Records…")
+        RecordsEngine(db).rebuildAll(onProgress)
+
+        if (fullBillboard) return emptyList()
+        val news = ArrayList<Achievement>()
+        for (c in db.certificationDao().allCurrent()) {
+            val rank = c.toDomain().rank
+            if ((certsBefore[c.entityType to c.entityId] ?: -1) < rank) {
+                val name = if (c.entityType == EntityType.ALBUM) db.albumDao().getById(c.entityId)?.title else db.trackDao().getById(c.entityId)?.title
+                news += Achievement("CERTIFICATION", c.entityType, c.entityId, c.level + if (c.multiplier > 1) ":${c.multiplier}" else "", name ?: "—")
+            }
+        }
+        for (p in db.pantheonDao().allCurrent()) {
+            val before = PantheonStatus.fromDb(pantheonBefore[p.artistId])?.ordinal ?: -1
+            val after = PantheonStatus.fromDb(p.currentStatus)?.ordinal ?: -1
+            if (after > before) news += Achievement("PANTHEON", EntityType.ARTIST, p.artistId, p.currentStatus, db.artistDao().getById(p.artistId)?.name ?: "—")
+        }
+        for (h in db.hallOfFameDao().all()) {
+            if (listOf(h.entityType, h.entityId.toString(), h.periodType, h.entryType) !in hofBefore) {
+                val name = when (h.entityType) {
+                    EntityType.ALBUM -> db.albumDao().getById(h.entityId)?.title
+                    EntityType.ARTIST -> db.artistDao().getById(h.entityId)?.name
+                    else -> db.trackDao().getById(h.entityId)?.title
+                }
+                news += Achievement("HALL_OF_FAME", h.entityType, h.entityId, h.entryType, name ?: "—")
+            }
+        }
+        return news
     }
 
     /* ---------------- Streaks ---------------- */

@@ -68,18 +68,19 @@ app/src/main/java/com/novastats/app/
 |---|---|
 | 🗄️ Base de données (34 tables) | ✅ Entités + DAOs |
 | 📥 Import JSON v1 + recalcul complet | ✅ |
-| 🎵 Détection v3.0 | 🟡 Tracker + service MediaSession/Notification (watchdog WorkManager, guide constructeur, filtres podcast à brancher) |
+| 🎵 Détection v3.0 | ✅ Tracker + service MediaSession/Notification, whitelist apps, blacklist artistes/mots-clés, filtre > 10 min |
 | 🏠 Accueil | ✅ 8 sections : lecture en cours (pochette, progression, source, statut), aujourd'hui, top du moment, actualités, prochaines certifs, records, récents, streak |
 | 📊 Stats | ✅ Titres/Artistes/Albums × 5 périodes (Weekly = 7 jours glissants), recherche, bandeau, popups détaillées (appui long) |
 | 💎 Certifications | 🟡 Règles + calcul + dates rétroactives (écran à venir) |
 | 👑 Panthéon | 🟡 Règles + calcul (écran à venir) |
 | 🏆 Billboard | ✅ Hot 100 / Artist 50 / 75 Albums × 5 périodes, snapshots figés, navigation historique, fiche détaillée, recherche |
 | 🏛️ Hall of Fame | 🟡 Alimenté par le Billboard (Direct Debut, Long Run, Triple Debut, Legendary Run) — écran à venir |
-| 🏅 Records · 🏆 Nova Awards | ⬜ Tables prêtes |
+| 🏅 Records | ✅ 24 records (`domain/Records.kt` + `RecordsEngine`), recalculés après chaque écoute / import, popup 90 % avec Périodes · Sections · Sous-sections |
+| 🏆 Nova Awards | ⬜ Tables prêtes |
 | 🎨 15 thèmes | ✅ Palettes + sélecteur |
-| ⚙️ Paramètres | 🟡 Détection, apparence, données, service |
+| ⚙️ Paramètres | ✅ 8 sous-pages : Détection · Apparence · Notifications (11) · Données (export JSON v2 compatible v1, import, sauvegarde auto, suppression) · Éditeur · Service & diagnostic · APIs · À propos |
 | 🌐 APIs (cascade 9 sources) | ✅ iTunes · Spotify · Last.fm · MusicBrainz/CAA · TheAudioDB · Deezer · Discogs · Fanart.tv · Google ; score de confiance, consensus, cache 6 mois/1 mois/négatif 7 j, fiabilité dynamique, worker en arrière-plan |
-| ✏️ Éditeur de données | ⬜ Tables prêtes |
+| ✏️ Éditeur de données | ✅ Renommer / fusionner (suggestions auto) / changer artiste-album / supprimer une écoute / marquer correct / historique 50 + Undo |
 
 ## Sécurité
 

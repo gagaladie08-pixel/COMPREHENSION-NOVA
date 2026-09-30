@@ -6,9 +6,11 @@ import android.app.NotificationManager
 import com.novastats.app.data.api.MetadataEnricher
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.repository.BillboardEngine
+import com.novastats.app.data.repository.DataEditorManager
 import com.novastats.app.data.repository.LibraryRepository
 import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.data.repository.StatsRebuilder
+import com.novastats.app.service.BackupWorker
 import com.novastats.app.service.EnrichmentWorker
 
 /**
@@ -22,12 +24,14 @@ class NovaStatsApp : Application() {
     val rebuilder: StatsRebuilder by lazy { StatsRebuilder(database) }
     val billboard: BillboardEngine by lazy { BillboardEngine(database) }
     val enricher: MetadataEnricher by lazy { MetadataEnricher(database, settings) }
+    val editor: DataEditorManager by lazy { DataEditorManager(database, rebuilder) }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannels()
         EnrichmentWorker.schedulePeriodic(this)
+        BackupWorker.schedulePeriodic(this)
     }
 
     private fun createNotificationChannels() {
