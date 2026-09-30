@@ -73,7 +73,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
-          name: NovaStats build #${{ github.run_number }}
+          name: "NovaStats build #${{ github.run_number }}"
           prerelease: true
           body: |
             📱 **APK de test NovaStats** — branche `${{ github.ref_name }}`, commit `${{ github.sha }}`
