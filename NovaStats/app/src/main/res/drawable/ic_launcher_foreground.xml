@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Étoile "Nova" simple -->
+    <path
+        android:fillColor="#FF006E"
+        android:pathData="M54,22 L60,46 L84,52 L60,58 L54,82 L48,58 L24,52 L48,46 Z" />
+    <path
+        android:fillColor="#00FFF0"
+        android:pathData="M54,40 L57,50 L67,53 L57,56 L54,66 L51,56 L41,53 L51,50 Z" />
+</vector>

@@ -1,0 +1,16 @@
+# Fichiers sensibles
+local.properties
+*.jks
+*.keystore
+
+# Gradle / IDE
+.gradle/
+build/
+/captures
+.externalNativeBuild
+.cxx
+*.iml
+.idea/
+.DS_Store
+/app/release
+/app/debug

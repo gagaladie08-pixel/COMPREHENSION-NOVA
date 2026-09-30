@@ -1,0 +1,8 @@
+<resources>
+    <!-- Thème système minimal : tout le vrai theming est fait dans Compose (15 thèmes). -->
+    <style name="Theme.NovaStats" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#050510</item>
+        <item name="android:statusBarColor">#050510</item>
+        <item name="android:navigationBarColor">#050510</item>
+    </style>
+</resources>

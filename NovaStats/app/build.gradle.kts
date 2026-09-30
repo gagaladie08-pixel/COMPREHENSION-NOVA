@@ -1,0 +1,125 @@
+import java.util.Properties
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
+}
+
+// Lecture des clés API depuis local.properties (jamais commité).
+// Flux : local.properties → BuildConfig → ApiKeys.kt
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun apiKey(name: String): String = "\"${localProps.getProperty(name, "")}\""
+
+android {
+    namespace = "com.novastats.app"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.novastats.app"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "LASTFM_API_KEY", apiKey("LASTFM_API_KEY"))
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", apiKey("SPOTIFY_CLIENT_ID"))
+        buildConfigField("String", "SPOTIFY_CLIENT_SECRET", apiKey("SPOTIFY_CLIENT_SECRET"))
+        buildConfigField("String", "FANART_API_KEY", apiKey("FANART_API_KEY"))
+        buildConfigField("String", "GOOGLE_API_KEY", apiKey("GOOGLE_API_KEY"))
+        buildConfigField("String", "GOOGLE_ENGINE_ID", apiKey("GOOGLE_ENGINE_ID"))
+        buildConfigField("String", "DISCOGS_TOKEN", apiKey("DISCOGS_TOKEN"))
+        buildConfigField("String", "THEAUDIODB_API_KEY", apiKey("THEAUDIODB_API_KEY"))
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.incremental", "true")
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
+
+    // Compose
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons)
+    implementation(libs.androidx.navigation.compose)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Room (34 tables)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // Background / prefs
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.datastore.preferences)
+
+    // Sérialisation JSON (import/export)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+
+    // Réseau (APIs métadonnées — cascade)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.kotlinx.serialization)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // Images
+    implementation(libs.coil.compose)
+
+    // Tests
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+}
