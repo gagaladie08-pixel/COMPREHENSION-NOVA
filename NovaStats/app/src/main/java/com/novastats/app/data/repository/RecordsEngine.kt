@@ -5,7 +5,7 @@ import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.RecordCacheEntity
-import com.novastats.app.domain.ChartAppearance
+import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.RecordCatalog
@@ -33,7 +33,7 @@ class RecordsEngine(private val db: NovaDatabase) {
         val now = System.currentTimeMillis()
 
         // Séries par période (chargées une fois pour le multi-chart)
-        val seriesByPeriod = HashMap<Period, Map<RecordCategory, Map<Long, List<ChartAppearance>>>>()
+        val seriesByPeriod = HashMap<Period, Map<RecordCategory, Map<Long, List<RecordAppearance>>>>()
         for (p in chartPeriods) {
             onProgress("Records · ${p.label}…")
             val perCat = mapOf(
@@ -76,12 +76,12 @@ class RecordsEngine(private val db: NovaDatabase) {
         Period.GLOBAL -> 0
     }
 
-    private fun toSeries(rows: List<PriorRow>, p: Period): Map<Long, List<ChartAppearance>> {
+    private fun toSeries(rows: List<PriorRow>, p: Period): Map<Long, List<RecordAppearance>> {
         val idx = HashMap<String, Int>()
-        val map = HashMap<Long, MutableList<ChartAppearance>>()
+        val map = HashMap<Long, MutableList<RecordAppearance>>()
         for (r in rows) {
             val i = idx.getOrPut(r.date) { periodIndex(Dates.parse(r.date), p) }
-            map.getOrPut(r.entityId) { ArrayList() }.add(ChartAppearance(i, r.date, r.position, r.playCount))
+            map.getOrPut(r.entityId) { ArrayList() }.add(RecordAppearance(i, r.date, r.position, r.playCount))
         }
         map.values.forEach { it.sortBy { a -> a.periodIndex } }
         return map
@@ -99,8 +99,8 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     /* ---------------- Records par entité (1, 2, 3, 10, 11, 15-20, 22) ---------------- */
 
-    private fun chartRecords(p: Period, cat: RecordCategory, series: Map<Long, List<ChartAppearance>>, out: MutableList<RecordCacheEntity>, now: Long) {
-        fun each(f: (Long, List<ChartAppearance>) -> RecordResult?): List<RecordResult> = series.mapNotNull { (id, s) -> f(id, s)?.copy(entityId = id) }
+    private fun chartRecords(p: Period, cat: RecordCategory, series: Map<Long, List<RecordAppearance>>, out: MutableList<RecordCacheEntity>, now: Long) {
+        fun each(f: (Long, List<RecordAppearance>) -> RecordResult?): List<RecordResult> = series.mapNotNull { (id, s) -> f(id, s)?.copy(entityId = id) }
 
         emit(out, "MOST_CUMULATIVE", p, cat, null, each { id, s -> RecordResult(id, RecordMath.cumulative(s).toDouble(), s.last().date) }, now)
         emit(out, "MOST_CUMULATIVE_TOP10", p, cat, null, each { id, s -> RecordResult(id, RecordMath.cumulative(s, 10).toDouble(), s.lastOrNull { it.position <= 10 }?.date) }, now)
@@ -124,12 +124,12 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     /* ---------------- Records "propriétaire" (4-8, 23, 24) ---------------- */
 
-    private fun ownerRecords(p: Period, perCat: Map<RecordCategory, Map<Long, List<ChartAppearance>>>, links: Links, out: MutableList<RecordCacheEntity>, now: Long) {
+    private fun ownerRecords(p: Period, perCat: Map<RecordCategory, Map<Long, List<RecordAppearance>>>, links: Links, out: MutableList<RecordCacheEntity>, now: Long) {
         val trackSeries = perCat.getValue(RecordCategory.TRACK)
         val albumSeries = perCat.getValue(RecordCategory.ALBUM)
 
         // Trois "vues" : ARTIST/SONGS (titres → artistes), ARTIST/ALBUMS (albums → artiste), ALBUM (titres → album)
-        data class View(val cat: RecordCategory, val sub: String?, val series: Map<Long, List<ChartAppearance>>, val owners: (Long) -> Set<Long>)
+        data class View(val cat: RecordCategory, val sub: String?, val series: Map<Long, List<RecordAppearance>>, val owners: (Long) -> Set<Long>)
         val views = listOf(
             View(RecordCategory.ARTIST, "SONGS", trackSeries) { links.trackArtists[it].orEmpty() },
             View(RecordCategory.ARTIST, "ALBUMS", albumSeries) { links.albumArtist[it]?.let { a -> setOf(a) }.orEmpty() },
@@ -185,7 +185,7 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     /* ---------------- 21. Multi-Chart Domination ---------------- */
 
-    private fun multiChart(seriesByPeriod: Map<Period, Map<RecordCategory, Map<Long, List<ChartAppearance>>>>, out: MutableList<RecordCacheEntity>, now: Long) {
+    private fun multiChart(seriesByPeriod: Map<Period, Map<RecordCategory, Map<Long, List<RecordAppearance>>>>, out: MutableList<RecordCacheEntity>, now: Long) {
         for (cat in RecordCategory.entries) {
             // date → entité → position, pour chaque période
             fun index(p: Period): Map<String, Map<Long, Int>> {

@@ -8,7 +8,7 @@ import org.junit.Test
 
 class RecordMathTest {
 
-    private fun s(vararg p: Pair<Int, Int>) = p.map { (idx, pos) -> ChartAppearance(idx, "2026-01-%02d".format(idx + 1), pos, 10) }
+    private fun s(vararg p: Pair<Int, Int>) = p.map { (idx, pos) -> RecordAppearance(idx, "2026-01-%02d".format(idx + 1), pos, 10) }
 
     @Test
     fun `catalogue expose les 24 records`() {

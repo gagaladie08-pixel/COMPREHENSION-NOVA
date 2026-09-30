@@ -119,7 +119,7 @@ object RecordCatalog {
 /* =========================== MOTEUR (séries de positions) =========================== */
 
 /** Une apparition dans un chart : index de période (0,1,2… consécutif dans le calendrier), position, écoutes. */
-data class ChartAppearance(val periodIndex: Int, val date: String, val position: Int, val plays: Int)
+data class RecordAppearance(val periodIndex: Int, val date: String, val position: Int, val plays: Int)
 
 /** Résultat d'un record pour une entité. */
 data class RecordResult(val entityId: Long, val value: Double, val date: String? = null, val extra: String? = null)
@@ -127,12 +127,12 @@ data class RecordResult(val entityId: Long, val value: Double, val date: String?
 /** Calculs purs à partir des séries de positions d'une entité (triées par periodIndex). */
 object RecordMath {
 
-    fun cumulative(series: List<ChartAppearance>, maxPosition: Int = Int.MAX_VALUE): Int = series.count { it.position <= maxPosition }
+    fun cumulative(series: List<RecordAppearance>, maxPosition: Int = Int.MAX_VALUE): Int = series.count { it.position <= maxPosition }
 
-    fun timesAt1(series: List<ChartAppearance>): Int = series.count { it.position == 1 }
+    fun timesAt1(series: List<RecordAppearance>): Int = series.count { it.position == 1 }
 
     /** Plus longue série d'apparitions consécutives (periodIndex contigus) à une position ≤ [maxPosition]. */
-    fun longestStreak(series: List<ChartAppearance>, maxPosition: Int = Int.MAX_VALUE): Pair<Int, String?> {
+    fun longestStreak(series: List<RecordAppearance>, maxPosition: Int = Int.MAX_VALUE): Pair<Int, String?> {
         var best = 0; var bestEnd: String? = null
         var cur = 0; var prevIdx = Int.MIN_VALUE
         for (a in series) {
@@ -144,7 +144,7 @@ object RecordMath {
     }
 
     /** Plus grande remontée lors d'un retour après une absence ≥ [minAbsence] périodes : (gain, date de retour, "avant→après"). */
-    fun biggestComeback(series: List<ChartAppearance>, minAbsence: Int): RecordResult? {
+    fun biggestComeback(series: List<RecordAppearance>, minAbsence: Int): RecordResult? {
         var best: RecordResult? = null
         for (i in 1 until series.size) {
             val prev = series[i - 1]; val cur = series[i]
@@ -158,7 +158,7 @@ object RecordMath {
     }
 
     /** Nombre de périodes entre l'entrée et la première position ≤ [target] (null si jamais atteint). */
-    fun periodsToReach(series: List<ChartAppearance>, target: Int): Pair<Int, String>? {
+    fun periodsToReach(series: List<RecordAppearance>, target: Int): Pair<Int, String>? {
         if (series.isEmpty()) return null
         val entry = series.first().periodIndex
         val hit = series.firstOrNull { it.position <= target } ?: return null
@@ -166,7 +166,7 @@ object RecordMath {
     }
 
     /** Plus grande progression (jump > 0) ou chute (fall > 0) entre deux périodes consécutives. */
-    fun biggestMove(series: List<ChartAppearance>, jump: Boolean): RecordResult? {
+    fun biggestMove(series: List<RecordAppearance>, jump: Boolean): RecordResult? {
         var best: RecordResult? = null
         for (i in 1 until series.size) {
             val prev = series[i - 1]; val cur = series[i]
@@ -178,7 +178,7 @@ object RecordMath {
     }
 
     /** Sleeper hit : entré au-delà de la position 20, peak ≤ 10 atteint ≥ 3 périodes plus tard → écart entrée-peak. */
-    fun sleeperHit(series: List<ChartAppearance>): RecordResult? {
+    fun sleeperHit(series: List<RecordAppearance>): RecordResult? {
         if (series.isEmpty()) return null
         val entry = series.first()
         if (entry.position <= 20) return null
@@ -187,7 +187,7 @@ object RecordMath {
         return RecordResult(0, (entry.position - peak.position).toDouble(), peak.date, "entré #${entry.position} → peak #${peak.position} en ${peak.periodIndex - entry.periodIndex} périodes")
     }
 
-    fun biggestClimber(series: List<ChartAppearance>): RecordResult? {
+    fun biggestClimber(series: List<RecordAppearance>): RecordResult? {
         if (series.isEmpty()) return null
         val entry = series.first()
         val peak = series.minByOrNull { it.position } ?: return null
@@ -197,7 +197,7 @@ object RecordMath {
     }
 
     /** Périodes dans le Top 5 pour une entité n'ayant jamais atteint le #1 : (n, meilleure position). */
-    fun blockedTop5(series: List<ChartAppearance>): Pair<Int, Int>? {
+    fun blockedTop5(series: List<RecordAppearance>): Pair<Int, Int>? {
         val peak = series.minOfOrNull { it.position } ?: return null
         if (peak == 1) return null
         val n = series.count { it.position <= 5 }
