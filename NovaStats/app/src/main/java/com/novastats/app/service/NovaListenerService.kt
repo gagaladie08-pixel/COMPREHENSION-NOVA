@@ -180,7 +180,8 @@ class NovaListenerService : NotificationListenerService() {
                 artist = artist,
                 album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM),
                 durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { it > 0 },
-                sourceApp = c.packageName
+                sourceApp = c.packageName,
+                albumArtist = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             )
             val position = state?.position ?: 0L
             if (tracker.current?.key != key) {
@@ -279,10 +280,14 @@ class NovaListenerService : NotificationListenerService() {
     }
 
     private suspend fun updateNowPlaying(s: ScrobbleTracker.Session) {
+        val now = System.currentTimeMillis()
+        val trackId = if (s.isValidated) app.library.peekTrackId(s.key.title, s.key.artist ?: "Artiste inconnu") else null
         app.database.nowPlayingDao().upsert(
             NowPlayingEntity(
-                rawTitle = s.key.title, rawArtist = s.key.artist, startedAt = s.startedAt,
-                progressMs = s.listenedMs(System.currentTimeMillis()), sourceApp = s.key.sourceApp,
+                trackId = trackId,
+                rawTitle = s.key.title, rawArtist = s.key.artist, rawAlbum = s.key.album, startedAt = s.startedAt,
+                progressMs = s.listenedMs(now), positionMs = s.estimatedPositionMs(now), durationMs = s.key.durationMs,
+                isPlaying = s.playingSince != null, sourceApp = s.key.sourceApp,
                 scrobbleStatus = if (s.isValidated) "VALIDATED" else "PENDING"
             )
         )
@@ -294,7 +299,7 @@ class NovaListenerService : NotificationListenerService() {
      */
     private suspend fun persist(s: ScrobbleTracker.Session, ended: Boolean) {
         val artistRaw = s.key.artist ?: "Artiste inconnu"
-        val resolved = app.library.resolve(s.key.title, artistRaw, s.key.album, s.key.durationMs)
+        val resolved = app.library.resolve(s.key.title, artistRaw, s.key.album, s.key.durationMs, albumArtist = s.key.albumArtist)
         val now = System.currentTimeMillis()
         val listened = s.listenedMs(now)
         val entity = ScrobbleEntity(

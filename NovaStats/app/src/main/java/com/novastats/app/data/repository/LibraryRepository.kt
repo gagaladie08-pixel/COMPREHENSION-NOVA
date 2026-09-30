@@ -32,36 +32,52 @@ class LibraryRepository(private val db: NovaDatabase) {
         rawArtists: String,
         rawAlbum: String?,
         durationMs: Long? = null,
-        genre: String? = null
+        genre: String? = null,
+        albumArtist: String? = null
     ): Resolved {
         val normalized = TitleNormalizer.normalizeTitle(rawTitle)
-        val artistNames = (TitleNormalizer.splitArtists(rawArtists) + normalized.featuredArtists)
+        // Cascade artistes : 1) feat. dans le titre  2) champ artiste du player (lui-même "A & B, C")
+        val playerArtists = TitleNormalizer.splitArtists(rawArtists)
+        val artistNames = (playerArtists + normalized.featuredArtists)
             .distinctBy { TitleNormalizer.normalizeKey(it) }
             .ifEmpty { listOf("Artiste inconnu") }
 
+        // Remix / version AVEC artiste featuring → titre distinct, lié à l'original.
+        // Sans featuring → fusion invisible avec l'original (remix DJ/EDM inclus).
+        val playerKeys = playerArtists.map { TitleNormalizer.normalizeKey(it) }.toSet()
+        val extraFeatured = normalized.featuredArtists.filter { TitleNormalizer.normalizeKey(it) !in playerKeys }
+        val isRemixFeat = normalized.isVersion && extraFeatured.isNotEmpty()
+        val title = if (isRemixFeat) "${normalized.title} (feat. ${extraFeatured.joinToString(", ")})" else normalized.title
+
         val primaryName = artistNames.first()
-        val trackKey = TitleNormalizer.normalizeKey(normalized.title) + "|" + TitleNormalizer.normalizeKey(primaryName)
+        val trackKey = TitleNormalizer.normalizeKey(title) + "|" + TitleNormalizer.normalizeKey(primaryName)
         trackCache[trackKey]?.let { return it }
 
         val artistIds = artistNames.map { resolveArtist(it) }
         val primaryArtistId = artistIds.first()
-        val albumId = rawAlbum?.takeIf { it.isNotBlank() }?.let { resolveAlbum(it, primaryArtistId) }
+        // Album crédité uniquement s'il s'agit d'un album de l'artiste principal ; jamais pour une compilation
+        val albumId = rawAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
+            ?.let { resolveAlbum(it, primaryArtistId) }
 
-        val existing = db.trackDao().findByTitleAndArtist(normalized.title, primaryArtistId)
+        val existing = db.trackDao().findByTitleAndArtist(title, primaryArtistId)
+        val originalId = if (isRemixFeat) db.trackDao().findByTitleAndArtist(normalized.title, primaryArtistId)?.trackId else null
         val trackId = existing?.trackId ?: db.trackDao().insert(
             TrackEntity(
-                title = normalized.title,
+                title = title,
                 titleRaw = rawTitle,
                 artistId = primaryArtistId,
                 albumId = albumId,
                 durationMs = durationMs,
-                genre = genre
+                genre = genre,
+                isRemix = isRemixFeat,
+                originalTrackId = originalId
             )
         )
         if (existing != null && existing.albumId == null && albumId != null) {
             db.trackDao().update(existing.copy(albumId = albumId, durationMs = existing.durationMs ?: durationMs, genre = existing.genre ?: genre))
         }
 
+        // Chaque artiste présent (principal + featured) est lié au titre → reçoit l'écoute à poids égal
         artistIds.forEachIndexed { i, id ->
             db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = trackId, artistId = id, isPrimary = i == 0))
         }
@@ -74,20 +90,29 @@ class LibraryRepository(private val db: NovaDatabase) {
         val key = TitleNormalizer.normalizeKey(rawName)
         artistCache[key]?.let { return it }
         val name = rawName.trim()
+        // Insensible à la casse : "LISA", "Lisa" et "lisa" sont le même artiste (normalisation du texte)
         val id = db.artistDao().findByName(name)?.artistId
+            ?: db.artistDao().findByNameNoCase(name)?.artistId
             ?: db.artistDao().insert(ArtistEntity(name = name, nameRaw = rawName))
         artistCache[key] = id
         return id
     }
 
     suspend fun resolveAlbum(rawTitle: String, artistId: Long): Long {
-        val title = TitleNormalizer.normalizeTitle(rawTitle).title // "Deluxe", "Remastered" fusionnés
+        val title = TitleNormalizer.normalizeAlbumTitle(rawTitle) // Deluxe / Expanded / Japan Edition… fusionnés
         val key = TitleNormalizer.normalizeKey(title) + "|" + artistId
         albumCache[key]?.let { return it }
         val id = db.albumDao().findByTitleAndArtist(title, artistId)?.albumId
             ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = artistId))
         albumCache[key] = id
         return id
+    }
+
+    /** Identifiant du titre s'il est déjà connu (cache mémoire uniquement — pas d'accès disque, pas de création). */
+    fun peekTrackId(rawTitle: String, rawArtists: String): Long? {
+        val normalized = TitleNormalizer.normalizeTitle(rawTitle)
+        val primary = (TitleNormalizer.splitArtists(rawArtists) + normalized.featuredArtists).firstOrNull() ?: "Artiste inconnu"
+        return trackCache[TitleNormalizer.normalizeKey(normalized.title) + "|" + TitleNormalizer.normalizeKey(primary)]?.trackId
     }
 
     fun clearCaches() { artistCache.clear(); albumCache.clear(); trackCache.clear() }

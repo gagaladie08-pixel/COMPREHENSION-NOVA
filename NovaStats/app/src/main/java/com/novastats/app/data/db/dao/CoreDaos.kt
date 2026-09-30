@@ -73,7 +73,7 @@ interface TrackDao {
      */
     @Query(
         """
-        SELECT t.*, a.name AS artist_name, al.title AS album_title,
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, al.title AS album_title,
                t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms
         FROM tracks t
         JOIN artists a ON a.artist_id = t.artist_id
@@ -90,7 +90,7 @@ interface TrackDao {
      */
     @Query(
         """
-        SELECT t.*, a.name AS artist_name, al.title AS album_title,
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, al.title AS album_title,
                SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
         FROM daily_plays d
         JOIN tracks t ON t.track_id = d.track_id
@@ -103,6 +103,61 @@ interface TrackDao {
         """
     )
     fun topForPeriod(from: String, to: String, limit: Int = 300): Flow<List<RankedTrack>>
+
+    /** Position d'un titre dans le classement d'une période (null = non classé). Égalité départagée par le temps. */
+    @Query(
+        """
+        SELECT (SELECT COUNT(*) + 1 FROM (
+                    SELECT track_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+                    WHERE date BETWEEN :from AND :to GROUP BY track_id) x
+                WHERE x.p > me.p OR (x.p = me.p AND x.d > me.d))
+        FROM (SELECT SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+              WHERE track_id = :trackId AND date BETWEEN :from AND :to) me
+        WHERE me.p > 0
+        """
+    )
+    suspend fun rankForPeriod(trackId: Long, from: String, to: String): Int?
+
+    @Query(
+        """
+        SELECT (SELECT COUNT(*) + 1 FROM tracks t WHERE t.play_count > me.p OR (t.play_count = me.p AND t.total_duration_ms > me.d))
+        FROM (SELECT play_count AS p, total_duration_ms AS d FROM tracks WHERE track_id = :trackId) me
+        WHERE me.p > 0
+        """
+    )
+    suspend fun rankAllTime(trackId: Long): Int?
+
+    /** Titres d'un artiste (principal ou featuring), les plus écoutés d'abord. */
+    @Query(
+        """
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name,
+               al.title AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms
+        FROM tracks t JOIN track_artists ta ON ta.track_id = t.track_id
+        LEFT JOIN albums al ON al.album_id = t.album_id
+        WHERE ta.artist_id = :artistId AND t.play_count > 0
+        ORDER BY t.play_count DESC, t.total_duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun topOfArtist(artistId: Long, limit: Int = 5): List<RankedTrack>
+
+    /** Titres écoutés d'un album, les plus écoutés d'abord. */
+    @Query(
+        """
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name,
+               (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title,
+               t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms
+        FROM tracks t WHERE t.album_id = :albumId AND t.play_count > 0
+        ORDER BY t.play_count DESC, t.total_duration_ms DESC
+        """
+    )
+    suspend fun ofAlbum(albumId: Long): List<RankedTrack>
+
+    /** Radar : titres les plus proches de leur prochain palier de certification (calcul du reste côté Kotlin). */
+    @Query("SELECT * FROM tracks WHERE play_count > 0 ORDER BY play_count DESC LIMIT :limit")
+    fun mostPlayed(limit: Int = 200): Flow<List<TrackEntity>>
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE play_count > 0")
+    suspend fun countPlayed(): Int
 
     /** Recalcule les agrégats des titres à partir des scrobbles confirmés (après import / édition). */
     @Query(
@@ -141,6 +196,9 @@ interface ArtistDao {
 
     @Query("SELECT * FROM artists WHERE name = :name LIMIT 1")
     suspend fun findByName(name: String): ArtistEntity?
+
+    @Query("SELECT * FROM artists WHERE name = :name COLLATE NOCASE LIMIT 1")
+    suspend fun findByNameNoCase(name: String): ArtistEntity?
 
     @Query("SELECT COUNT(*) FROM artists")
     fun countFlow(): Flow<Int>
@@ -192,8 +250,7 @@ interface ArtistDao {
                           WHERE ta.artist_id = artists.artist_id AND s.status = 'CONFIRMED'),
             distinct_tracks = (SELECT COUNT(DISTINCT ta.track_id) FROM track_artists ta JOIN tracks t ON t.track_id = ta.track_id
                           WHERE ta.artist_id = artists.artist_id AND t.play_count > 0),
-            distinct_albums = (SELECT COUNT(DISTINCT t.album_id) FROM track_artists ta JOIN tracks t ON t.track_id = ta.track_id
-                          WHERE ta.artist_id = artists.artist_id AND t.play_count > 0 AND t.album_id IS NOT NULL),
+            distinct_albums = (SELECT COUNT(*) FROM albums al WHERE al.artist_id = artists.artist_id AND al.play_count > 0),
             first_played_at = (SELECT MIN(s.started_at) FROM scrobbles s JOIN track_artists ta ON ta.track_id = s.track_id
                           WHERE ta.artist_id = artists.artist_id AND s.status = 'CONFIRMED'),
             last_played_at = (SELECT MAX(s.started_at) FROM scrobbles s JOIN track_artists ta ON ta.track_id = s.track_id
@@ -201,6 +258,30 @@ interface ArtistDao {
         """
     )
     suspend fun recomputeAggregates()
+
+    @Query(
+        """
+        SELECT (SELECT COUNT(*) + 1 FROM (
+                    SELECT ta.artist_id, SUM(d.play_count) AS p, SUM(d.total_duration_ms) AS d
+                    FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id
+                    WHERE d.date BETWEEN :from AND :to GROUP BY ta.artist_id) x
+                WHERE x.p > me.p OR (x.p = me.p AND x.d > me.d))
+        FROM (SELECT SUM(d.play_count) AS p, SUM(d.total_duration_ms) AS d
+              FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id
+              WHERE ta.artist_id = :artistId AND d.date BETWEEN :from AND :to) me
+        WHERE me.p > 0
+        """
+    )
+    suspend fun rankForPeriod(artistId: Long, from: String, to: String): Int?
+
+    /** Écoutes d'un artiste sur une période (main + featuring). */
+    @Query(
+        """
+        SELECT IFNULL(SUM(d.play_count), 0) FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id
+        WHERE ta.artist_id = :artistId AND d.date BETWEEN :from AND :to
+        """
+    )
+    suspend fun playsForPeriod(artistId: Long, from: String, to: String): Int
 
     @Query("UPDATE artists SET pantheon_status = :status, pantheon_date = :date WHERE artist_id = :artistId")
     suspend fun setPantheonStatus(artistId: Long, status: String, date: Long)
@@ -261,6 +342,26 @@ interface AlbumDao {
         """
     )
     fun topForPeriod(from: String, to: String, limit: Int = 300): Flow<List<RankedAlbum>>
+
+    @Query(
+        """
+        SELECT (SELECT COUNT(*) + 1 FROM (
+                    SELECT album_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+                    WHERE album_id IS NOT NULL AND date BETWEEN :from AND :to GROUP BY album_id) x
+                WHERE x.p > me.p OR (x.p = me.p AND x.d > me.d))
+        FROM (SELECT SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+              WHERE album_id = :albumId AND date BETWEEN :from AND :to) me
+        WHERE me.p > 0
+        """
+    )
+    suspend fun rankForPeriod(albumId: Long, from: String, to: String): Int?
+
+    /** Albums d'un artiste présents dans la bibliothèque (au moins une écoute). */
+    @Query("SELECT * FROM albums WHERE artist_id = :artistId AND play_count > 0 ORDER BY play_count DESC, total_duration_ms DESC")
+    suspend fun ofArtist(artistId: Long): List<AlbumEntity>
+
+    @Query("SELECT al.*, a.name AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.play_count > 0 ORDER BY al.play_count DESC LIMIT :limit")
+    fun mostPlayed(limit: Int = 100): Flow<List<RankedAlbum>>
 
     /** Écoutes d'un album = somme des écoutes de tous ses titres. */
     @Query(

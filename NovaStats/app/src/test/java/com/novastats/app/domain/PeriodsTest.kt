@@ -14,6 +14,18 @@ class PeriodsTest {
     }
 
     @Test
+    fun `stats weekly = 7 derniers jours glissants, billboard weekly = semaine ISO`() {
+        val anchor = LocalDate.of(2026, 9, 30)
+        val stats = Dates.statsRangeFor(Period.WEEKLY, anchor)
+        assertEquals(LocalDate.of(2026, 9, 24), stats.from)
+        assertEquals(anchor, stats.to)
+        assertEquals(LocalDate.of(2026, 9, 28), Dates.rangeFor(Period.WEEKLY, anchor).from)
+        assertEquals(anchor, Dates.statsRangeFor(Period.DAILY, anchor).from)
+        assertEquals("2026-09-01", Dates.statsRangeFor(Period.MONTHLY, anchor).fromIso)
+        assertEquals("2026-01-01", Dates.statsRangeFor(Period.YEARLY, anchor).fromIso)
+    }
+
+    @Test
     fun `mois et annee calendaires`() {
         assertEquals("2026-02-01", Dates.monthOf(LocalDate.of(2026, 2, 14)).fromIso)
         assertEquals("2026-02-28", Dates.monthOf(LocalDate.of(2026, 2, 14)).toIso)

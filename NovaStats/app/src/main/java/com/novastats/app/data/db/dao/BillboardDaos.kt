@@ -153,7 +153,7 @@ interface BillboardDao {
 
     @Query(
         """
-        SELECT st.*, t.title AS title, a.name AS artist_name, t.cover_url AS cover_url
+        SELECT st.*, t.title AS title, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, t.cover_url AS cover_url
         FROM snapshot_tracks st
         JOIN tracks t ON t.track_id = st.track_id
         JOIN artists a ON a.artist_id = t.artist_id

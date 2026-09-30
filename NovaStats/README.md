@@ -69,8 +69,8 @@ app/src/main/java/com/novastats/app/
 | 🗄️ Base de données (34 tables) | ✅ Entités + DAOs |
 | 📥 Import JSON v1 + recalcul complet | ✅ |
 | 🎵 Détection v3.0 | 🟡 Tracker + service MediaSession/Notification (watchdog WorkManager, guide constructeur, filtres podcast à brancher) |
-| 🏠 Accueil | 🟡 Sections 1, 2, 3, 7, 8 (actualités, prochaines certifs, records à venir) |
-| 📊 Stats | 🟡 Classements Top 300 × 5 périodes + bandeau (popups détaillées à venir) |
+| 🏠 Accueil | ✅ 8 sections : lecture en cours (pochette, progression, source, statut), aujourd'hui, top du moment, actualités, prochaines certifs, records, récents, streak |
+| 📊 Stats | ✅ Titres/Artistes/Albums × 5 périodes (Weekly = 7 jours glissants), recherche, bandeau, popups détaillées (appui long) |
 | 💎 Certifications | 🟡 Règles + calcul + dates rétroactives (écran à venir) |
 | 👑 Panthéon | 🟡 Règles + calcul (écran à venir) |
 | 🏆 Billboard | ✅ Hot 100 / Artist 50 / 75 Albums × 5 périodes, snapshots figés, navigation historique, fiche détaillée, recherche |

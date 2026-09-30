@@ -157,11 +157,46 @@ object TitleNormalizer {
         "audio", "video", "mv", "m/v", "hd", "4k"
     )
 
+    /** Éditions d'album fusionnées avec l'album principal (Deluxe, Expanded, Japan/UK Edition, Platinum, International…). */
+    val ALBUM_EDITION_KEYWORDS = listOf(
+        "deluxe", "expanded", "edition", "édition", "version", "remaster", "remastered", "anniversary", "bonus",
+        "international", "japan", "japanese", "korean", "uk", "us", "eu", "platinum", "special", "complete", "explicit",
+        "clean", "standard", "tour", "repackage", "reissue", "extended", "super deluxe", "digital", "limited", "collector"
+    )
+
+    /**
+     * Normalise un titre d'album : "Born Pink (Japan Edition)" / "Born Pink - Deluxe" → "Born Pink".
+     * Les suffixes qui NE sont PAS des marqueurs d'édition ("Vol. 2", "Part 1") sont conservés.
+     */
+    fun normalizeAlbumTitle(raw: String): String {
+        var title = raw.trim()
+        title = bracketRegex.replace(title) { m ->
+            val inner = m.groupValues[1].lowercase()
+            if (ALBUM_EDITION_KEYWORDS.any { inner.contains(it) }) "" else m.value
+        }
+        dashSuffixRegex.find(title)?.let { m ->
+            val suffix = m.groupValues[1].lowercase()
+            if (ALBUM_EDITION_KEYWORDS.any { suffix.contains(it) }) title = title.removeSuffix(m.value)
+        }
+        // Suffixe sans séparateur : "Born Pink Deluxe Edition", "Thriller 25th Anniversary"
+        val words = title.split(' ').toMutableList()
+        while (words.size > 1) {
+            val last = words.last().lowercase().trim(',', '.')
+            if (last in ALBUM_EDITION_KEYWORDS || Regex("""\d+(th|st|nd|rd)""").matches(last)) words.removeAt(words.lastIndex) else break
+        }
+        title = spaceRegex.replace(words.joinToString(" "), " ").trim()
+        return title.ifBlank { raw.trim() }
+    }
+
     private val junkWords = listOf("™", "®", "official", "Official")
 
     private val bracketRegex = Regex("""\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]""")
     private val dashSuffixRegex = Regex("""\s+[-–—]\s+(.+)$""")
-    private val featRegex = Regex("""(?i)\s*[\(\[]?\s*(feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]?""")
+    /**
+     * Featuring : "(feat. X)", "[ft. X]", "(with X)" entre parenthèses/crochets, ou "feat./ft./featuring X" nu
+     * jusqu'à la fin du titre / prochaine parenthèse. "with" nu n'est pas traité ("Stay With Me" reste un titre).
+     */
+    private val featRegex = Regex("""(?i)(?:\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]|\s+(?:feat\.?|ft\.?|featuring)\s+(.+?)(?=\s*[\(\[]|\s+[-–—]\s|$))""")
     private val spaceRegex = Regex("""\s+""")
 
     /**
@@ -172,28 +207,38 @@ object TitleNormalizer {
     fun normalizeTitle(raw: String): NormalizedTitle {
         var title = raw.trim()
         val featured = mutableListOf<String>()
+        var isVersion = false
 
-        featRegex.find(title)?.let { m ->
-            featured += splitArtists(m.groupValues[2])
-            title = title.replace(m.value, "")
+        // Toutes les occurrences : "(feat. A) [ft. B]", "with C"…
+        featRegex.findAll(title).toList().forEach { m ->
+            featured += splitArtists(m.groupValues[1].ifEmpty { m.groupValues[2] })
         }
+        title = featRegex.replace(title, "")
 
         // Parenthèses / crochets contenant un mot-clé de version → supprimés
         title = bracketRegex.replace(title) { m ->
             val inner = m.groupValues[1].lowercase()
-            if (VERSION_KEYWORDS.any { inner.contains(it) }) "" else m.value
+            if (VERSION_KEYWORDS.any { inner.contains(it) }) { isVersion = true; "" } else m.value
         }
         // Suffixe " - Remastered 2011", " - Live" …
         dashSuffixRegex.find(title)?.let { m ->
             val suffix = m.groupValues[1].lowercase()
-            if (VERSION_KEYWORDS.any { suffix.contains(it) }) title = title.removeSuffix(m.value)
+            if (VERSION_KEYWORDS.any { suffix.contains(it) }) { isVersion = true; title = title.removeSuffix(m.value) }
         }
         junkWords.forEach { title = title.replace(it, "") }
         title = spaceRegex.replace(title, " ").trim()
-        return NormalizedTitle(title = title.ifBlank { raw.trim() }, featuredArtists = featured)
+        return NormalizedTitle(title = title.ifBlank { raw.trim() }, featuredArtists = featured.distinctBy { normalizeKey(it) }, isVersion = isVersion)
     }
 
     /** Sépare "A, B & C feat. D" en liste d'artistes. */
+    /** Compilations ("Various Artists", "NOW That's What I Call Music"…) : jamais de crédit album. */
+    private val compilationRegex = Regex("""(?i)(various artists|artistes divers|multi-interpr|now that'?s what i call|nrj music awards|nrj hits|hits? 20\d\d|top hits|compilation|\bvol(ume)?\.? \d+\b.*(hits|party|dance))""")
+
+    fun isCompilation(albumTitle: String?, albumArtist: String?): Boolean {
+        if (albumArtist != null && compilationRegex.containsMatchIn(albumArtist)) return true
+        return albumTitle != null && compilationRegex.containsMatchIn(albumTitle)
+    }
+
     fun splitArtists(raw: String): List<String> =
         raw.split(Regex("""(?i)\s*(,|&|;|/|\+| x | feat\.? | ft\.? | featuring | with | and )\s*"""))
             .map { it.trim().trim('(', ')', '[', ']') }
@@ -227,7 +272,12 @@ object TitleNormalizer {
     }
 }
 
-data class NormalizedTitle(val title: String, val featuredArtists: List<String>)
+/**
+ * @property title           titre nettoyé (versions fusionnées, feat. extraits)
+ * @property featuredArtists artistes extraits du titre ("feat.", "ft.", "with"…)
+ * @property isVersion       le titre brut portait un marqueur de version (remix, edit, live…)
+ */
+data class NormalizedTitle(val title: String, val featuredArtists: List<String>, val isVersion: Boolean = false)
 
 /* =========================== DÉTECTION — Validation d'écoute =========================== */
 

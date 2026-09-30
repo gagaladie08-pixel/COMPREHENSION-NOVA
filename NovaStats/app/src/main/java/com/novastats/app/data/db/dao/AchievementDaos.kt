@@ -1,6 +1,7 @@
 package com.novastats.app.data.db.dao
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -29,6 +30,11 @@ import com.novastats.app.data.db.entity.SnapshotTrackEntity
 import com.novastats.app.data.db.entity.UserCorrectionEntity
 import kotlinx.coroutines.flow.Flow
 
+/* ===== Lignes "Dernières actualités" (Accueil §4) ===== */
+data class CertificationNews(@Embedded val h: CertificationHistoryEntity, val name: String?)
+data class PantheonNews(@Embedded val h: PantheonHistoryEntity, val name: String?)
+data class HallOfFameNews(@Embedded val h: HallOfFameEntity, val name: String?)
+
 @Dao
 interface CertificationDao {
     @Upsert suspend fun upsert(cert: CertificationEntity)
@@ -38,6 +44,11 @@ interface CertificationDao {
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") suspend fun current(entityId: Long, type: String): CertificationEntity?
     @Query("SELECT * FROM certification_history WHERE entity_id = :entityId AND entity_type = :type ORDER BY certified_at") suspend fun history(entityId: Long, type: String): List<CertificationHistoryEntity>
     @Query("SELECT COUNT(*) FROM certifications") fun countFlow(): Flow<Int>
+    @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
+    @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id)
+                                  WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id)
+                                  ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM certification_history h ORDER BY h.certified_at DESC LIMIT :limit")
+    fun latestHistory(limit: Int = 10): Flow<List<CertificationNews>>
     @Query("DELETE FROM certifications") suspend fun clear()
     @Query("DELETE FROM certification_history") suspend fun clearHistory()
 }
@@ -50,6 +61,8 @@ interface PantheonDao {
     @Query("SELECT * FROM pantheon_status ORDER BY CASE current_status WHEN 'MYTHIQUE' THEN 0 WHEN 'LEGENDE' THEN 1 WHEN 'MEGASTAR' THEN 2 WHEN 'SUPERSTAR' THEN 3 ELSE 4 END, status_date")
     fun all(): Flow<List<PantheonStatusEntity>>
     @Query("SELECT * FROM pantheon_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun history(artistId: Long): List<PantheonHistoryEntity>
+    @Query("SELECT h.*, (SELECT name FROM artists WHERE artist_id = h.artist_id) AS name FROM pantheon_history h ORDER BY h.date_reached DESC LIMIT :limit")
+    fun latestHistory(limit: Int = 10): Flow<List<PantheonNews>>
     @Query("DELETE FROM pantheon_status") suspend fun clear()
     @Query("DELETE FROM pantheon_history") suspend fun clearHistory()
 }
@@ -96,6 +109,10 @@ interface HallOfFameDao {
     @Query("SELECT * FROM hall_of_fame WHERE period_type = :period AND entity_type = :entityType ORDER BY entry_date DESC") fun list(period: String, entityType: String): Flow<List<HallOfFameEntity>>
     @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType") suspend fun exists(entityId: Long, entityType: String, period: String, entryType: String): Int
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
+    @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id)
+                                  WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id)
+                                  ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM hall_of_fame h ORDER BY h.created_at DESC LIMIT :limit")
+    fun latest(limit: Int = 10): Flow<List<HallOfFameNews>>
     @Query("DELETE FROM hall_of_fame") suspend fun clear()
     @Query("DELETE FROM hall_of_fame_badges") suspend fun clearBadges()
 }

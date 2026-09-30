@@ -17,7 +17,10 @@ class ScrobbleTracker(
     private var thresholdSec: Int = ScrobbleRules.DEFAULT_THRESHOLD_SEC,
     private val clock: () -> Long = System::currentTimeMillis
 ) {
-    data class TrackKey(val title: String, val artist: String?, val album: String?, val durationMs: Long?, val sourceApp: String) {
+    data class TrackKey(
+        val title: String, val artist: String?, val album: String?, val durationMs: Long?, val sourceApp: String,
+        val albumArtist: String? = null
+    ) {
         val display get() = if (artist.isNullOrBlank()) title else "$artist — $title"
     }
 
@@ -30,9 +33,15 @@ class ScrobbleTracker(
         var pausedAt: Long? = null,
         var validatedAt: Long? = null,
         var lastPositionMs: Long = 0,
+        var lastPositionAt: Long = 0,
         val detectionSource: String
     ) {
         fun listenedMs(now: Long): Long = accumulatedMs + (playingSince?.let { now - it } ?: 0L)
+        /** Position estimée dans le morceau (dernière position connue + temps écoulé si en lecture). */
+        fun estimatedPositionMs(now: Long): Long {
+            val p = if (playingSince != null && lastPositionAt > 0) lastPositionMs + (now - lastPositionAt) else lastPositionMs
+            return key.durationMs?.let { p.coerceAtMost(it) } ?: p
+        }
         val isValidated get() = validatedAt != null
     }
 
@@ -60,12 +69,12 @@ class ScrobbleTracker(
         if (cur != null && cur.key == key) {
             // Même titre : détecter le loop (retour en début alors qu'on était avancé)
             val looped = positionMs < 3_000 && cur.lastPositionMs > 15_000 && (cur.key.durationMs == null || cur.lastPositionMs > cur.key.durationMs / 2)
-            if (!looped) { cur.lastPositionMs = positionMs; return events }
+            if (!looped) { cur.lastPositionMs = positionMs; cur.lastPositionAt = now; return events }
             events += end(cur, now)
         } else if (cur != null) {
             events += end(cur, now) // crossfade / changement : clôture de A
         }
-        val s = Session(key = key, startedAt = now, playingSince = if (isPlaying) now else null, pausedAt = if (isPlaying) null else now, lastPositionMs = positionMs, detectionSource = source)
+        val s = Session(key = key, startedAt = now, playingSince = if (isPlaying) now else null, pausedAt = if (isPlaying) null else now, lastPositionMs = positionMs, lastPositionAt = now, detectionSource = source)
         current = s
         events += Event.Started(s)
         return events
@@ -75,7 +84,7 @@ class ScrobbleTracker(
     fun onPlaybackStateChanged(isPlaying: Boolean, positionMs: Long? = null): List<Event> {
         val now = clock()
         val cur = current ?: return emptyList()
-        positionMs?.let { cur.lastPositionMs = it }
+        positionMs?.let { cur.lastPositionMs = it; cur.lastPositionAt = now }
         return if (isPlaying) resume(cur, now) else pause(cur, now)
     }
 

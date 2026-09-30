@@ -20,7 +20,13 @@ data class NowPlayingEntity(
     @ColumnInfo(name = "raw_title") val rawTitle: String? = null,
     @ColumnInfo(name = "raw_artist") val rawArtist: String? = null,
     @ColumnInfo(name = "started_at") val startedAt: Long? = null,
+    /** Temps réellement écouté (validation du seuil) */
     @ColumnInfo(name = "progress_ms") val progressMs: Long = 0,
+    /** Position dans le morceau + durée (barre de progression de l'Accueil) */
+    @ColumnInfo(name = "position_ms", defaultValue = "0") val positionMs: Long = 0,
+    @ColumnInfo(name = "duration_ms") val durationMs: Long? = null,
+    @ColumnInfo(name = "is_playing", defaultValue = "0") val isPlaying: Boolean = false,
+    @ColumnInfo(name = "raw_album") val rawAlbum: String? = null,
     @ColumnInfo(name = "source_app") val sourceApp: String? = null,
     /** PENDING / VALIDATED / IDLE */
     @ColumnInfo(name = "scrobble_status") val scrobbleStatus: String = "IDLE",

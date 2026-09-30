@@ -45,7 +45,16 @@ object Dates {
     fun yearOf(date: LocalDate) = DateRange(date.withDayOfYear(1), date.with(TemporalAdjusters.lastDayOfYear()))
     fun isoWeekNumber(date: LocalDate): Int = date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
 
-    /** Intervalle couvert par une période, ancré sur [anchor] (aujourd'hui par défaut). */
+    /**
+     * Intervalle de l'onglet Stats : Daily = aujourd'hui, Weekly = 7 derniers jours (glissant),
+     * Monthly = mois calendaire, Yearly = année calendaire, Global = tout.
+     */
+    fun statsRangeFor(period: Period, anchor: LocalDate = today()): DateRange = when (period) {
+        Period.WEEKLY -> DateRange(anchor.minusDays(6), anchor)
+        else -> rangeFor(period, anchor)
+    }
+
+    /** Intervalle calendaire couvert par une période (Billboard), ancré sur [anchor] (aujourd'hui par défaut). */
     fun rangeFor(period: Period, anchor: LocalDate = today()): DateRange = when (period) {
         Period.DAILY -> DateRange(anchor, anchor)
         Period.WEEKLY -> weekOf(anchor)

@@ -63,7 +63,7 @@ import com.novastats.app.data.db.entity.*
         // Import/Export
         MigrationLogEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -103,11 +103,21 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v3 : position / durée / état de lecture dans now_playing (barre de progression de l'Accueil). */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE now_playing ADD COLUMN position_ms INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE now_playing ADD COLUMN duration_ms INTEGER")
+                db.execSQL("ALTER TABLE now_playing ADD COLUMN is_playing INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE now_playing ADD COLUMN raw_album TEXT")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

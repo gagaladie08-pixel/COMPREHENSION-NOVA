@@ -83,7 +83,13 @@ Service / Import ──► scrobbles (CONFIRMED)
 
 ## Écarts volontaires par rapport à la spec
 
-- `now_playing` a deux colonnes supplémentaires `raw_title` / `raw_artist` pour afficher immédiatement le titre
-  avant sa résolution en base.
+- `now_playing` a des colonnes supplémentaires `raw_title` / `raw_artist` / `raw_album` pour afficher immédiatement
+  le titre avant sa résolution en base, et `position_ms` / `duration_ms` / `is_playing` (v3) pour la barre de
+  progression de l'Accueil.
+- **Featurings** : chaque artiste d'un titre (principal + featured, extraits du titre `feat./ft./with` puis du champ
+  artiste du player) est lié dans `track_artists` et reçoit l'écoute à poids égal (Stats, Billboard, Panthéon).
+  L'album n'est crédité qu'à l'artiste principal (`albums.artist_id`) ; les compilations ne créditent jamais d'album ;
+  les éditions Deluxe / Japan / UK / Platinum… sont fusionnées ; un remix n'est un titre distinct (`is_remix`,
+  `original_track_id`) que s'il porte un artiste featuring identifié.
 - Les index d'unicité (`scrobbles(track_id, started_at)`, `artists(name)`, `albums(title, artist_id)`) portent la
   règle "doublons ignorés à l'import" et la fusion des entités.

@@ -1,6 +1,8 @@
 package com.novastats.app.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,13 +108,18 @@ fun CoverArt(url: String?, fallbackText: String, size: Int = 48, circle: Boolean
     }
 }
 
-/** Ligne de classement générique (position, pochette, titre, sous-titre, écoutes). */
+/** Ligne de classement générique (position, pochette, titre, sous-titre, écoutes). Appui long → popup de détail. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun RankRow(position: Int, title: String, subtitle: String?, plays: Int, durationMs: Long, coverUrl: String?, circle: Boolean = false) {
+fun RankRow(
+    position: Int, title: String, subtitle: String?, plays: Int, durationMs: Long, coverUrl: String?, circle: Boolean = false,
+    onClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null
+) {
     val theme = Nova.theme
     val posColor = when (position) { 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; 3 -> Color(0xFFCD7F32); else -> theme.textSecondary }
+    val gesture = if (onClick != null || onLongClick != null) Modifier.combinedClickable(onClick = { onClick?.invoke() }, onLongClick = onLongClick) else Modifier
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().then(gesture).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
