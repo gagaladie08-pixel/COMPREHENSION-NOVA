@@ -154,8 +154,12 @@ class NovaListenerService : NotificationListenerService() {
 
     private fun onSession(c: MediaController, metadata: MediaMetadata?, state: PlaybackState?) {
         try {
-            val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
-                ?: metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { it.isNotBlank() }
+            if (metadata == null) {
+                DetectionState.log("${c.packageName} : pas de métadonnées (état ${stateName(state)})")
+                return
+            }
+            val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
+                ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { it.isNotBlank() }
             if (title == null) {
                 DetectionState.log("${c.packageName} : pas de titre dans les métadonnées (état ${stateName(state)})")
                 return
