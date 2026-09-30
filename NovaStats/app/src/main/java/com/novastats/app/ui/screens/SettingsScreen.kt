@@ -88,8 +88,8 @@ fun SettingsScreen() {
                 val report = withContext(Dispatchers.IO) {
                     val backup = context.contentResolver.openInputStream(uri)!!.use { LegacyBackupImporter.parse(it) }
                     LegacyBackupImporter.import(app.database, backup, threshold) { importStatus = it }
-                    EnrichmentWorker.enqueue(context)
                 }
+                EnrichmentWorker.enqueue(context)
                 importStatus = report.summary()
             } catch (e: Exception) {
                 importStatus = "❌ Import échoué : ${e.message}"
