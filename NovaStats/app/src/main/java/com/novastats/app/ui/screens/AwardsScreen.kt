@@ -113,7 +113,7 @@ fun AwardsScreen() {
     LaunchedEffect(year, alreadyRevealed, awards.isEmpty()) {
         if (alreadyRevealed == null || awards.isEmpty()) return@LaunchedEffect
         if (alreadyRevealed) { revealedCount = AwardCategory.entries.size; return@LaunchedEffect }
-        for (i in 1..AwardCategory.entries.size) { delay(if (i == 1) 400 else 800); revealedCount = i }
+        for (i in 1..AwardCategory.entries.size) { delay(if (i == 1) 400 else 800); revealedCount = i; com.novastats.app.ui.theme.ThemeEvents.unlocked() }
         app.settings.markAwardsRevealed(year)
     }
 

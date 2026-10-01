@@ -336,9 +336,27 @@ private fun AppearancePage() {
                         }
                     }
                 }
-                val current = NovaThemes.ALL.firstOrNull { it.id == themeId } ?: NovaThemes.DEFAULT
-                Spacer(Modifier.height(8.dp))
-                Text("${current.emoji} ${current.name} — ${current.effects}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        val current = NovaThemes.ALL.firstOrNull { it.id == themeId } ?: NovaThemes.DEFAULT
+        SectionTitle("${current.emoji} ${current.name}")
+        NovaCard {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(current.inspiration, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("🔤 Titres : ${current.titleFont} · Corps : ${current.bodyFont}", color = theme.text, style = MaterialTheme.typography.bodyMedium)
+                Text("✨ Effet signature : ${current.effects}", color = theme.text, style = MaterialTheme.typography.bodyMedium)
+                Text("🎞️ Transition : ${current.transitionLabel}", color = theme.text, style = MaterialTheme.typography.bodyMedium)
+                Text("🧩 Icônes : ${current.iconsDescription}", color = theme.text, style = MaterialTheme.typography.bodyMedium)
+                val fontsOnline = remember { com.novastats.app.ui.theme.NovaFonts.isProviderAvailable(app) }
+                if (!fontsOnline) Text("⚠️ Google Play Services Fonts indisponible : polices système de remplacement.", color = theme.accent, style = MaterialTheme.typography.labelSmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("Chanson" to current.primary, "Album" to current.secondary, "Artiste" to current.glowSecondary, "Accent" to current.accent).forEach { (label, c) ->
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(Modifier.size(22.dp).background(c, CircleShape).border(1.dp, theme.textSecondary.copy(alpha = 0.3f), CircleShape))
+                            Text(label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
             }
         }
         SectionTitle("✨ Confort")

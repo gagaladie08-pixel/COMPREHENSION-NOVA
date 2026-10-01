@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novastats.app.ui.theme.NovaTheme
 import com.novastats.app.ui.theme.NovaThemes
+import com.novastats.app.ui.theme.NovaFonts
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
@@ -123,9 +124,10 @@ fun ThemeStepScreen(audio: ObAudio, initial: NovaTheme, onThemeSelected: (NovaTh
             Spacer(Modifier.height(8.dp))
             AnimatedContent(targetState = selected, transitionSpec = { (fadeIn(tween(250)) + slideInVertically(tween(250)) { it / 2 }) togetherWith fadeOut(tween(120)) }, label = "name") { t ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 28.dp)) {
-                    Text("${t.emoji} ${t.name}", color = t.primary, fontFamily = ObFonts.cinzel, fontWeight = FontWeight.Bold, fontSize = 24.sp, letterSpacing = 2.sp)
+                    Text("${t.emoji} ${t.name}", color = t.primary, fontFamily = NovaFonts.family(t.titleFont), fontWeight = FontWeight.Bold, fontSize = 24.sp, letterSpacing = 2.sp)
                     Text(themeDescriptions[t.id] ?: t.effects, color = t.textSecondary, fontFamily = ObFonts.raleway, fontStyle = FontStyle.Italic, fontWeight = FontWeight.Light, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
-                    Text(t.effects, color = t.textSecondary.copy(alpha = 0.6f), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 2.dp))
+                    Text("✨ ${t.effects}", color = t.textSecondary.copy(alpha = 0.7f), fontFamily = NovaFonts.family(t.bodyFont), fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+                    Text("🔤 ${t.titleFont} · ${t.bodyFont}   🎞️ ${t.transitionLabel}", color = t.textSecondary.copy(alpha = 0.55f), fontFamily = NovaFonts.family(t.bodyFont), fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 2.dp))
                 }
             }
             Spacer(Modifier.height(22.dp))
@@ -151,11 +153,14 @@ fun LivePreview(t: NovaTheme, modifier: Modifier = Modifier) {
     val background by animateColorAsState(t.background, tween(300), label = "b")
     val progress by rememberInfiniteTransition(label = "lp").animateFloat(0.55f, 0.95f, infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "lpa")
     val secs = (154 + (progress - 0.55f) / 0.4f * 48).toInt()
-    Column(
-        modifier.clip(RoundedCornerShape(14.dp)).background(background).border(1.dp, primary.copy(alpha = 0.6f), RoundedCornerShape(14.dp)).pulsingGlow(primary, 0.1f, 0.35f, 1800, 12.dp).padding(12.dp)
-    ) {
+    val titleFont = NovaFonts.family(t.titleFont)
+    val bodyFont = NovaFonts.family(t.bodyFont)
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(background).border(1.dp, primary.copy(alpha = 0.6f), RoundedCornerShape(14.dp)).pulsingGlow(primary, 0.1f, 0.35f, 1800, 12.dp)) {
+    // Effet signature continu du thème (scanlines, bulles, paillettes, pulsation, motif…) dans l'aperçu
+    com.novastats.app.ui.theme.ThemeSignatureOverlay(t, Modifier.matchParentSize())
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("NovaStats", color = primary, fontWeight = FontWeight.Black, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text("NovaStats", color = primary, fontFamily = titleFont, fontWeight = FontWeight.Black, fontSize = 15.sp, modifier = Modifier.weight(1f))
             Text("⚙️", fontSize = 13.sp)
         }
         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -164,8 +169,8 @@ fun LivePreview(t: NovaTheme, modifier: Modifier = Modifier) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(textSec.copy(alpha = 0.3f)))
         Spacer(Modifier.height(6.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(surface).padding(8.dp)) {
-            Text("🎵 En cours — Blinding Lights", color = text, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-            Text("The Weeknd · Spotify", color = textSec, fontSize = 10.sp)
+            Text("🎵 En cours — Blinding Lights", color = text, fontFamily = bodyFont, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Text("The Weeknd · Spotify", color = textSec, fontFamily = bodyFont, fontSize = 10.sp)
             Spacer(Modifier.height(4.dp))
             Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(textSec.copy(alpha = 0.25f))) {
                 Box(Modifier.fillMaxWidth(progress).height(5.dp).background(Brush.horizontalGradient(listOf(primary, secondary))))
@@ -173,10 +178,11 @@ fun LivePreview(t: NovaTheme, modifier: Modifier = Modifier) {
             Text("${secs / 60}:${String.format("%02d", secs % 60)} / 3:22", color = textSec, fontSize = 9.sp, modifier = Modifier.padding(top = 2.dp))
         }
         Spacer(Modifier.height(6.dp))
-        Text("Aujourd'hui", color = textSec, fontSize = 10.sp, letterSpacing = 1.sp)
+        Text("Aujourd'hui", color = textSec, fontFamily = bodyFont, fontSize = 10.sp, letterSpacing = 1.sp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("🎵 47", "⏱️ 2h34", "🎤 12", "💿 8").forEach { Text(it, color = primary, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            listOf("🎵 47", "⏱️ 2h34", "🎤 12", "💿 8").forEach { Text(it, color = primary, fontFamily = titleFont, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
         }
+    }
     }
 }
 
@@ -200,7 +206,7 @@ private fun ThemeCard(t: NovaTheme, selected: Boolean, modifier: Modifier, onCli
             Text(t.emoji, fontSize = 22.sp, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
         Column(Modifier.padding(8.dp)) {
-            Text(t.name, color = t.text, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
+            Text(t.name, color = t.text, fontFamily = NovaFonts.family(t.titleFont), fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
             Row(Modifier.padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf(t.primary, t.secondary, t.glowSecondary, t.accent).forEach { c -> Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(c)) }
             }

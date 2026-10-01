@@ -55,6 +55,8 @@ object AchievementNotifier {
                 .build()
             runCatching { NotificationManagerCompat.from(context).notify((System.currentTimeMillis() % 100_000).toInt() + i, n) }
         }
+        // Effet signature « déblocage de palier » (confettis Survivor…) si l'app est à l'écran
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { com.novastats.app.ui.theme.ThemeEvents.unlocked() }
     }
 
     /** 🎉 Première écoute de l'histoire : notification spéciale + entrée dans le fil. */

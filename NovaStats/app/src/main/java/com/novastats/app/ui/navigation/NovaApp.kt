@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -59,6 +60,10 @@ import com.novastats.app.ui.screens.PantheonScreen
 import com.novastats.app.ui.screens.SettingsScreen
 import com.novastats.app.ui.screens.StatsScreen
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.NovaMotion
+import com.novastats.app.ui.theme.ThemeEvents
+import com.novastats.app.ui.theme.ThemeFxHost
+import com.novastats.app.ui.theme.ThemedTabIcon
 
 /** Les onglets de la barre de navigation inférieure (ordre du cahier des charges). */
 enum class NovaTab(val route: String, val label: String, val emoji: String, val icon: ImageVector) {
@@ -100,9 +105,10 @@ fun NovaApp() {
                     val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.width(76.dp).clip(RoundedCornerShape(14.dp))
+                        modifier = Modifier.width(76.dp).clip(Nova.chipShape)
                             .background(if (selected) theme.primary.copy(alpha = 0.15f) else Color.Transparent)
                             .clickable {
+                                if (!selected) ThemeEvents.tabChanged()
                                 navController.navigate(tab.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
@@ -111,7 +117,7 @@ fun NovaApp() {
                             }
                             .padding(vertical = 6.dp)
                     ) {
-                        Icon(tab.icon, contentDescription = tab.label, tint = if (selected) theme.primary else theme.textSecondary)
+                        ThemedTabIcon(tab.icon, contentDescription = tab.label, selected = selected)
                         Text(tab.label, maxLines = 1, style = MaterialTheme.typography.labelSmall, color = if (selected) theme.primary else theme.textSecondary)
                     }
                 }
@@ -129,10 +135,15 @@ fun NovaApp() {
         ) {
             Text("🔴 Détection inactive — NovaStats n'écoute pas. Touche pour autoriser l'accès aux notifications.", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
         }
+        ThemeFxHost(Modifier.weight(1f)) {
         NavHost(
             navController = navController,
             startDestination = NovaTab.HOME.route,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.fillMaxSize(),
+            enterTransition = { NovaMotion.enter(theme) },
+            exitTransition = { NovaMotion.exit(theme) },
+            popEnterTransition = { NovaMotion.enter(theme) },
+            popExitTransition = { NovaMotion.exit(theme) }
         ) {
             composable(NovaTab.HOME.route) { HomeScreen(onOpenTab = { navController.navigate(it.route) }) }
             composable(NovaTab.STATS.route) { StatsScreen() }
@@ -143,6 +154,7 @@ fun NovaApp() {
             composable(NovaTab.PANTHEON.route) { PantheonScreen() }
             composable(NovaTab.AWARDS.route) { AwardsScreen() }
             composable(NovaTab.SETTINGS.route) { SettingsScreen() }
+        }
         }
       }
     }

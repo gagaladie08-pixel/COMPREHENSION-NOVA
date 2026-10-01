@@ -41,6 +41,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.drawNovaCurve
+import com.novastats.app.ui.theme.rememberCurveAnim
 import com.novastats.app.ui.theme.NovaColors
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -156,6 +158,7 @@ private fun PositionChart(h: EntityHistory, modifier: Modifier) {
     val maxPos = remember(h) { (h.appearances.maxOfOrNull { it.position } ?: limit).coerceAtLeast(5) }
     val lineColor = theme.primary
     val textColor = theme.textSecondary
+    val anim = rememberCurveAnim(theme, h.appearances.size)
 
     Canvas(modifier) {
         val w = size.width; val hgt = size.height
@@ -186,17 +189,8 @@ private fun PositionChart(h: EntityHistory, modifier: Modifier) {
         if (segment.isNotEmpty()) segments += segment
 
         segments.forEach { pts ->
-            if (pts.size >= 2) {
-                val fill = Path().apply {
-                    moveTo(pts.first().x, padT + plotH)
-                    pts.forEach { lineTo(it.x, it.y) }
-                    lineTo(pts.last().x, padT + plotH); close()
-                }
-                drawPath(fill, Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.45f), lineColor.copy(alpha = 0.02f)), startY = padT, endY = padT + plotH))
-                val line = Path().apply { moveTo(pts.first().x, pts.first().y); pts.drop(1).forEach { lineTo(it.x, it.y) } }
-                drawPath(line, lineColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
-            }
-            pts.forEach { drawCircle(lineColor, radius = 3.5.dp.toPx(), center = it) }
+            if (pts.size >= 2) drawNovaCurve(theme, pts, baselineY = padT + plotH, anim = anim, showPoints = true)
+            else pts.forEach { drawCircle(lineColor, radius = 3.5.dp.toPx(), center = it) }
         }
 
         // ⭐ au peak

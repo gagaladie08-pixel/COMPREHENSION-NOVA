@@ -76,6 +76,8 @@ import com.novastats.app.domain.CertificationRules
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.drawNovaCurve
+import com.novastats.app.ui.theme.rememberCurveAnim
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -367,6 +369,7 @@ private fun PlaysCurve(series: List<DayCount>, color: Color, history: List<Certi
     val next = thresholds.required(thresholds.next(total))
     val maxY = maxOf(total, next).toFloat()
     val levels = remember(history, next) { history.map { h -> CertLevel.entries.firstOrNull { it.dbName == h.level }?.let { thresholds.required(Certification(it, h.multiplier)) to certColor(it) } }.filterNotNull() }
+    val anim = rememberCurveAnim(theme, series.size)
     Canvas(modifier) {
         val w = size.width; val h = size.height
         val padL = 34.dp.toPx(); val padT = 6.dp.toPx(); val padB = 6.dp.toPx()
@@ -382,10 +385,8 @@ private fun PlaysCurve(series: List<DayCount>, color: Color, history: List<Certi
             drawContext.canvas.nativeCanvas.drawText("$v", 0f, y(v.toFloat()) + 3.dp.toPx(), paint)
         }
         val pts = cumul.mapIndexed { i, v -> Offset(x(i), y(v.toFloat())) }
-        val fill = Path().apply { moveTo(pts.first().x, padT + plotH); pts.forEach { lineTo(it.x, it.y) }; lineTo(pts.last().x, padT + plotH); close() }
-        drawPath(fill, Brush.verticalGradient(listOf(color.copy(alpha = 0.4f), color.copy(alpha = 0.02f)), startY = padT, endY = padT + plotH))
-        val line = Path().apply { moveTo(pts.first().x, pts.first().y); pts.drop(1).forEach { lineTo(it.x, it.y) } }
-        drawPath(line, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+        // Courbe thématisée (trait = couleur du palier, style / glow / décor = thème)
+        drawNovaCurve(theme, pts, baselineY = padT + plotH, anim = anim, strokeOverride = color)
         drawCircle(color, radius = 4.dp.toPx(), center = pts.last())
     }
 }

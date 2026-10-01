@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.novastats.app.ui.navigation.NovaTab
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.goldShimmer
 import com.novastats.app.ui.theme.NovaColors
 import java.util.Locale
 
@@ -65,10 +66,17 @@ fun positionLabel(position: Int?, limit: Int = 300): String = when {
 
 @Composable
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    val rainbow = Nova.rainbowBrush
+    val style = MaterialTheme.typography.labelSmall
     Text(
         text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = Nova.theme.textSecondary,
+        style = if (rainbow != null) style.copy(brush = rainbow) else style,
+        color = when {
+            rainbow != null -> Color.Unspecified
+            theme.signature == com.novastats.app.ui.theme.Signature.DUAL_CONTRAST -> Nova.dualAccent.copy(alpha = 0.85f)
+            else -> theme.textSecondary
+        },
         modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
 }
@@ -77,14 +85,14 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 fun NovaCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(16.dp),
+        shape = Nova.cardShape,
         colors = CardDefaults.cardColors(containerColor = Nova.theme.surface)
     ) { content() }
 }
 
 @Composable
 fun StatPill(value: String, label: String, modifier: Modifier = Modifier, accent: Color = Nova.theme.primary) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier = modifier.goldShimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, style = MaterialTheme.typography.titleLarge, color = accent, fontWeight = FontWeight.Black)
         Text(label, style = MaterialTheme.typography.bodySmall, color = Nova.theme.textSecondary, textAlign = TextAlign.Center)
     }

@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novastats.app.R
+import com.novastats.app.ui.theme.NovaFonts
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -78,18 +79,18 @@ object ObColors {
 }
 
 /* ===================================== Typographies =====================================
- * Cinzel Decorative / Cormorant Garamond / Raleway / Rajdhani ne sont pas embarquées (pas de réseau au build) :
- * on utilise les familles système les plus proches, avec les mêmes graisses / espacements que le cahier des charges.
+ * Cinzel Decorative / Cormorant Garamond / Raleway / Rajdhani chargées via Google Fonts (Play Services),
+ * avec repli automatique sur les familles système les plus proches.
  */
 object ObFonts {
-    /** Cinzel Decorative → serif gras, espacement large */
-    val cinzel: FontFamily = FontFamily.Serif
-    /** Cormorant Garamond → serif italique léger */
-    val cormorant: FontFamily = FontFamily.Serif
-    /** Raleway → sans-serif light */
-    val raleway: FontFamily = runCatching { FontFamily(Typeface.create("sans-serif-light", Typeface.NORMAL)) }.getOrDefault(FontFamily.SansSerif)
-    /** Rajdhani → sans-serif condensé gras, majuscules */
-    val rajdhani: FontFamily = runCatching { FontFamily(Typeface.create("sans-serif-condensed", Typeface.BOLD)) }.getOrDefault(FontFamily.SansSerif)
+    /** Cinzel Decorative → titres */
+    val cinzel: FontFamily get() = NovaFonts.family("Cinzel Decorative")
+    /** Cormorant Garamond → phrases poétiques (italique léger) */
+    val cormorant: FontFamily get() = NovaFonts.family("Cormorant Garamond")
+    /** Raleway → corps light */
+    val raleway: FontFamily get() = NovaFonts.family("Raleway")
+    /** Rajdhani → boutons, majuscules */
+    val rajdhani: FontFamily get() = NovaFonts.family("Rajdhani")
 }
 
 /* ===================================== Audio + haptique ===================================== */
