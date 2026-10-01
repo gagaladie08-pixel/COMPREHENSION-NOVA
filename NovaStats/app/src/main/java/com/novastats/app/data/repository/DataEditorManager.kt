@@ -93,29 +93,41 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
 
     /** Fusionne [from] dans [into] : titres, liens, écoutes, albums ; [from] marqué MERGED. */
     suspend fun mergeArtists(from: Long, into: Long) = perform("Artistes fusionnés", rebuild = true) {
+        db.withTransaction { mergeArtistsInternal(from, into) }
+    }
+
+    /** Fusion de plusieurs paires (from → into) en une seule transaction + un seul recalcul. */
+    suspend fun mergeArtistsBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) d'artistes", rebuild = true) {
+        db.withTransaction {
+            for ((from, into) in pairs) {
+                if (from == into || db.artistDao().getById(from) == null || db.artistDao().getById(into) == null) continue
+                mergeArtistsInternal(from, into)
+            }
+        }
+    }
+
+    private suspend fun mergeArtistsInternal(from: Long, into: Long) {
         require(from != into) { "Même artiste" }
         val a = db.artistDao().getById(from) ?: error("Artiste introuvable")
         val b = db.artistDao().getById(into) ?: error("Artiste cible introuvable")
-        db.withTransaction {
-            // Albums homonymes → fusion, sinon simple transfert
-            for (al in db.albumDao().all().filter { it.artistId == from }) {
-                val existing = db.albumDao().findByTitleAndArtist(al.title, into)
-                if (existing != null && existing.albumId != al.albumId) mergeAlbumsInternal(al.albumId, existing.albumId)
-            }
-            db.albumDao().moveArtist(from, into)
-            // Titres homonymes → fusion des écoutes
-            for (t in db.trackDao().allPlayed().filter { it.artistId == from }) {
-                val existing = db.trackDao().findByTitleAndArtist(t.title, into)
-                if (existing != null && existing.trackId != t.trackId) mergeTracksInternal(t.trackId, existing.trackId)
-            }
-            db.trackDao().moveArtist(from, into)
-            db.trackLinkDao().dropDuplicateLinks(from, into)
-            db.trackLinkDao().moveArtist(from, into)
-            db.scrobbleDao().moveArtist(from, into)
-            db.artistDao().markMerged(from, into)
-            db.editorDao().upsertCorrection(UserCorrectionEntity(originalValue = a.name, correctedValue = b.name, correctionType = "ARTIST"))
-            log(Type.MERGE, "ARTIST", from, a.name, b.name, extra = into.toString())
+        // Albums homonymes → fusion, sinon simple transfert
+        for (al in db.albumDao().all().filter { it.artistId == from }) {
+            val existing = db.albumDao().findByTitleAndArtist(al.title, into)
+            if (existing != null && existing.albumId != al.albumId) mergeAlbumsInternal(al.albumId, existing.albumId)
         }
+        db.albumDao().moveArtist(from, into)
+        // Titres homonymes → fusion des écoutes
+        for (t in db.trackDao().allPlayed().filter { it.artistId == from }) {
+            val existing = db.trackDao().findByTitleAndArtist(t.title, into)
+            if (existing != null && existing.trackId != t.trackId) mergeTracksInternal(t.trackId, existing.trackId)
+        }
+        db.trackDao().moveArtist(from, into)
+        db.trackLinkDao().dropDuplicateLinks(from, into)
+        db.trackLinkDao().moveArtist(from, into)
+        db.scrobbleDao().moveArtist(from, into)
+        db.artistDao().markMerged(from, into)
+        db.editorDao().upsertCorrection(UserCorrectionEntity(originalValue = a.name, correctedValue = b.name, correctionType = "ARTIST"))
+        log(Type.MERGE, "ARTIST", from, a.name, b.name, extra = into.toString())
     }
 
     suspend fun mergeAlbums(from: Long, into: Long) = perform("Albums fusionnés", rebuild = true) {
@@ -125,6 +137,18 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         db.withTransaction {
             mergeAlbumsInternal(from, into)
             log(Type.MERGE, "ALBUM", from, a.title, b.title, extra = into.toString())
+        }
+    }
+
+    suspend fun mergeAlbumsBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) d'albums", rebuild = true) {
+        db.withTransaction {
+            for ((from, into) in pairs) {
+                if (from == into) continue
+                val a = db.albumDao().getById(from) ?: continue
+                val b = db.albumDao().getById(into) ?: continue
+                mergeAlbumsInternal(from, into)
+                log(Type.MERGE, "ALBUM", from, a.title, b.title, extra = into.toString())
+            }
         }
     }
 
@@ -142,6 +166,18 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         db.withTransaction {
             mergeTracksInternal(from, into)
             log(Type.MERGE, "TRACK", from, a.title, b.title, extra = into.toString())
+        }
+    }
+
+    suspend fun mergeTracksBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) de titres", rebuild = true) {
+        db.withTransaction {
+            for ((from, into) in pairs) {
+                if (from == into) continue
+                val a = db.trackDao().getById(from) ?: continue
+                val b = db.trackDao().getById(into) ?: continue
+                mergeTracksInternal(from, into)
+                log(Type.MERGE, "TRACK", from, a.title, b.title, extra = into.toString())
+            }
         }
     }
 
@@ -243,12 +279,13 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
 
     /* ---------------- Suggestions de fusion ---------------- */
 
-    /** Artistes dont le nom normalisé est identique (max 10 paires). */
+    /** Artistes dont le nom normalisé est identique : chaque doublon → le plus écouté du groupe. */
     fun suggestArtistMerges(artists: List<ArtistEntity>): List<Pair<ArtistEntity, ArtistEntity>> =
-        artists.groupBy { TitleNormalizer.normalizeKey(it.name) }.values.filter { it.size > 1 }
-            .map { g -> g.sortedByDescending { it.playCount }.let { it[1] to it[0] } }.take(10)
+        artists.filter { TitleNormalizer.normalizeKey(it.name).isNotBlank() }
+            .groupBy { TitleNormalizer.normalizeKey(it.name) }.values.filter { it.size > 1 }
+            .flatMap { g -> g.sortedByDescending { it.playCount }.let { s -> s.drop(1).map { it to s[0] } } }
 
-    /** Albums du même artiste : normalisation identique ou l'un contient l'autre (max 10 paires). */
+    /** Albums du même artiste : normalisation identique ou l'un contient l'autre (max 200 paires). */
     fun suggestAlbumMerges(albums: List<AlbumEntity>): List<Pair<AlbumEntity, AlbumEntity>> {
         val out = ArrayList<Pair<AlbumEntity, AlbumEntity>>()
         for (group in albums.groupBy { it.artistId }.values) {
@@ -256,14 +293,15 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
             for (i in sorted.indices) for (j in i + 1 until sorted.size) {
                 val a = TitleNormalizer.normalizeKey(sorted[i].title); val b = TitleNormalizer.normalizeKey(sorted[j].title)
                 if (a.isNotBlank() && b.isNotBlank() && (a == b || a.contains(b) || b.contains(a))) out += sorted[j] to sorted[i]
-                if (out.size >= 10) return out
+                if (out.size >= 200) return out
             }
         }
         return out
     }
 
-    /** Titres en double : même artiste principal + même titre normalisé (max 10 paires). */
+    /** Titres en double : même artiste principal + même titre normalisé ; chaque doublon → le plus écouté du groupe. */
     fun suggestTrackMerges(tracks: List<TrackEntity>): List<Pair<TrackEntity, TrackEntity>> =
-        tracks.groupBy { it.artistId to TitleNormalizer.normalizeKey(it.title) }.values.filter { it.size > 1 }
-            .map { g -> g.sortedByDescending { it.playCount }.let { it[1] to it[0] } }.take(10)
+        tracks.filter { TitleNormalizer.normalizeKey(it.title).isNotBlank() }
+            .groupBy { it.artistId to TitleNormalizer.normalizeKey(it.title) }.values.filter { it.size > 1 }
+            .flatMap { g -> g.sortedByDescending { it.playCount }.let { s -> s.drop(1).map { it to s[0] } } }
 }

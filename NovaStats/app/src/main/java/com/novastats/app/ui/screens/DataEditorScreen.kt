@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,8 +39,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,10 +86,28 @@ fun DataEditorScreen() {
     var action by remember { mutableStateOf<EditorAction?>(null) }
     val exec: (suspend () -> Unit) -> Unit = { block -> scope.launch { runCatching { withContext(Dispatchers.IO) { block() } } } }
 
+    // Paires de doublons que l'utilisateur a choisi d'ignorer (persistant)
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("nova_editor", android.content.Context.MODE_PRIVATE) }
+    var ignored by remember { mutableStateOf(prefs.getStringSet("ignored_pairs", emptySet())?.toSet() ?: emptySet()) }
+    fun ignore(key: String) { ignored = ignored + key; prefs.edit().putStringSet("ignored_pairs", ignored).apply() }
+    fun resetIgnored(prefix: String) { ignored = ignored.filterNot { it.startsWith(prefix) }.toSet(); prefs.edit().putStringSet("ignored_pairs", ignored).apply() }
+    var dupPopup by remember { mutableStateOf<EditorTab?>(null) }
+
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             EditorTab.entries.forEach { t -> FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) }) }
         }
+        /* ---------- Doublons détectés (compteur sous le sous-onglet → popup de choix) ---------- */
+        val trackDups = remember(tracks, ignored) { trackDupsState(tracks, editor, ignored) }
+        val artistDups = remember(artists, ignored) { artistDupsState(artists, editor, ignored) }
+        val albumDups = remember(albums, ignored) { albumDupsState(albums, editor, ignored) }
+        val dupsForTab = when (tab) { EditorTab.TRACKS -> trackDups; EditorTab.ARTISTS -> artistDups; EditorTab.ALBUMS -> albumDups; else -> null }
+        if (dupsForTab != null) {
+            val noun = when (tab) { EditorTab.TRACKS -> "de titres"; EditorTab.ARTISTS -> "d'artistes"; else -> "d'albums" }
+            DuplicateBadge(dupsForTab.size, noun, enabled = !busy) { dupPopup = tab }
+        }
+
         if (tab == EditorTab.TRACKS || tab == EditorTab.ARTISTS || tab == EditorTab.ALBUMS) {
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,
@@ -95,40 +118,19 @@ fun DataEditorScreen() {
         status?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
 
         val q = query.trim().lowercase()
-        val trackSugg = remember(tracks) { editor.suggestTrackMerges(tracks.map { it.track }) }
-        val artistSugg = remember(artists) { editor.suggestArtistMerges(artists) }
-        val albumSugg = remember(albums) { editor.suggestAlbumMerges(albums.map { it.album }) }
         LazyColumn(Modifier.fillMaxSize()) {
             when (tab) {
                 EditorTab.TRACKS -> {
-                    val sugg = trackSugg
-                    if (q.isEmpty() && sugg.isNotEmpty()) item {
-                        SuggestionCard("🔍 ${sugg.size} doublon(s) de titres détecté(s)", sugg.map { (a, b) -> "« ${a.title} » → « ${b.title} »" }) {
-                            exec { sugg.forEach { (a, b) -> editor.mergeTracks(a.trackId, b.trackId) } }
-                        }
-                    }
                     items(tracks.filter { q.isEmpty() || it.track.title.lowercase().contains(q) || it.artistName.lowercase().contains(q) }, key = { "t" + it.track.trackId }) { t ->
                         EditorRow(t.track.title, "${t.artistName}${t.albumTitle?.let { " · $it" } ?: ""} · ${t.periodPlays} ▶", t.track.coverUrl) { action = EditorAction.Track(t) }
                     }
                 }
                 EditorTab.ARTISTS -> {
-                    val sugg = artistSugg
-                    if (q.isEmpty() && sugg.isNotEmpty()) item {
-                        SuggestionCard("🔍 ${sugg.size} fusion(s) d'artistes suggérée(s)", sugg.map { (a, b) -> "« ${a.name} » → « ${b.name} »" }) {
-                            exec { sugg.forEach { (a, b) -> editor.mergeArtists(a.artistId, b.artistId) } }
-                        }
-                    }
                     items(artists.filter { q.isEmpty() || it.name.lowercase().contains(q) }, key = { "a" + it.artistId }) { a ->
                         EditorRow(a.name, "${a.playCount} ▶", a.photoUrl, circle = true) { action = EditorAction.Artist(a) }
                     }
                 }
                 EditorTab.ALBUMS -> {
-                    val sugg = albumSugg
-                    if (q.isEmpty() && sugg.isNotEmpty()) item {
-                        SuggestionCard("🔍 ${sugg.size} fusion(s) d'albums suggérée(s)", sugg.map { (a, b) -> "« ${a.title} » → « ${b.title} »" }) {
-                            exec { sugg.forEach { (a, b) -> editor.mergeAlbums(a.albumId, b.albumId) } }
-                        }
-                    }
                     items(albums.filter { q.isEmpty() || it.album.title.lowercase().contains(q) || it.artistName.lowercase().contains(q) }, key = { "al" + it.album.albumId }) { al ->
                         EditorRow(al.album.title, "${al.artistName} · ${al.periodPlays} ▶", al.album.coverUrl) { action = EditorAction.Album(al) }
                     }
@@ -165,6 +167,176 @@ fun DataEditorScreen() {
     }
 
     action?.let { a -> EditorActionDialog(a, artists, albums, tracks, onDismiss = { action = null }, exec = exec) }
+
+    dupPopup?.let { kind ->
+        val pairs = remember(kind, tracks, artists, albums, ignored) {
+            when (kind) {
+                EditorTab.TRACKS -> trackDupsState(tracks, editor, ignored)
+                EditorTab.ARTISTS -> artistDupsState(artists, editor, ignored)
+                else -> albumDupsState(albums, editor, ignored)
+            }
+        }
+        val (title, prefix) = when (kind) {
+            EditorTab.TRACKS -> "🎵 Doublons de titres" to "T:"
+            EditorTab.ARTISTS -> "🎤 Doublons d'artistes" to "AR:"
+            else -> "💿 Doublons d'albums" to "AL:"
+        }
+        DuplicatesPopup(
+            title = title, pairs = pairs, ignoredCount = ignored.count { it.startsWith(prefix) },
+            onIgnore = { ignore(it) }, onResetIgnored = { resetIgnored(prefix) },
+            onDismiss = { dupPopup = null },
+            onMerge = { chosen ->
+                dupPopup = null
+                exec {
+                    when (kind) {
+                        EditorTab.TRACKS -> editor.mergeTracksBatch(chosen)
+                        EditorTab.ARTISTS -> editor.mergeArtistsBatch(chosen)
+                        else -> editor.mergeAlbumsBatch(chosen)
+                    }
+                }
+            }
+        )
+    }
+}
+
+/* ---------------- Doublons : modèle, compteur, popup de choix ---------------- */
+
+private data class DupSide(val id: Long, val title: String, val subtitle: String, val cover: String?, val plays: Int, val circle: Boolean = false)
+/** Une paire de doublons : [from] (le moins écouté) proposé à la fusion dans [into] (le plus écouté). */
+private data class DupPair(val key: String, val from: DupSide, val into: DupSide)
+
+private fun trackDupsState(tracks: List<RankedTrack>, editor: com.novastats.app.data.repository.DataEditorManager, ignored: Set<String>): List<DupPair> {
+    val byId = tracks.associateBy { it.track.trackId }
+    return editor.suggestTrackMerges(tracks.map { it.track }).mapNotNull { (a, b) ->
+        val ra = byId[a.trackId] ?: return@mapNotNull null; val rb = byId[b.trackId] ?: return@mapNotNull null
+        DupPair(
+            "T:${a.trackId}-${b.trackId}",
+            DupSide(a.trackId, a.title, listOfNotNull(ra.artistName, ra.albumTitle).joinToString(" · "), a.coverUrl, a.playCount),
+            DupSide(b.trackId, b.title, listOfNotNull(rb.artistName, rb.albumTitle).joinToString(" · "), b.coverUrl, b.playCount)
+        )
+    }.filterNot { it.key in ignored }
+}
+private fun artistDupsState(artists: List<ArtistEntity>, editor: com.novastats.app.data.repository.DataEditorManager, ignored: Set<String>): List<DupPair> =
+    editor.suggestArtistMerges(artists).map { (a, b) ->
+        DupPair("AR:${a.artistId}-${b.artistId}", DupSide(a.artistId, a.name, "${a.distinctTracks} titres", a.photoUrl, a.playCount, circle = true), DupSide(b.artistId, b.name, "${b.distinctTracks} titres", b.photoUrl, b.playCount, circle = true))
+    }.filterNot { it.key in ignored }
+private fun albumDupsState(albums: List<RankedAlbum>, editor: com.novastats.app.data.repository.DataEditorManager, ignored: Set<String>): List<DupPair> {
+    val byId = albums.associateBy { it.album.albumId }
+    return editor.suggestAlbumMerges(albums.map { it.album }).mapNotNull { (a, b) ->
+        val ra = byId[a.albumId] ?: return@mapNotNull null; val rb = byId[b.albumId] ?: return@mapNotNull null
+        DupPair("AL:${a.albumId}-${b.albumId}", DupSide(a.albumId, a.title, ra.artistName, a.coverUrl, a.playCount), DupSide(b.albumId, b.title, rb.artistName, b.coverUrl, b.playCount))
+    }.filterNot { it.key in ignored }
+}
+
+/** Compteur de doublons sous le sous-onglet — appui → popup de choix. */
+@Composable
+private fun DuplicateBadge(count: Int, noun: String, enabled: Boolean, onClick: () -> Unit) {
+    val theme = Nova.theme
+    val none = count == 0
+    val color = if (none) theme.textSecondary else theme.accent
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = if (none) 0.08f else 0.14f))
+            .then(if (none || !enabled) Modifier else Modifier.clickable(onClick = onClick))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            if (none) "✅ Aucun doublon $noun détecté" else "🔍 $count doublon${if (count > 1) "s" else ""} $noun détecté${if (count > 1) "s" else ""}",
+            color = if (none) theme.textSecondary else theme.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+        )
+        if (!none) Text("Choisir ▸", color = theme.accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+/**
+ * Popup de doublons : une carte par paire, case à cocher « fusionner », ⇄ pour inverser le sens (lequel on garde),
+ * 🚫 Ignorer (mémorisé). Bouton « Fusionner la sélection » → une seule transaction + un seul recalcul.
+ */
+@Composable
+private fun DuplicatesPopup(
+    title: String, pairs: List<DupPair>, ignoredCount: Int,
+    onIgnore: (String) -> Unit, onResetIgnored: () -> Unit, onDismiss: () -> Unit, onMerge: (List<Pair<Long, Long>>) -> Unit
+) {
+    val theme = Nova.theme
+    var selected by remember { mutableStateOf(pairs.map { it.key }.toSet()) }
+    var swapped by remember { mutableStateOf(emptySet<String>()) }
+    val liveKeys = pairs.map { it.key }.toSet()
+    val chosenCount = selected.count { it in liveKeys }
+
+    NovaPopupCard(
+        borderColor = theme.accent, onDismiss = onDismiss, glowDp = 10,
+        banner = {
+            Column(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    if (pairs.isEmpty()) "Plus aucun doublon à traiter" else "${pairs.size} paire${if (pairs.size > 1) "s" else ""} détectée${if (pairs.size > 1) "s" else ""} · coche celles à fusionner",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+                )
+            }
+        }
+    ) {
+        // Actions globales
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = { selected = if (chosenCount == pairs.size) emptySet() else liveKeys }) {
+                Text(if (chosenCount == pairs.size && pairs.isNotEmpty()) "Tout décocher" else "Tout cocher", color = theme.textSecondary)
+            }
+            Button(
+                onClick = { onMerge(pairs.filter { it.key in selected }.map { p -> if (p.key in swapped) p.into.id to p.from.id else p.from.id to p.into.id }) },
+                enabled = chosenCount > 0, colors = ButtonDefaults.buttonColors(containerColor = theme.accent, contentColor = if (theme.accent.luminance() > 0.5f) Color.Black else Color.White)
+            ) { Text("🔗 Fusionner ($chosenCount)", fontWeight = FontWeight.Bold) }
+        }
+        Spacer(Modifier.height(4.dp))
+
+        pairs.forEach { p ->
+            val isSwapped = p.key in swapped
+            val keep = if (isSwapped) p.from else p.into
+            val gone = if (isSwapped) p.into else p.from
+            val on = p.key in selected
+            Column(
+                Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (on) theme.accent.copy(alpha = 0.10f) else theme.surface.copy(alpha = 0.6f))
+                    .clickable { selected = if (on) selected - p.key else selected + p.key }
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = on, onCheckedChange = { selected = if (it) selected + p.key else selected - p.key }, colors = CheckboxDefaults.colors(checkedColor = theme.accent))
+                    Column(Modifier.weight(1f)) {
+                        DupLine(gone, label = "Disparaît", labelColor = theme.textSecondary)
+                        Text("   ⬇ fusionné dans", color = theme.accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        DupLine(keep, label = "Conservé", labelColor = theme.accent)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { swapped = if (isSwapped) swapped - p.key else swapped + p.key }) { Text("⇄ Inverser", color = theme.textSecondary, style = MaterialTheme.typography.labelMedium) }
+                    TextButton(onClick = { onIgnore(p.key) }) { Text("🚫 Ignorer", color = theme.textSecondary, style = MaterialTheme.typography.labelMedium) }
+                }
+            }
+        }
+        if (ignoredCount > 0) {
+            TextButton(onClick = onResetIgnored, modifier = Modifier.fillMaxWidth()) {
+                Text("Réafficher $ignoredCount paire${if (ignoredCount > 1) "s" else ""} ignorée${if (ignoredCount > 1) "s" else ""}", color = theme.textSecondary, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        Text(
+            "Les écoutes du doublon sont transférées vers l'élément conservé, puis toutes les statistiques sont recalculées. Annulable depuis 🕘 Historique (dernière action).",
+            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun DupLine(side: DupSide, label: String, labelColor: Color) {
+    val theme = Nova.theme
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+        CoverArt(side.cover, side.title, size = 36, circle = side.circle)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(side.title, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${side.subtitle} · ${side.plays} ▶", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(label, color = labelColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+    }
 }
 
 private val playFmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
@@ -189,17 +361,6 @@ private fun EditorRow(title: String, subtitle: String, cover: String?, circle: B
             Text(subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text("✏️", color = theme.primary)
-    }
-}
-
-@Composable
-private fun SuggestionCard(title: String, lines: List<String>, onApplyAll: () -> Unit) {
-    val theme = Nova.theme
-    Column(Modifier.fillMaxWidth().padding(16.dp, 8.dp).clip(RoundedCornerShape(12.dp)).background(theme.primary.copy(alpha = 0.12f)).padding(12.dp)) {
-        Text(title, color = theme.text, fontWeight = FontWeight.SemiBold)
-        lines.take(5).forEach { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-        if (lines.size > 5) Text("… et ${lines.size - 5} autre(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-        TextButton(onClick = onApplyAll) { Text("🔗 Tout fusionner", color = theme.primary, fontWeight = FontWeight.Bold) }
     }
 }
 
