@@ -1,5 +1,17 @@
 package com.novastats.app.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import com.novastats.app.ui.theme.goldShimmer
+import java.util.Locale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,8 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -85,17 +95,73 @@ fun StatsScreen() {
     DetailPopupHost(detail) { detail = null }
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        /* ---------- En-tête (maquette utilisateur) : périodes → bandeau → onglets Titres / Artistes / Albums + 🔍 ---------- */
+
+        // 1. Sélecteur de période : 5 boutons de largeur égale, le sélectionné plein (primary)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Period.entries.forEach { p ->
+                val on = period == p
+                Box(
+                    Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp))
+                        .background(if (on) theme.primary else theme.surface)
+                        .clickable { period = p },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        p.frLabel, color = if (on) MaterialTheme.colorScheme.onPrimary else theme.text,
+                        style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1, softWrap = false, overflow = TextOverflow.Clip
+                    )
+                }
+            }
+        }
+
+        // 2. Bandeau résumé : 5 valeurs (primary) séparées par de fins traits verticaux
+        val days = if (period == Period.GLOBAL) summary.activeDays else elapsedDays(range)
+        val avg = if (days > 0) summary.playCount.toFloat() / days else 0f
+        val cells = listOf(
+            formatCount(summary.playCount) to "Écoutes",
+            formatDuration(summary.totalDurationMs) to "Temps",
+            "${summary.distinctTracks}" to "Titres",
+            "${summary.distinctArtists}" to "Artistes",
+            String.format(Locale.FRANCE, if (avg == avg.toInt().toFloat()) "%.0f" else "%.1f", avg) to "Moy/jour"
+        )
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp)).background(theme.surface).padding(vertical = 14.dp)
+        ) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+                cells.forEachIndexed { i, (value, label) ->
+                    if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 6.dp).background(theme.textSecondary.copy(alpha = 0.35f)))
+                    Column(Modifier.weight(1f).goldShimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(value, color = theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
+                        Text(label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                    }
+                }
+            }
+        }
+        Text(
+            periodCaption(period, range), color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
+        )
+
+        // 3. Onglets Titres / Artistes / Albums + loupe
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             TabRow(
                 selectedTabIndex = tab,
                 modifier = Modifier.weight(1f),
-                containerColor = theme.surface,
+                containerColor = theme.background,
                 contentColor = theme.primary,
-                indicator = { positions -> TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(positions[tab]), color = theme.primary) },
+                indicator = { positions ->
+                    Box(Modifier.tabIndicatorOffset(positions[tab]).padding(horizontal = 28.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
+                },
                 divider = {}
             ) {
                 statsTabs.forEachIndexed { i, label ->
-                    Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) }, selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary)
+                    Tab(
+                        selected = tab == i, onClick = { tab = i },
+                        text = { Text(label, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.titleSmall) },
+                        selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+                    )
                 }
             }
             Box(Modifier.padding(end = 4.dp)) {
@@ -116,39 +182,6 @@ fun StatsScreen() {
                     focusedTextColor = theme.text, unfocusedTextColor = theme.text, cursorColor = theme.primary
                 )
             )
-        }
-
-        // Sélecteur de période — commun aux 3 sous-onglets
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Period.entries.forEach { p ->
-                FilterChip(
-                    selected = period == p,
-                    onClick = { period = p },
-                    label = { Text(p.label, style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = theme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        labelColor = theme.textSecondary, containerColor = theme.surface
-                    )
-                )
-            }
-        }
-        Text(
-            periodCaption(period, range), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), textAlign = TextAlign.Center
-        )
-
-        // Bandeau résumé
-        NovaCard {
-            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceAround) {
-                StatPill(formatCount(summary.playCount), "écoutes")
-                StatPill(formatDuration(summary.totalDurationMs), "temps", accent = theme.secondary)
-                StatPill("${summary.distinctTracks}", "titres", accent = theme.accent)
-                StatPill("${summary.distinctArtists}", "artistes", accent = theme.glowSecondary)
-                // Moyenne/jour : jours écoulés de la période (jours actifs pour Global)
-                val days = if (period == Period.GLOBAL) summary.activeDays else elapsedDays(range)
-                val avg = if (days > 0) summary.playCount / days else 0
-                StatPill("$avg", "moy./jour")
-            }
         }
 
         val filteredTracks = remember(tracks, q) { tracks.mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }

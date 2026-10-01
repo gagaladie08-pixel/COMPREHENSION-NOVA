@@ -9,12 +9,12 @@ import java.time.temporal.IsoFields
 import java.time.temporal.TemporalAdjusters
 
 /** Périodes de Stats / Billboard — calendaires (pas glissantes). */
-enum class Period(val label: String, val dbName: String) {
-    DAILY("Daily", "DAILY"),
-    WEEKLY("Weekly", "WEEKLY"),
-    MONTHLY("Monthly", "MONTHLY"),
-    YEARLY("Yearly", "YEARLY"),
-    GLOBAL("Global", "GLOBAL")
+enum class Period(val label: String, val dbName: String, val frLabel: String) {
+    DAILY("Daily", "DAILY", "Jour"),
+    WEEKLY("Weekly", "WEEKLY", "Semaine"),
+    MONTHLY("Monthly", "MONTHLY", "Mois"),
+    YEARLY("Yearly", "YEARLY", "Année"),
+    GLOBAL("Global", "GLOBAL", "Global")
 }
 
 /** Intervalle de dates ISO inclusif [from, to]. */
