@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,7 +67,7 @@ import com.novastats.app.ui.theme.ThemeEvents
 import com.novastats.app.ui.theme.ThemeFxHost
 import com.novastats.app.ui.theme.ThemedTabIcon
 
-/** Les onglets de la barre de navigation inférieure (ordre du cahier des charges). */
+/** Les onglets de la barre de navigation supérieure (ordre du cahier des charges). */
 enum class NovaTab(val route: String, val label: String, val emoji: String, val icon: ImageVector) {
     HOME("home", "Accueil", "🏠", Icons.Filled.Home),
     STATS("stats", "Stats", "📊", Icons.Filled.BarChart),
@@ -80,8 +80,8 @@ enum class NovaTab(val route: String, val label: String, val emoji: String, val 
     SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings);
 }
 
-/** Tous les onglets du cahier des charges — la barre défile horizontalement. */
-private val bottomTabs = NovaTab.entries
+/** Tous les onglets du cahier des charges — la barre, placée en haut de l'écran, défile horizontalement. */
+private val topTabs = NovaTab.entries
 
 @Composable
 fun NovaApp() {
@@ -92,18 +92,18 @@ fun NovaApp() {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
+        topBar = {
             val scroll = rememberScrollState()
-            val selectedIndex = bottomTabs.indexOfFirst { tab -> currentDestination?.hierarchy?.any { it.route == tab.route } == true }
+            val selectedIndex = topTabs.indexOfFirst { tab -> currentDestination?.hierarchy?.any { it.route == tab.route } == true }
             // Garde l'onglet actif visible dans la barre défilante
             val itemPx = with(LocalDensity.current) { 76.dp.toPx() }
             LaunchedEffect(selectedIndex) {
                 if (selectedIndex >= 0) scroll.animateScrollTo(((selectedIndex - 2) * itemPx).toInt().coerceAtLeast(0))
             }
             Row(
-                Modifier.fillMaxWidth().background(theme.surface).navigationBarsPadding().horizontalScroll(scroll).padding(horizontal = 4.dp, vertical = 6.dp)
+                Modifier.fillMaxWidth().background(theme.surface).statusBarsPadding().horizontalScroll(scroll).padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
-                bottomTabs.forEach { tab ->
+                topTabs.forEach { tab ->
                     val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
