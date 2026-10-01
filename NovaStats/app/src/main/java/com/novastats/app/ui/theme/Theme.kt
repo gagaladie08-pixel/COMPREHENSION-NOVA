@@ -1,5 +1,6 @@
 package com.novastats.app.ui.theme
 
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -61,7 +62,7 @@ object Nova {
         @Composable get() = if (theme.rainbowTextSecondary) rememberRainbowBrush() else null
 }
 
-fun shapeFor(theme: NovaTheme, radiusDp: Float): Shape = when {
+fun shapeFor(theme: NovaTheme, radiusDp: Float): CornerBasedShape = when {
     theme.icons == IconStyle.SPIKY -> CutCornerShape((radiusDp + 6f).dp)
     radiusDp <= 0f -> RoundedCornerShape(0.dp)
     else -> RoundedCornerShape(radiusDp.dp)
