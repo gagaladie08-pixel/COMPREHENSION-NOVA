@@ -297,6 +297,19 @@ object ScrobbleRules {
     /** Titres > 10 min → notification de confirmation à la première détection (filtre podcast). */
     const val LONG_TRACK_MS = 10 * 60 * 1000L
 
+    /** Anti-gel : si le service n'a reçu aucun tick / événement pendant plus de ce délai, le temps intermédiaire n'est PAS compté. */
+    const val FREEZE_GAP_MS = 8_000L
+    /** Marge au-dessus de la durée du morceau (crossfade, latence) pour le plafond du temps écouté. */
+    const val DURATION_MARGIN_MS = 5_000L
+    /** Marge au-dessus de l'avancée réelle de position (lecteur) pour le plafond du temps écouté. */
+    const val POSITION_MARGIN_MS = 15_000L
+    /** Plafond absolu d'une écoute quand le lecteur ne donne pas la durée. */
+    const val MAX_LISTEN_UNKNOWN_DURATION_MS = 20 * 60 * 1000L
+
+    /** Plafond du temps écouté : durée du morceau (+ marge) ou plafond absolu si inconnue. */
+    fun capListened(listenedMs: Long, durationMs: Long?): Long =
+        listenedMs.coerceAtMost(if (durationMs != null && durationMs > 0) durationMs + DURATION_MARGIN_MS else MAX_LISTEN_UNKNOWN_DURATION_MS)
+
     fun isValidated(listenedMs: Long, thresholdSec: Int = DEFAULT_THRESHOLD_SEC) = listenedMs >= thresholdSec * 1000L
 }
 

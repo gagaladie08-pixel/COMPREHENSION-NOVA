@@ -9,6 +9,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,6 +113,7 @@ fun PantheonScreen() {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
     var query by rememberSaveable { mutableStateOf("") }
+    var statusFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
 
     val rows by app.database.pantheonDao().rows().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -117,8 +122,8 @@ fun PantheonScreen() {
     val certsByArtist = remember(certRows) { certRows.groupBy { it.artistId } }
 
     val q = query.trim().lowercase()
-    val sorted = remember(rows, q) {
-        rows.filter { q.isEmpty() || it.name.lowercase().contains(q) }
+    val sorted = remember(rows, q, statusFilter) {
+        rows.filter { (q.isEmpty() || it.name.lowercase().contains(q)) && (statusFilter == null || it.s.currentStatus == statusFilter) }
             .sortedWith(compareByDescending<PantheonRow> { PantheonStatus.fromDb(it.s.currentStatus)?.ordinal ?: -1 }.thenByDescending { it.playCount })
     }
     // Bientôt dans le Panthéon : pas encore Star mais ≥ 50 % du chemin
@@ -145,6 +150,30 @@ fun PantheonScreen() {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             )
             Spacer(Modifier.height(8.dp))
+            // Chips de filtre par statut (scrollables) avec compteur — Mythique en tête
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(
+                    selected = statusFilter == null, onClick = { statusFilter = null }, label = { Text("Tous (${rows.size})") },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text)
+                )
+                PantheonStatus.entries.reversed().forEach { st ->
+                    val c = pantheonColor(st)
+                    val on = statusFilter == st.dbName
+                    FilterChip(
+                        selected = on, onClick = { statusFilter = if (on) null else st.dbName },
+                        label = { Text("${st.emoji} ${st.label} (${counts[st.dbName] ?: 0})") },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = c.copy(alpha = 0.3f), selectedLabelColor = theme.text),
+                        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = on, borderColor = c.copy(alpha = 0.5f), selectedBorderColor = c)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        if (rows.isNotEmpty() && sorted.isEmpty()) item {
+            Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🕳️", fontSize = 40.sp)
+                Text("Aucun artiste pour ce filtre", color = theme.text, fontWeight = FontWeight.Bold)
+            }
         }
         if (rows.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {

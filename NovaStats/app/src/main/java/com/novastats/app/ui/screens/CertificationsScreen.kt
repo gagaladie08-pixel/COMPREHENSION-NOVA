@@ -163,8 +163,6 @@ fun CertificationsScreen() {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             )
             Spacer(Modifier.height(10.dp))
-            RadarCard(radar, allMax, tab == 0) { detail = type to it }
-            Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = levelFilter == null, onClick = { levelFilter = null }, label = { Text("Tous (${certified.size})") },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text))
@@ -181,10 +179,15 @@ fun CertificationsScreen() {
             Spacer(Modifier.height(6.dp))
         }
         if (list.isEmpty()) item {
-            EmptyState("🏅", if (certified.isEmpty()) "Aucune certification pour l'instant" else "Rien ici", if (certified.isEmpty()) "Première certification 🥉 Argent à ${thresholds.silver} écoutes — le radar ci-dessus montre les plus proches." else "Aucun résultat pour ce filtre.")
+            EmptyState("🏅", if (certified.isEmpty()) "Aucune certification pour l'instant" else "Rien ici", if (certified.isEmpty()) "Première certification 🥉 Argent à ${thresholds.silver} écoutes — le radar ci-dessous montre les plus proches." else "Aucun résultat pour ce filtre.")
         }
         items(list, key = { it.entityId }) { c -> CertRow(c, type == EntityType.ALBUM) { detail = type to c.entityId } }
-        item { Spacer(Modifier.height(24.dp)) }
+        // Radar en bas de la liste (demande utilisateur)
+        item(key = "radar") {
+            Spacer(Modifier.height(12.dp))
+            RadarCard(radar, allMax, tab == 0) { detail = type to it }
+            Spacer(Modifier.height(24.dp))
+        }
     }
     detail?.let { (t, id) -> CertificationPopup(t, id) { detail = null } }
 }

@@ -100,6 +100,9 @@ class NovaListenerService : NotificationListenerService() {
         runCatching { sessionManager.removeOnActiveSessionsChangedListener(sessionsListener) }
         unbindAll()
         tickJob?.cancel()
+        // On ne recevra plus d'événements : clôture propre de l'écoute en cours (sinon son chrono continuerait à tourner)
+        activePackage = null
+        handle(tracker.onPlayerGone())
         requestRebind(component)
     }
 
@@ -107,6 +110,11 @@ class NovaListenerService : NotificationListenerService() {
         DetectionState.connected(false)
         DetectionState.log("Service détruit")
         unbindAll()
+        tickJob?.cancel()
+        // Clôture synchrone de l'écoute en cours (le scope va être annulé)
+        tracker.onPlayerGone().let { events ->
+            if (events.isNotEmpty()) runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(3_000) { handleNow(events) } } }
+        }
         scope.cancel()
         super.onDestroy()
     }
@@ -203,7 +211,7 @@ class NovaListenerService : NotificationListenerService() {
                 sourceApp = c.packageName,
                 albumArtist = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             )
-            val position = state?.position ?: 0L
+            val position = realPosition(state) ?: 0L
             if (tracker.current?.key != key) {
                 DetectionState.lastTrack(key.display)
                 DetectionState.log("▶ ${key.display} [${c.packageName}] ${stateName(state)}")
@@ -261,12 +269,34 @@ class NovaListenerService : NotificationListenerService() {
 
     /* ---------------- Ticker (validation du seuil) ---------------- */
 
+    /**
+     * Position réelle du lecteur : position annoncée + temps écoulé depuis sa mise à jour (× vitesse) si en lecture.
+     * `lastPositionUpdateTime` est en elapsedRealtime, insensible aux gels du process de NovaStats.
+     * null si le lecteur ne fournit pas de position.
+     */
+    private fun realPosition(state: PlaybackState?): Long? {
+        state ?: return null
+        val p = state.position
+        if (p < 0) return null
+        if (state.state != PlaybackState.STATE_PLAYING) return p
+        val speed = if (state.playbackSpeed > 0f) state.playbackSpeed else 1f
+        val elapsed = (android.os.SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L)
+        return p + (elapsed * speed).toLong()
+    }
+
+    /** Position réelle du lecteur actif (pour le garde-fou du ticker). */
+    private fun activePosition(): Long? {
+        val pkg = tracker.current?.key?.sourceApp ?: return null
+        val c = controllers[pkg] ?: return null
+        return runCatching { realPosition(c.playbackState) }.getOrNull()
+    }
+
     private fun startTicker() {
         tickJob?.cancel()
         tickJob = scope.launch {
             while (isActive) {
                 delay(1_000)
-                handle(tracker.onTick())
+                handle(tracker.onTick(positionMs = activePosition()))
                 tracker.current?.let { runCatching { updateNowPlaying(it) }.onFailure { e -> DetectionState.error(e) } }
             }
         }
@@ -276,7 +306,11 @@ class NovaListenerService : NotificationListenerService() {
 
     private fun handle(events: List<ScrobbleTracker.Event>) {
         if (events.isEmpty()) return
-        scope.launch {
+        scope.launch { handleNow(events) }
+    }
+
+    private suspend fun handleNow(events: List<ScrobbleTracker.Event>) {
+        run {
             for (e in events) {
                 try {
                     when (e) {
@@ -290,6 +324,7 @@ class NovaListenerService : NotificationListenerService() {
                             else DetectionState.log("⏭ Skip avant seuil (${e.listenedMs / 1000}s) : ${e.session.key.display}")
                             app.database.nowPlayingDao().upsert(NowPlayingEntity(scrobbleStatus = "IDLE"))
                         }
+                        is ScrobbleTracker.Event.Gap -> DetectionState.log("🧊 Trou de ${e.gapMs / 1000}s non compté (service gelé / déconnecté) : ${e.session.key.display}")
                         ScrobbleTracker.Event.None -> Unit
                     }
                 } catch (t: Throwable) {
