@@ -80,6 +80,7 @@ enum class SettingsPage(val emoji: String, val title: String, val subtitle: Stri
     DATA("🗄️", "Données", "Export / import JSON, sauvegarde auto, suppression"),
     EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
     SERVICE("🛡️", "Service & diagnostic", "État du service, batterie, journal"),
+    GUIDE("📱", "Guide constructeur", "Samsung, Xiaomi, Huawei, Oppo, Pixel — libérer NovaStats"),
     APIS("🌐", "APIs & enrichissement", "Pochettes, photos — 9 sources"),
     ABOUT("ℹ️", "À propos", "Version, nouveautés, crédits")
 }
@@ -102,6 +103,7 @@ fun SettingsScreen() {
             SettingsPage.DATA -> DataPage()
             SettingsPage.EDITOR -> DataEditorScreen()
             SettingsPage.SERVICE -> ServicePage()
+            SettingsPage.GUIDE -> com.novastats.app.ui.onboarding.GuideStepScreen(com.novastats.app.ui.onboarding.rememberObAudio(), Nova.theme, embedded = true)
             SettingsPage.APIS -> ApisPage()
             SettingsPage.ABOUT -> AboutPage()
         }

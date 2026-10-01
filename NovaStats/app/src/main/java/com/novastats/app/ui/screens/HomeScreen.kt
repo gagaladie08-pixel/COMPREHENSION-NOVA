@@ -1,5 +1,10 @@
 package com.novastats.app.ui.screens
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -86,9 +91,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     DetailPopupHost(detail) { detail = null }
 
     if (totalScrobbles == 0 && nowPlaying?.rawTitle == null) {
-        Column(Modifier.fillMaxSize()) {
-            EmptyState("🎵", "Bienvenue sur NovaStats", "Lance de la musique ou importe ton backup JSON depuis ⚙️ Réglages → Données.\nTon classement s'enrichit à chaque écoute.")
-        }
+        FirstContactHome()
         return
     }
 
@@ -400,4 +403,66 @@ fun sourceAppName(pkg: String?): String = when (pkg) {
     "com.shazam.android" -> "Shazam"
     "com.maxmpz.audioplayer" -> "Poweramp"
     else -> pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
+}
+
+
+/* ---------- Accueil vide — premier contact (avant la première écoute) ---------- */
+@Composable
+private fun FirstContactHome() {
+    val theme = Nova.theme
+    val context = LocalContext.current
+    var listenerOk by remember { mutableStateOf(com.novastats.app.service.NovaListenerService.isEnabled(context)) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) { listenerOk = com.novastats.app.service.NovaListenerService.isEnabled(context); onPauseOrDispose { } }
+    val float by androidx.compose.animation.core.rememberInfiniteTransition(label = "fc").animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(2400), androidx.compose.animation.core.RepeatMode.Reverse), label = "fca")
+    val beat by androidx.compose.animation.core.rememberInfiniteTransition(label = "hb").animateFloat(0.3f, 0.9f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(700), androidx.compose.animation.core.RepeatMode.Reverse), label = "hba")
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        SectionTitle("🎵 En cours de lecture")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("🎧 En attente de ta première écoute…", color = theme.text, fontWeight = FontWeight.SemiBold)
+                        Text("Lance ta musique et regarde la magie opérer", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    listOf("♪", "♫", "♬").forEachIndexed { i, n -> Text(n, color = theme.primary.copy(alpha = 0.4f + 0.6f * ((float + i * 0.33f) % 1f)), fontSize = (16 + 6 * ((float + i * 0.5f) % 1f)).sp, modifier = Modifier.padding(start = 6.dp, bottom = (10 * ((float + i * 0.33f) % 1f)).dp)) }
+                }
+            }
+        }
+        SectionTitle("📊 Aujourd'hui")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    listOf("🎵 0", "⏱️ 0:00", "🎤 0", "💿 0").forEach { Text(it, color = theme.textSecondary.copy(alpha = 0.6f), fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                }
+                Text("Tout commence ici ✨", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp).fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+        }
+        SectionTitle("🎯 Première mission")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Text("🎵 Écoute ta première chanson", color = theme.text, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFE74C3C).copy(alpha = beat * 0.35f)))
+                    Spacer(Modifier.width(10.dp))
+                    Text("0/1", color = theme.textSecondary, fontWeight = FontWeight.Bold)
+                }
+                Text("Récompense : 🏆 Premier Scrobble", color = Color(0xFFFFD700), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                Text("📎 Spotify · YouTube Music · Deezer · Apple Music · ou autre 🎶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+        SectionTitle("🔥 Streak")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Text("🔥 0 jour", color = Color(0xFFE74C3C), fontWeight = FontWeight.Black, fontSize = 22.sp)
+                Text("Ton premier jour commence dès ta première écoute", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            if (listenerOk) "🟢 Service actif — En écoute" else "🔴 Détection inactive — autorise l'accès aux notifications dans ⚙️",
+            color = if (listenerOk) Color(0xFF2ECC71) else Color(0xFFE74C3C), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Text("Tu as déjà un historique ? Importe ton backup JSON depuis ⚙️ → Données.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
 }

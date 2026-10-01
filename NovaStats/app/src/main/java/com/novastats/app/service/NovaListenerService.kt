@@ -339,6 +339,8 @@ class NovaListenerService : NotificationListenerService() {
         }
         if (ended) {
             DetectionState.log("💾 Enregistré (${listened / 1000}s) : ${s.key.display}")
+            // 🎉 Micro-événement : toute première écoute → mission « Premier Scrobble » accomplie
+            if (app.database.scrobbleDao().countConfirmed() == 1) runCatching { AchievementNotifier.firstScrobble(this, s.key.display) }
             // TODO(perf) : remplacer par une mise à jour incrémentale (titre/artiste/album + jour courant)
             // et un check de certification / Panthéon ciblé. Le rebuild complet est correct mais coûteux.
             val news = app.rebuilder.rebuildAll(fullBillboard = false)

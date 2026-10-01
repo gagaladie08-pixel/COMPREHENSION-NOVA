@@ -77,6 +77,7 @@ app/src/main/java/com/novastats/app/
 | 🏛️ Hall of Fame | ✅ Weekly / Monthly / Global × Chansons / Artistes / Albums, une carte par entité avec tous ses badges (Direct Debut, Long Run, Triple Debut, Legendary Run), tri par prestige puis durée de règne |
 | 🏅 Records | ✅ 24 records (`domain/Records.kt` + `RecordsEngine`), recalculés après chaque écoute / import, popup 90 % avec Périodes · Sections · Sous-sections |
 | 🏆 Nova Awards | ✅ 9 récompenses, déblocage à 2 mois, LIVE / FINAL par année, révélation une par une, cérémonie 31 déc., partage texte |
+| 🎬 Onboarding | ✅ Bienvenue 7 phases (sons + vibrations), Étape 1 thèmes (preview live + 15 effets), Étape 2 permissions (3 orbes, gestion des refus), Étape 3 guide constructeur (Samsung / Xiaomi / Huawei / Oppo / Pixel, validation au retour), Étape 4 grand final (genèse, carte d'identité, première mission) ; accueil « premier contact » et notification de première écoute |
 | 🎨 15 thèmes | ✅ Palettes + sélecteur |
 | ⚙️ Paramètres | ✅ 8 sous-pages : Détection · Apparence · Notifications (11) · Données (export JSON v2 compatible v1, import, sauvegarde auto, suppression) · Éditeur · Service & diagnostic · APIs · À propos |
 | 🌐 APIs (cascade 9 sources) | ✅ iTunes · Spotify · Last.fm · MusicBrainz/CAA · TheAudioDB · Deezer · Discogs · Fanart.tv · Google ; score de confiance, consensus, cache 6 mois/1 mois/négatif 7 j, fiabilité dynamique, worker en arrière-plan |

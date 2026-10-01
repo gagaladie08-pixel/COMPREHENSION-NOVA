@@ -26,6 +26,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.Icons
@@ -114,10 +118,21 @@ fun NovaApp() {
             }
         }
     ) { padding ->
+      Column(Modifier.padding(padding)) {
+        // Bannière 🔴 permanente tant que l'accès aux notifications n'est pas accordé (détection impossible)
+        val ctx = LocalContext.current
+        var listenerOk by remember { mutableStateOf(com.novastats.app.service.NovaListenerService.isEnabled(ctx)) }
+        androidx.lifecycle.compose.LifecycleResumeEffect(Unit) { listenerOk = com.novastats.app.service.NovaListenerService.isEnabled(ctx); onPauseOrDispose { } }
+        if (!listenerOk) Row(
+            Modifier.fillMaxWidth().background(Color(0xFFE74C3C)).clickable { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("🔴 Détection inactive — NovaStats n'écoute pas. Touche pour autoriser l'accès aux notifications.", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+        }
         NavHost(
             navController = navController,
             startDestination = NovaTab.HOME.route,
-            modifier = Modifier.padding(padding)
+            modifier = Modifier.weight(1f)
         ) {
             composable(NovaTab.HOME.route) { HomeScreen(onOpenTab = { navController.navigate(it.route) }) }
             composable(NovaTab.STATS.route) { StatsScreen() }
@@ -129,5 +144,6 @@ fun NovaApp() {
             composable(NovaTab.AWARDS.route) { AwardsScreen() }
             composable(NovaTab.SETTINGS.route) { SettingsScreen() }
         }
+      }
     }
 }

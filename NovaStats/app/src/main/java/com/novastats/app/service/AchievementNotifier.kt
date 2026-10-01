@@ -57,6 +57,22 @@ object AchievementNotifier {
         }
     }
 
+    /** 🎉 Première écoute de l'histoire : notification spéciale + entrée dans le fil. */
+    suspend fun firstScrobble(context: Context, display: String) {
+        val app = context.applicationContext as NovaStatsApp
+        app.database.notificationFeedDao().insert(NotificationFeedEntity(type = "FIRST", entityId = 0, entityType = "TRACK", message = "🎉 Ta première écoute ! $display — Ton histoire commence maintenant. 🏆 Premier Scrobble débloqué !"))
+        val canPost = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!canPost) return
+        val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
+        val pi = PendingIntent.getActivity(context, 7_777, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_CERT_EPIC)
+            .setSmallIcon(android.R.drawable.star_on).setContentTitle("🎉 Ta première écoute !")
+            .setContentText("$display — Ton histoire commence maintenant")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$display\nTon histoire commence maintenant.\n🏆 Premier Scrobble débloqué ! Ton premier jour. Le début d'une ère."))
+            .setContentIntent(pi).setAutoCancel(true).build()
+        runCatching { NotificationManagerCompat.from(context).notify(7_777, n) }
+    }
+
     /** (titre, texte, clé de réglage) ou null si inconnu. */
     fun describe(a: StatsRebuilder.Achievement): Triple<String, String, String>? = when (a.kind) {
         "CERTIFICATION" -> {
