@@ -223,3 +223,35 @@ fun SummaryStrip(cells: List<StripCell>, modifier: Modifier = Modifier, content:
 
 /** Moyenne par jour au format FR : « 136,6 » (ou « 12 » si entière). */
 fun formatAverage(avg: Float): String = String.format(Locale.FRANCE, if (avg == avg.toInt().toFloat()) "%.0f" else "%.1f", avg)
+
+/* ---------- Listes « Top 25 + Voir plus » & libellés de période ---------- */
+
+/** Taille initiale des classements Stats / Billboard, et pas du bouton « Voir plus ». */
+const val TOP_INITIAL = 25
+const val TOP_STEP = 20
+
+/** Bouton « Voir plus » placé en fin de liste : déroule [TOP_STEP] lignes supplémentaires. */
+@Composable
+fun LoadMoreButton(remaining: Int, onClick: () -> Unit) {
+    val theme = Nova.theme
+    val step = minOf(TOP_STEP, remaining)
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+        Text(
+            "Voir plus  ▾  (+$step · $remaining restant${if (remaining > 1) "s" else ""})",
+            color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.clip(Nova.chipShape).background(theme.primary.copy(alpha = 0.12f)).clickable(onClick = onClick).padding(horizontal = 18.dp, vertical = 10.dp)
+        )
+    }
+}
+
+/** Libellé lisible d'une période Stats (Daily = aujourd'hui, Weekly = 7 jours glissants, …). */
+fun periodCaption(period: Period, range: com.novastats.app.domain.DateRange): String {
+    val f = java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+    return when (period) {
+        Period.DAILY -> "Aujourd'hui · ${range.to.format(f)}"
+        Period.WEEKLY -> "7 derniers jours · ${range.from.format(f)} → ${range.to.format(f)}"
+        Period.MONTHLY -> "Mois en cours · ${range.from.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE))}"
+        Period.YEARLY -> "Année ${range.to.year}"
+        Period.GLOBAL -> "Depuis le début"
+    }
+}

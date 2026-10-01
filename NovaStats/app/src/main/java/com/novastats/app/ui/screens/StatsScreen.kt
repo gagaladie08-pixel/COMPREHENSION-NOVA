@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +27,7 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,8 +57,13 @@ private const val TOP_LIMIT = 300
  * Sélecteur de période commun : Daily = aujourd'hui · Weekly = 7 derniers jours (glissant) · Monthly = mois
  * calendaire · Yearly = année calendaire · Global. Top 300, tri écoutes puis temps cumulé.
  * Positions : 🥇🥈🥉 #1-3 · 🔥 #4-#10 · "#11" · "—" non classé · "▼ 300+".
- * Appui long sur une ligne → popup de détail (chanson / artiste / album).
+ * Appui long sur une ligne → popup de détail (chanson / artiste / album) **sur la période choisie**.
+ *
+ * Mise en page : périodes + bandeau défilent avec la liste ; la rangée Titres / Artistes / Albums reste collée en haut
+ * (stickyHeader) dès qu'on fait défiler → elle vient se coller sous les onglets principaux.
+ * Classement : Top 25 affiché, bouton « Voir plus » = +20 à chaque appui (jusqu'à 300).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StatsScreen() {
     val app = LocalContext.current.applicationContext as NovaStatsApp
@@ -87,120 +95,123 @@ fun StatsScreen() {
 
     DetailPopupHost(detail) { detail = null }
 
-    Column(Modifier.fillMaxSize()) {
-        /* ---------- En-tête (maquette utilisateur) : périodes → bandeau → onglets Titres / Artistes / Albums + 🔍 ---------- */
+    val filteredTracks = remember(tracks, q) { tracks.mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
+    val filteredArtists = remember(artists, q) { artists.mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
+    val filteredAlbums = remember(albums, q) { albums.mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
 
-        // 1. Sélecteur de période
-        PeriodSegment(period) { period = it }
+    val total = when (tab) { 0 -> filteredTracks.size; 1 -> filteredArtists.size; else -> filteredAlbums.size }
+    // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de sous-onglet / période / recherche
+    var visible by remember(tab, period, q) { mutableIntStateOf(TOP_INITIAL) }
+    val shown = minOf(visible, total)
 
-        // 2. Bandeau résumé
-        val days = if (period == Period.GLOBAL) summary.activeDays else elapsedDays(range)
-        val avg = if (days > 0) summary.playCount.toFloat() / days else 0f
-        SummaryStrip(
-            listOf(
-                StripCell(formatCount(summary.playCount), "Écoutes"),
-                StripCell(formatDuration(summary.totalDurationMs), "Temps"),
-                StripCell("${summary.distinctTracks}", "Titres"),
-                StripCell("${summary.distinctArtists}", "Artistes"),
-                StripCell(formatAverage(avg), "Moy/jour")
-            )
-        )
-        Text(
-            periodCaption(period, range), color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
-        )
+    val listState = rememberLazyListState()
+    // Changement de période : on remonte en haut pour revoir le bandeau
+    LaunchedEffect(period) { listState.scrollToItem(0) }
 
-        // 3. Onglets Titres / Artistes / Albums + loupe
-        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            TabRow(
-                selectedTabIndex = tab,
-                modifier = Modifier.weight(1f),
-                containerColor = theme.background,
-                contentColor = theme.primary,
-                indicator = { positions ->
-                    Box(Modifier.tabIndicatorOffset(positions[tab]).padding(horizontal = 28.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
-                },
-                divider = {}
-            ) {
-                statsTabs.forEachIndexed { i, label ->
-                    Tab(
-                        selected = tab == i, onClick = { tab = i },
-                        text = { Text(label, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.titleSmall) },
-                        selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+    LazyColumn(Modifier.fillMaxSize(), state = listState) {
+        /* ---------- En-tête défilant : périodes → bandeau → légende ---------- */
+        item(key = "header") {
+            Column(Modifier.fillMaxWidth()) {
+                PeriodSegment(period) { period = it }
+                val days = if (period == Period.GLOBAL) summary.activeDays else elapsedDays(range)
+                val avg = if (days > 0) summary.playCount.toFloat() / days else 0f
+                SummaryStrip(
+                    listOf(
+                        StripCell(formatCount(summary.playCount), "Écoutes"),
+                        StripCell(formatDuration(summary.totalDurationMs), "Temps"),
+                        StripCell("${summary.distinctTracks}", "Titres"),
+                        StripCell("${summary.distinctArtists}", "Artistes"),
+                        StripCell(formatAverage(avg), "Moy/jour")
                     )
-                }
-            }
-            Box(Modifier.padding(end = 4.dp)) {
-                IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
-                    Icon(if (searching) CloseIcon else SearchIcon, contentDescription = "Rechercher", tint = if (searching || query.isNotBlank()) theme.primary else theme.textSecondary)
-                }
-            }
-        }
-
-        if (searching) {
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                singleLine = true,
-                placeholder = { Text("Rechercher dans ${statsTabs[tab].lowercase()}…", color = theme.textSecondary) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = theme.primary, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f),
-                    focusedTextColor = theme.text, unfocusedTextColor = theme.text, cursorColor = theme.primary
                 )
-            )
+                Text(
+                    periodCaption(period, range) + if (period == Period.GLOBAL) " · Top $TOP_LIMIT" else "",
+                    color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
+                )
+            }
         }
 
-        val filteredTracks = remember(tracks, q) { tracks.mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
-        val filteredArtists = remember(artists, q) { artists.mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
-        val filteredAlbums = remember(albums, q) { albums.mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
-
-        val isEmpty = when (tab) { 0 -> filteredTracks.isEmpty(); 1 -> filteredArtists.isEmpty(); else -> filteredAlbums.isEmpty() }
-        if (isEmpty) {
-            if (q.isNotBlank()) EmptyState("🔍", "Aucun résultat pour « $query »", "dans le Top $TOP_LIMIT ${statsTabs[tab].lowercase()} de la période")
-            else EmptyState("📊", "Aucune écoute sur cette période", "Ton classement s'enrichit à chaque écoute")
-            return
-        }
-
-        LazyColumn(Modifier.fillMaxSize()) {
-            when (tab) {
-                0 -> itemsIndexed(filteredTracks, key = { _, (_, t) -> t.track.trackId }) { _, (pos, t) ->
-                    RankRow(
-                        pos, t.track.title, listOfNotNull(t.artistName, t.albumTitle).joinToString(" · "), t.periodPlays, t.periodDurationMs, t.track.coverUrl,
-                        onLongClick = { detail = DetailTarget.Track(t.track.trackId) }
-                    )
+        /* ---------- Sous-onglets collants : Titres / Artistes / Albums + loupe (+ champ de recherche) ---------- */
+        stickyHeader(key = "tabs") {
+            Column(Modifier.fillMaxWidth().background(theme.background)) {
+                Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TabRow(
+                        selectedTabIndex = tab,
+                        modifier = Modifier.weight(1f),
+                        containerColor = theme.background,
+                        contentColor = theme.primary,
+                        indicator = { positions ->
+                            Box(Modifier.tabIndicatorOffset(positions[tab]).padding(horizontal = 28.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
+                        },
+                        divider = {}
+                    ) {
+                        statsTabs.forEachIndexed { i, label ->
+                            Tab(
+                                selected = tab == i, onClick = { tab = i },
+                                text = { Text(label, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.titleSmall) },
+                                selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+                            )
+                        }
+                    }
+                    Box(Modifier.padding(end = 4.dp)) {
+                        IconButton(onClick = { searching = !searching; if (!searching) query = "" }) {
+                            Icon(if (searching) CloseIcon else SearchIcon, contentDescription = "Rechercher", tint = if (searching || query.isNotBlank()) theme.primary else theme.textSecondary)
+                        }
+                    }
                 }
-                1 -> itemsIndexed(filteredArtists, key = { _, (_, a) -> a.artist.artistId }) { _, (pos, a) ->
-                    val sub = PantheonStatus.fromDb(a.artist.pantheonStatus)?.let { "${it.emoji} ${it.label.uppercase()}" }
-                    RankRow(
-                        pos, a.artist.name, sub, a.periodPlays, a.periodDurationMs, a.artist.photoUrl, circle = true,
-                        onLongClick = { detail = DetailTarget.Artist(a.artist.artistId) }
-                    )
-                }
-                else -> itemsIndexed(filteredAlbums, key = { _, (_, al) -> al.album.albumId }) { _, (pos, al) ->
-                    RankRow(
-                        pos, al.album.title, al.artistName, al.periodPlays, al.periodDurationMs, al.album.coverUrl,
-                        onLongClick = { detail = DetailTarget.Album(al.album.albumId) }
+                if (searching) {
+                    OutlinedTextField(
+                        value = query, onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        singleLine = true,
+                        placeholder = { Text("Rechercher dans ${statsTabs[tab].lowercase()}…", color = theme.textSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = theme.primary, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f),
+                            focusedTextColor = theme.text, unfocusedTextColor = theme.text, cursorColor = theme.primary
+                        )
                     )
                 }
             }
         }
+
+        /* ---------- Classement ---------- */
+        if (total == 0) {
+            item(key = "empty") {
+                Box(Modifier.fillParentMaxHeight(0.6f)) {
+                    if (q.isNotBlank()) EmptyState("🔍", "Aucun résultat pour « $query »", "dans le Top $TOP_LIMIT ${statsTabs[tab].lowercase()} de la période")
+                    else EmptyState("📊", "Aucune écoute sur cette période", "Ton classement s'enrichit à chaque écoute")
+                }
+            }
+        } else when (tab) {
+            0 -> itemsIndexed(filteredTracks.subList(0, shown), key = { _, (_, t) -> "t" + t.track.trackId }) { _, (pos, t) ->
+                RankRow(
+                    pos, t.track.title, listOfNotNull(t.artistName, t.albumTitle).joinToString(" · "), t.periodPlays, t.periodDurationMs, t.track.coverUrl,
+                    onLongClick = { detail = DetailTarget.Track(t.track.trackId, period) }
+                )
+            }
+            1 -> itemsIndexed(filteredArtists.subList(0, shown), key = { _, (_, a) -> "a" + a.artist.artistId }) { _, (pos, a) ->
+                val sub = PantheonStatus.fromDb(a.artist.pantheonStatus)?.let { "${it.emoji} ${it.label.uppercase()}" }
+                RankRow(
+                    pos, a.artist.name, sub, a.periodPlays, a.periodDurationMs, a.artist.photoUrl, circle = true,
+                    onLongClick = { detail = DetailTarget.Artist(a.artist.artistId, period) }
+                )
+            }
+            else -> itemsIndexed(filteredAlbums.subList(0, shown), key = { _, (_, al) -> "al" + al.album.albumId }) { _, (pos, al) ->
+                RankRow(
+                    pos, al.album.title, al.artistName, al.periodPlays, al.periodDurationMs, al.album.coverUrl,
+                    onLongClick = { detail = DetailTarget.Album(al.album.albumId, period) }
+                )
+            }
+        }
+        if (total > shown) item(key = "more") { LoadMoreButton(total - shown) { visible += TOP_STEP } }
+        item(key = "bottom") { Box(Modifier.height(24.dp)) }
     }
 }
 
 private fun elapsedDays(range: com.novastats.app.domain.DateRange): Int {
     val end = minOf(range.to, Dates.today())
     return (java.time.temporal.ChronoUnit.DAYS.between(range.from, end) + 1).toInt().coerceAtLeast(1)
-}
-
-private fun periodCaption(period: Period, range: com.novastats.app.domain.DateRange): String {
-    val f = java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.FRANCE)
-    return when (period) {
-        Period.DAILY -> "Aujourd'hui · ${range.to.format(f)}"
-        Period.WEEKLY -> "7 derniers jours · ${range.from.format(f)} → ${range.to.format(f)}"
-        Period.MONTHLY -> "Mois en cours · ${range.from.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.FRANCE))}"
-        Period.YEARLY -> "Année ${range.to.year}"
-        Period.GLOBAL -> "Depuis le début · Top $TOP_LIMIT"
-    }
 }
 
 /* Icônes vectorielles minimalistes (pas de dépendance material-icons-extended) */

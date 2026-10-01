@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,6 +44,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,6 +78,7 @@ private val Bronze = Color(0xFFCD7F32)
 /**
  * 🏆 Billboard — Nova Hot 100 · Nova Artist 50 · Nova 75 Albums.
  * Classements figés par période (snapshots), navigation dans l'historique, fiche détaillée par appui long.
+ * Périodes + bandeau défilent avec la liste ; la rangée des charts reste collée en haut. Top 25 + « Voir plus » (+20).
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -85,94 +89,108 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     var showPicker by remember { mutableStateOf(false) }
 
     var searching by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize()) {
-        /* ---------- En-tête (maquette utilisateur) : périodes → navigation → bandeau → onglets Hot 100 / Artist 50 / Albums 75 + 🔍 ---------- */
 
-        // 1. Périodes
-        PeriodSegment(state.period) { vm.selectPeriod(it) }
+    val rows = state.filtered
+    val limit = state.limit
+    val unit = BillboardDates.unitLabel(state.period, 2)
+    // Lignes à afficher : le classement réel puis les places vides « — » jusqu'à la limite du chart (hors recherche)
+    val totalRows = if (state.query.isBlank()) limit else rows.size
+    // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de chart / période / date / recherche
+    var visible by remember(state.chart, state.period, state.anchor, state.query) { mutableIntStateOf(TOP_INITIAL) }
+    val shown = minOf(visible, totalRows)
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.period, state.anchor) { listState.scrollToItem(0) }
 
-        // 2. Navigation dans l'historique (appui long sur la date → calendrier)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = vm::previousPeriod) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Période précédente", tint = theme.text) }
-            Row(
-                Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
-                    .combinedClickable(onClick = {}, onLongClick = { showPicker = true })
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    BillboardDates.label(state.period, state.anchor), color = theme.text, fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-                if (state.isCurrent) {
-                    Spacer(Modifier.width(8.dp))
-                    Badge("LIVE", NovaColors.Down)
+    LazyColumn(Modifier.fillMaxSize(), state = listState) {
+        /* ---------- En-tête défilant : périodes → navigation → bandeau ---------- */
+        item(key = "header") {
+            Column(Modifier.fillMaxWidth()) {
+                // 1. Périodes
+                PeriodSegment(state.period) { vm.selectPeriod(it) }
+
+                // 2. Navigation dans l'historique (appui long sur la date → calendrier)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = vm::previousPeriod) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Période précédente", tint = theme.text) }
+                    Row(
+                        Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                            .combinedClickable(onClick = {}, onLongClick = { showPicker = true })
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            BillboardDates.label(state.period, state.anchor), color = theme.text, fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                        if (state.isCurrent) {
+                            Spacer(Modifier.width(8.dp))
+                            Badge("LIVE", NovaColors.Down)
+                        }
+                    }
+                    IconButton(onClick = vm::nextPeriod, enabled = !state.isCurrent) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Période suivante", tint = if (state.isCurrent) theme.textSecondary.copy(alpha = 0.3f) else theme.text)
+                    }
                 }
-            }
-            IconButton(onClick = vm::nextPeriod, enabled = !state.isCurrent) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Période suivante", tint = if (state.isCurrent) theme.textSecondary.copy(alpha = 0.3f) else theme.text)
+
+                // 3. Bandeau résumé (style Stats)
+                if (state.hasAnyData) SummaryBanner(state)
             }
         }
 
-        // 3. Bandeau résumé (style Stats)
-        if (state.hasAnyData) SummaryBanner(state)
-
-        // 4. Onglets charts + loupe
-        val chartIndex = Chart.entries.indexOf(state.chart)
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TabRow(
-                selectedTabIndex = chartIndex,
-                modifier = Modifier.weight(1f),
-                containerColor = theme.background,
-                contentColor = theme.primary,
-                indicator = { positions ->
-                    Box(Modifier.tabIndicatorOffset(positions[chartIndex]).padding(horizontal = 24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
-                },
-                divider = {}
-            ) {
-                Chart.entries.forEach { c ->
-                    val on = state.chart == c
-                    Tab(
-                        selected = on, onClick = { vm.selectChart(c) },
-                        text = { Text(c.label.removePrefix("Nova "), style = MaterialTheme.typography.titleSmall, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false) },
-                        selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+        /* ---------- Sous-onglets collants : Hot 100 / Artist 50 / Albums 75 + loupe (+ recherche) ---------- */
+        stickyHeader(key = "tabs") {
+            val chartIndex = Chart.entries.indexOf(state.chart)
+            Column(Modifier.fillMaxWidth().background(theme.background)) {
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TabRow(
+                        selectedTabIndex = chartIndex,
+                        modifier = Modifier.weight(1f),
+                        containerColor = theme.background,
+                        contentColor = theme.primary,
+                        indicator = { positions ->
+                            Box(Modifier.tabIndicatorOffset(positions[chartIndex]).padding(horizontal = 24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
+                        },
+                        divider = {}
+                    ) {
+                        Chart.entries.forEach { c ->
+                            val on = state.chart == c
+                            Tab(
+                                selected = on, onClick = { vm.selectChart(c) },
+                                text = { Text(c.label.removePrefix("Nova "), style = MaterialTheme.typography.titleSmall, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false) },
+                                selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+                            )
+                        }
+                    }
+                    IconButton(onClick = { searching = !searching; if (!searching) vm.search("") }, modifier = Modifier.padding(end = 4.dp)) {
+                        Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Rechercher", tint = if (searching || state.query.isNotBlank()) theme.primary else theme.textSecondary)
+                    }
+                }
+                if (searching) {
+                    OutlinedTextField(
+                        value = state.query, onValueChange = vm::search, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        placeholder = { Text("Rechercher dans ${state.chart.label}…", color = theme.textSecondary) },
+                        leadingIcon = { Icon(Icons.Filled.Search, null, tint = theme.textSecondary) },
+                        trailingIcon = { if (state.query.isNotEmpty()) IconButton({ vm.search("") }) { Icon(Icons.Filled.Close, "Effacer", tint = theme.textSecondary) } },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = theme.primary, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f), cursorColor = theme.primary),
+                        shape = RoundedCornerShape(12.dp)
                     )
                 }
-            }
-            IconButton(onClick = { searching = !searching; if (!searching) vm.search("") }, modifier = Modifier.padding(end = 4.dp)) {
-                Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Rechercher", tint = if (searching || state.query.isNotBlank()) theme.primary else theme.textSecondary)
+                Spacer(Modifier.height(4.dp))
             }
         }
 
-        // 5. Recherche (chart actif uniquement)
-        if (searching) {
-            OutlinedTextField(
-                value = state.query, onValueChange = vm::search, singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                placeholder = { Text("Rechercher dans ${state.chart.label}…", color = theme.textSecondary) },
-                leadingIcon = { Icon(Icons.Filled.Search, null, tint = theme.textSecondary) },
-                trailingIcon = { if (state.query.isNotEmpty()) IconButton({ vm.search("") }) { Icon(Icons.Filled.Close, "Effacer", tint = theme.textSecondary) } },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = theme.primary, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f), cursorColor = theme.primary),
-                shape = RoundedCornerShape(12.dp)
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-
+        /* ---------- Classement ---------- */
         if (!state.hasAnyData) {
-            EmptyState("🏆", "Ton Billboard t'attend", "Lance ta première écoute : chaque titre, artiste et album se battra pour la 1re place !")
-            return
-        }
-
-        val rows = state.filtered
-        val limit = state.limit
-        val unit = BillboardDates.unitLabel(state.period, 2)
-
-        LazyColumn(Modifier.fillMaxSize()) {
-
+            item(key = "empty") {
+                Box(Modifier.fillParentMaxHeight(0.6f)) {
+                    EmptyState("🏆", "Ton Billboard t'attend", "Lance ta première écoute : chaque titre, artiste et album se battra pour la 1re place !")
+                }
+            }
+        } else {
             if (state.items.isEmpty() && state.query.isBlank()) {
-                item {
+                item(key = "no-period") {
                     Text(
                         "Aucune écoute sur cette période — le classement se remplira à la prochaine lecture 🎧",
                         color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
@@ -181,7 +199,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 }
             }
             if (state.query.isNotBlank() && rows.isEmpty()) {
-                item {
+                item(key = "no-result") {
                     Text(
                         "Aucun résultat pour « ${state.query} » dans ${state.chart.label}",
                         color = theme.textSecondary, textAlign = TextAlign.Center,
@@ -190,18 +208,22 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 }
             }
 
-            items(rows, key = { it.entityId }) { item ->
+            val realShown = minOf(shown, rows.size)
+            items(rows.subList(0, realShown), key = { it.entityId }) { item ->
                 ChartRow(item, state.period, onLongPress = { vm.openHistory(item) })
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }
 
-            // Places vides "—" jusqu'à la limite du chart (hors recherche)
-            if (state.query.isBlank() && state.items.size < limit) {
-                items((state.items.size + 1..limit).toList(), key = { "empty-$it" }) { pos ->
+            // Places vides « — » jusqu'à la limite visible (hors recherche)
+            if (state.query.isBlank() && shown > state.items.size) {
+                items((state.items.size + 1..shown).toList(), key = { "empty-$it" }) { pos ->
                     EmptyRow(pos)
                     if (pos == 10) Top10Divider()
                 }
-                item {
+            }
+            if (totalRows > shown) item(key = "more") { LoadMoreButton(totalRows - shown) { visible += TOP_STEP } }
+            else if (state.query.isBlank() && state.items.size < limit) {
+                item(key = "remaining") {
                     Text(
                         "Encore ${limit - state.items.size} place${if (limit - state.items.size > 1) "s" else ""} à conquérir sur ce $unit… continue d'écouter ✨",
                         color = theme.textSecondary.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
@@ -209,7 +231,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                     )
                 }
             }
-            item { Spacer(Modifier.height(24.dp)) }
+            item(key = "bottom") { Spacer(Modifier.height(24.dp)) }
         }
     }
 
