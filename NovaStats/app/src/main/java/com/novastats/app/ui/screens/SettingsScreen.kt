@@ -623,13 +623,26 @@ private fun ServicePage() {
                     colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
                 ) { Text("🔋 Désactiver l'optimisation batterie") }
                 Spacer(Modifier.height(8.dp))
-                ToggleRow("Watchdog", "Vérification toutes les 5 min + relance auto", watchdog) { scope.launch { settings.setWatchdog(it) } }
+                ToggleRow("Watchdog", "Vérification toutes les 15 min + à l'ouverture : relance le listener s'il est endormi", watchdog) {
+                    scope.launch { settings.setWatchdog(it); if (it) com.novastats.app.service.Watchdog.schedule(context) else com.novastats.app.service.Watchdog.cancel(context) }
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { com.novastats.app.service.Watchdog.revive(context, "manuel") }, modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("🐕 Relancer le service maintenant") }
             }
         }
         SectionTitle("🔎 Diagnostic détection")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
+                val health by com.novastats.app.service.ServiceHealth.state.collectAsStateWithLifecycle()
+                val batteryExempt = remember { com.novastats.app.service.Watchdog.isBatteryExempt(context) }
                 DiagLine("Listener connecté", if (detection.listenerConnected) "oui" else "non")
+                DiagLine("Dernier signe de vie", com.novastats.app.service.ServiceHealth.ago(health.lastHeartbeat), error = health.isStale() && accessGranted)
+                DiagLine("Service premier plan", "notification « NovaStats veille »")
+                DiagLine("Optimisation batterie", if (batteryExempt) "désactivée ✅" else "ACTIVE ⚠️ (risque de gel)", error = !batteryExempt)
+                if (health.restarts > 0) DiagLine("Relances watchdog", "${health.restarts} · dernière ${com.novastats.app.service.ServiceHealth.ago(health.lastRestart)} (${health.lastRestartReason ?: "?"})")
                 DiagLine("MediaSession", if (detection.mediaSessionAvailable) "disponible" else "indisponible")
                 DiagLine("Sessions média actives", detection.activeSessions.ifEmpty { listOf("aucune") }.joinToString(", "))
                 if (detection.ignoredSessions.isNotEmpty()) DiagLine("Ignorées (whitelist)", detection.ignoredSessions.joinToString(", "))

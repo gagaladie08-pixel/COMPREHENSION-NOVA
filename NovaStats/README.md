@@ -68,7 +68,7 @@ app/src/main/java/com/novastats/app/
 |---|---|
 | 🗄️ Base de données (34 tables) | ✅ Entités + DAOs |
 | 📥 Import JSON v1 + recalcul complet | ✅ |
-| 🎵 Détection v3.0 | ✅ Tracker + service MediaSession/Notification, whitelist apps, blacklist artistes/mots-clés, filtre > 10 min ; robustesse : plafond durée du morceau, anti-gel (trous d'horloge non comptés, clôture à la déconnexion), position réelle du lecteur comme garde-fou |
+| 🎵 Détection v3.0 | ✅ Tracker + service MediaSession/Notification, whitelist apps, blacklist artistes/mots-clés, filtre > 10 min ; robustesse : plafond durée du morceau, anti-gel (trous d'horloge non comptés, clôture à la déconnexion), position réelle du lecteur comme garde-fou ; service premier plan compagnon (« NovaStats veille »), watchdog 15 min + ouverture (battement de cœur persisté, relance listener), tracker mono-thread, recalcul regroupé, bannières service endormi / optimisation batterie |
 | 🏠 Accueil | ✅ 8 sections : lecture en cours (pochette, progression, source, statut), aujourd'hui, top du moment, actualités, prochaines certifs, records, récents, streak |
 | 📊 Stats | ✅ Titres/Artistes/Albums × 5 périodes (Weekly = 7 jours glissants), recherche, bandeau, popups détaillées (appui long) |
 | 💎 Certifications | ✅ Chansons / Albums, chips par palier avec compteurs, radar des 5 prochains paliers, tri niveau → écoutes, dates rétroactives + durée, recherche, fiche colorée par niveau (historique, progression, courbe, positions), sons distincts par palier |

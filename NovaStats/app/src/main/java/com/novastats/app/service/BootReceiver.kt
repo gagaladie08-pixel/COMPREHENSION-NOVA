@@ -24,5 +24,8 @@ class BootReceiver : BroadcastReceiver() {
             pm.setComponentEnabledSetting(component, android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED, android.content.pm.PackageManager.DONT_KILL_APP)
             NotificationListenerService.requestRebind(component)
         }.onFailure { Log.w("NovaBoot", "Rebind impossible", it) }
+        // Service premier plan (autorisé depuis BOOT_COMPLETED) + watchdog périodique
+        NovaKeepAliveService.start(context)
+        runCatching { Watchdog.schedule(context) }
     }
 }

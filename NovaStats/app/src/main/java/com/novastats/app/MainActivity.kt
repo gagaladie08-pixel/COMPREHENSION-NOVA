@@ -20,6 +20,12 @@ import com.novastats.app.ui.theme.NovaStatsTheme
 import com.novastats.app.ui.theme.NovaThemes
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        // L'app est visible : on peut toujours (re)lancer le service premier plan et réveiller le listener si besoin
+        runCatching { com.novastats.app.service.Watchdog.check(this, "ouverture de l'app", fromForeground = true) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

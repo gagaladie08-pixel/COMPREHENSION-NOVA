@@ -32,7 +32,17 @@ object DetectionState {
     private val _state = MutableStateFlow(Snapshot())
     val state: StateFlow<Snapshot> = _state
 
-    private val fmt = SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
+    private val fmt = SimpleDateFormat("dd/MM HH:mm:ss", Locale.FRANCE)
+    private var appContext: android.content.Context? = null
+
+    /** À appeler au démarrage de l'app / du service : recharge le journal persisté (survit à la mort du process). */
+    fun bind(context: android.content.Context) {
+        if (appContext != null) return
+        appContext = context.applicationContext
+        val persisted = ServiceHealth.persistedLog(context)
+        ServiceHealth.load(context)
+        if (persisted.isNotEmpty()) _state.update { it.copy(log = (it.log + persisted).distinct().take(60)) }
+    }
 
     fun connected(value: Boolean) = _state.update { it.copy(listenerConnected = value) }
     fun mediaSessionAvailable(value: Boolean) = _state.update { it.copy(mediaSessionAvailable = value) }
@@ -40,7 +50,9 @@ object DetectionState {
     fun lastTrack(value: String) = _state.update { it.copy(lastTrack = value) }
     fun error(t: Throwable) = _state.update { it.copy(lastError = "${t.javaClass.simpleName}: ${t.message}") }
 
-    fun log(message: String) = _state.update {
-        it.copy(log = (listOf("${fmt.format(Date())}  $message") + it.log).take(30))
+    fun log(message: String) {
+        val line = "${fmt.format(Date())}  $message"
+        _state.update { it.copy(log = (listOf(line) + it.log).take(60)) }
+        appContext?.let { runCatching { ServiceHealth.appendLog(it, line) } }
     }
 }

@@ -30,6 +30,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -134,6 +136,36 @@ fun NovaApp() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("🔴 Détection inactive — NovaStats n'écoute pas. Touche pour autoriser l'accès aux notifications.", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+        }
+        // 🟠 Permission OK mais service endormi (pas de battement de cœur) → relance au toucher
+        val detection by com.novastats.app.service.DetectionState.state.collectAsStateWithLifecycle()
+        val health by com.novastats.app.service.ServiceHealth.state.collectAsStateWithLifecycle()
+        var batteryExempt by remember { mutableStateOf(com.novastats.app.service.Watchdog.isBatteryExempt(ctx)) }
+        var batteryDismissed by rememberSaveable { mutableStateOf(false) }
+        androidx.lifecycle.compose.LifecycleResumeEffect(Unit) { batteryExempt = com.novastats.app.service.Watchdog.isBatteryExempt(ctx); onPauseOrDispose { } }
+        if (listenerOk && (!detection.listenerConnected || health.isStale())) Row(
+            Modifier.fillMaxWidth().background(Color(0xFFE67E22)).clickable { com.novastats.app.service.Watchdog.revive(ctx, "bannière Accueil") }.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "🟠 Service de détection endormi (dernier signe de vie : ${com.novastats.app.service.ServiceHealth.ago(health.lastHeartbeat)}). Touche pour le relancer.",
+                color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f)
+            )
+        }
+        // 🔋 Optimisation batterie active → l'OS peut geler la détection hors de l'app
+        if (listenerOk && !batteryExempt && !batteryDismissed) Row(
+            Modifier.fillMaxWidth().background(Color(0xFFB7950B)).padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "🔋 Optimisation batterie active : Android peut couper la détection quand l'app est fermée. Touche pour l'exclure.",
+                color = Color.White, style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.weight(1f).clickable {
+                    runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${ctx.packageName}"))) }
+                        .onFailure { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                }
+            )
+            Text("  ✕", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { batteryDismissed = true })
         }
         ThemeFxHost(Modifier.weight(1f)) {
         NavHost(

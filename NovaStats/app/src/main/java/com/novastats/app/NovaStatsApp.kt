@@ -36,6 +36,8 @@ class NovaStatsApp : Application() {
         createNotificationChannels()
         EnrichmentWorker.schedulePeriodic(this)
         BackupWorker.schedulePeriodic(this)
+        com.novastats.app.service.DetectionState.bind(this)
+        com.novastats.app.service.Watchdog.schedule(this)
     }
 
     private fun createNotificationChannels() {

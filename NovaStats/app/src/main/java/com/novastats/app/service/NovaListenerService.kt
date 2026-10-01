@@ -57,6 +57,7 @@ class NovaListenerService : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         sessionManager = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+        DetectionState.bind(this)
         DetectionState.log("Service créé")
         scope.launch {
             launch { app.settings.thresholdSec.collect { tracker.updateThreshold(it); DetectionState.log("Seuil : ${it}s") } }
@@ -77,7 +78,10 @@ class NovaListenerService : NotificationListenerService() {
         super.onListenerConnected()
         Log.i(tag, "Listener connecté")
         DetectionState.connected(true)
+        ServiceHealth.connected(this, true)
         DetectionState.log("Accès aux notifications : connecté")
+        // Service premier plan compagnon : empêche le gel du process quand l'app n'est plus à l'écran
+        NovaKeepAliveService.start(this)
         runCatching {
             sessionManager.addOnActiveSessionsChangedListener(sessionsListener, component, mainHandler)
             DetectionState.mediaSessionAvailable(true)
@@ -96,6 +100,7 @@ class NovaListenerService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         DetectionState.connected(false)
+        ServiceHealth.connected(this, false)
         DetectionState.log("Accès aux notifications : déconnecté → demande de reconnexion")
         runCatching { sessionManager.removeOnActiveSessionsChangedListener(sessionsListener) }
         unbindAll()
@@ -108,6 +113,7 @@ class NovaListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         DetectionState.connected(false)
+        ServiceHealth.connected(this, false)
         DetectionState.log("Service détruit")
         unbindAll()
         tickJob?.cancel()
@@ -291,13 +297,29 @@ class NovaListenerService : NotificationListenerService() {
         return runCatching { realPosition(c.playbackState) }.getOrNull()
     }
 
+    /**
+     * Ticker 1 s — sur le **thread principal**, comme les callbacks MediaSession : le tracker n'est ainsi jamais
+     * touché par deux threads à la fois (plus de course entre un tick et un changement de titre).
+     */
     private fun startTicker() {
         tickJob?.cancel()
-        tickJob = scope.launch {
+        tickJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
                 delay(1_000)
                 handle(tracker.onTick(positionMs = activePosition()))
-                tracker.current?.let { runCatching { updateNowPlaying(it) }.onFailure { e -> DetectionState.error(e) } }
+                ServiceHealth.heartbeat(this@NovaListenerService)
+                val cur = tracker.current
+                if (cur != null) {
+                    val now = System.currentTimeMillis()
+                    // Instantané pris sur le thread principal, persisté hors thread principal
+                    val snap = NowPlayingEntity(
+                        trackId = null, rawTitle = cur.key.title, rawArtist = cur.key.artist, rawAlbum = cur.key.album, startedAt = cur.startedAt,
+                        progressMs = cur.listenedMs(now), positionMs = cur.estimatedPositionMs(now), durationMs = cur.key.durationMs,
+                        isPlaying = cur.playingSince != null, sourceApp = cur.key.sourceApp,
+                        scrobbleStatus = if (cur.isValidated) "VALIDATED" else "PENDING"
+                    )
+                    scope.launch { runCatching { persistNowPlaying(snap) }.onFailure { e -> DetectionState.error(e) } }
+                }
             }
         }
     }
@@ -337,16 +359,20 @@ class NovaListenerService : NotificationListenerService() {
 
     private suspend fun updateNowPlaying(s: ScrobbleTracker.Session) {
         val now = System.currentTimeMillis()
-        val trackId = if (s.isValidated) app.library.peekTrackId(s.key.title, s.key.artist ?: "Artiste inconnu") else null
-        app.database.nowPlayingDao().upsert(
+        persistNowPlaying(
             NowPlayingEntity(
-                trackId = trackId,
+                trackId = null,
                 rawTitle = s.key.title, rawArtist = s.key.artist, rawAlbum = s.key.album, startedAt = s.startedAt,
                 progressMs = s.listenedMs(now), positionMs = s.estimatedPositionMs(now), durationMs = s.key.durationMs,
                 isPlaying = s.playingSince != null, sourceApp = s.key.sourceApp,
                 scrobbleStatus = if (s.isValidated) "VALIDATED" else "PENDING"
             )
         )
+    }
+
+    private suspend fun persistNowPlaying(snap: NowPlayingEntity) {
+        val trackId = if (snap.scrobbleStatus == "VALIDATED") app.library.peekTrackId(snap.rawTitle ?: return, snap.rawArtist ?: "Artiste inconnu") else null
+        app.database.nowPlayingDao().upsert(snap.copy(trackId = trackId))
     }
 
     /**
@@ -376,11 +402,30 @@ class NovaListenerService : NotificationListenerService() {
             DetectionState.log("💾 Enregistré (${listened / 1000}s) : ${s.key.display}")
             // 🎉 Micro-événement : toute première écoute → mission « Premier Scrobble » accomplie
             if (app.database.scrobbleDao().countConfirmed() == 1) runCatching { AchievementNotifier.firstScrobble(this, s.key.display) }
-            // TODO(perf) : remplacer par une mise à jour incrémentale (titre/artiste/album + jour courant)
-            // et un check de certification / Panthéon ciblé. Le rebuild complet est correct mais coûteux.
-            val news = app.rebuilder.rebuildAll(fullBillboard = false)
-            runCatching { AchievementNotifier.notify(this, news) }.onFailure { DetectionState.error(it) }
-            EnrichmentWorker.enqueue(this)
+            scheduleRebuild()
+        }
+    }
+
+    private var rebuildJob: Job? = null
+
+    /**
+     * Recalcul des stats **regroupé** : plusieurs écoutes qui se terminent à quelques secondes d'intervalle
+     * (fin de morceau + dégel, rafale d'événements…) ne déclenchent qu'un seul recalcul, 5 s après la dernière.
+     * Le recalcul complet par écoute était la principale charge CPU du service en arrière-plan.
+     */
+    private fun scheduleRebuild() {
+        rebuildJob?.cancel()
+        rebuildJob = scope.launch {
+            delay(5_000)
+            try {
+                val news = app.rebuilder.rebuildAll(fullBillboard = false)
+                runCatching { AchievementNotifier.notify(this@NovaListenerService, news) }.onFailure { DetectionState.error(it) }
+                EnrichmentWorker.enqueue(this@NovaListenerService)
+            } catch (t: kotlinx.coroutines.CancellationException) {
+                throw t
+            } catch (t: Throwable) {
+                Log.e(tag, "rebuild", t); DetectionState.error(t)
+            }
         }
     }
 
