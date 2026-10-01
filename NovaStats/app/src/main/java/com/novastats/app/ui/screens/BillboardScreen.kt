@@ -29,8 +29,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -86,48 +84,20 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val history by vm.history.collectAsStateWithLifecycle()
     var showPicker by remember { mutableStateOf(false) }
 
+    var searching by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        // ---- Charts
-        val chartIndex = Chart.entries.indexOf(state.chart)
-        TabRow(
-            selectedTabIndex = chartIndex,
-            containerColor = theme.surface,
-            contentColor = theme.primary,
-            indicator = { positions -> TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(positions[chartIndex]), color = theme.primary) }
-        ) {
-            Chart.entries.forEach { c ->
-                Tab(
-                    selected = state.chart == c, onClick = { vm.selectChart(c) },
-                    text = { Text("${c.emoji} ${c.label.removePrefix("Nova ")}", style = MaterialTheme.typography.labelMedium, maxLines = 1) },
-                    selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
-                )
-            }
-        }
+        /* ---------- En-tête (maquette utilisateur) : périodes → navigation → bandeau → onglets Hot 100 / Artist 50 / Albums 75 + 🔍 ---------- */
 
-        // ---- Périodes
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Period.entries.forEach { p ->
-                FilterChip(
-                    selected = state.period == p, onClick = { vm.selectPeriod(p) },
-                    label = { Text(p.label, style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = theme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        labelColor = theme.textSecondary, containerColor = theme.surface
-                    )
-                )
-            }
-        }
+        // 1. Périodes
+        PeriodSegment(state.period) { vm.selectPeriod(it) }
 
-        // ---- Navigation dans l'historique
+        // 2. Navigation dans l'historique (appui long sur la date → calendrier)
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = vm::previousPeriod) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Période précédente", tint = theme.text) }
             Row(
                 Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
                     .combinedClickable(onClick = {}, onLongClick = { showPicker = true })
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -144,19 +114,51 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
             }
         }
 
-        // ---- Recherche (chart actif uniquement)
-        OutlinedTextField(
-            value = state.query, onValueChange = vm::search, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-            placeholder = { Text("Rechercher dans ${state.chart.label}…", color = theme.textSecondary) },
-            leadingIcon = { Icon(Icons.Filled.Search, null, tint = theme.textSecondary) },
-            trailingIcon = { if (state.query.isNotEmpty()) IconButton({ vm.search("") }) { Icon(Icons.Filled.Close, "Effacer", tint = theme.textSecondary) } },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = theme.primary, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f), cursorColor = theme.primary),
-            shape = RoundedCornerShape(12.dp)
-        )
-        Spacer(Modifier.height(6.dp))
+        // 3. Bandeau résumé (style Stats)
+        if (state.hasAnyData) SummaryBanner(state)
+
+        // 4. Onglets charts + loupe
+        val chartIndex = Chart.entries.indexOf(state.chart)
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            TabRow(
+                selectedTabIndex = chartIndex,
+                modifier = Modifier.weight(1f),
+                containerColor = theme.background,
+                contentColor = theme.primary,
+                indicator = { positions ->
+                    Box(Modifier.tabIndicatorOffset(positions[chartIndex]).padding(horizontal = 24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
+                },
+                divider = {}
+            ) {
+                Chart.entries.forEach { c ->
+                    val on = state.chart == c
+                    Tab(
+                        selected = on, onClick = { vm.selectChart(c) },
+                        text = { Text(c.label.removePrefix("Nova "), style = MaterialTheme.typography.titleSmall, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false) },
+                        selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+                    )
+                }
+            }
+            IconButton(onClick = { searching = !searching; if (!searching) vm.search("") }, modifier = Modifier.padding(end = 4.dp)) {
+                Icon(if (searching) Icons.Filled.Close else Icons.Filled.Search, "Rechercher", tint = if (searching || state.query.isNotBlank()) theme.primary else theme.textSecondary)
+            }
+        }
+
+        // 5. Recherche (chart actif uniquement)
+        if (searching) {
+            OutlinedTextField(
+                value = state.query, onValueChange = vm::search, singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                placeholder = { Text("Rechercher dans ${state.chart.label}…", color = theme.textSecondary) },
+                leadingIcon = { Icon(Icons.Filled.Search, null, tint = theme.textSecondary) },
+                trailingIcon = { if (state.query.isNotEmpty()) IconButton({ vm.search("") }) { Icon(Icons.Filled.Close, "Effacer", tint = theme.textSecondary) } },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = theme.primary, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f), cursorColor = theme.primary),
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
 
         if (!state.hasAnyData) {
             EmptyState("🏆", "Ton Billboard t'attend", "Lance ta première écoute : chaque titre, artiste et album se battra pour la 1re place !")
@@ -168,7 +170,6 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         val unit = BillboardDates.unitLabel(state.period, 2)
 
         LazyColumn(Modifier.fillMaxSize()) {
-            item { SummaryBanner(state) }
 
             if (state.items.isEmpty() && state.query.isBlank()) {
                 item {
@@ -241,19 +242,20 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 private fun SummaryBanner(state: BillboardUiState) {
     val theme = Nova.theme
     val s = state.summary
-    if (state.items.isEmpty()) return
-    NovaCard(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                StatPill("${s.newEntries}", "nouveautés", accent = NovaColors.DirectDebut)
-                StatPill("${s.exits}", "sorties", accent = NovaColors.Down)
-                StatPill("${s.reentries}", "retours ↩️", accent = theme.secondary)
-            }
+    val cells = listOf(
+        StripCell("${state.items.size}", "Classés"),
+        StripCell("${s.newEntries}", "Nouveautés", NovaColors.DirectDebut),
+        StripCell("${s.exits}", "Sorties", NovaColors.Down),
+        StripCell("${s.reentries}", "Retours", theme.secondary)
+    )
+    val hasDetails = state.items.isNotEmpty() && (s.numberOne != null || s.biggestClimber != null)
+    val details: (@Composable () -> Unit)? = if (!hasDetails) null else {
+        {
             s.numberOne?.let { one ->
                 val since = if (s.numberOneRun > 1) " · depuis ${s.numberOneRun} ${BillboardDates.unitLabel(state.period, s.numberOneRun)}" else " · nouveau #1"
                 Text(
                     buildString { append("👑 #1 : "); append(one.name); one.secondary?.let { if (state.chart == Chart.HOT_100 || state.chart == Chart.ALBUMS_75) append(" — $it") }; append(since) },
-                    color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis
+                    color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis
                 )
             }
             s.biggestClimber?.let { c ->
@@ -264,6 +266,7 @@ private fun SummaryBanner(state: BillboardUiState) {
             }
         }
     }
+    SummaryStrip(cells, content = details)
 }
 
 @Composable

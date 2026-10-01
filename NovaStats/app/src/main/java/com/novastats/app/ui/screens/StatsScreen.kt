@@ -1,17 +1,10 @@
 package com.novastats.app.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import com.novastats.app.ui.theme.goldShimmer
-import java.util.Locale
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -97,48 +90,21 @@ fun StatsScreen() {
     Column(Modifier.fillMaxSize()) {
         /* ---------- En-tête (maquette utilisateur) : périodes → bandeau → onglets Titres / Artistes / Albums + 🔍 ---------- */
 
-        // 1. Sélecteur de période : 5 boutons de largeur égale, le sélectionné plein (primary)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Period.entries.forEach { p ->
-                val on = period == p
-                Box(
-                    Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp))
-                        .background(if (on) theme.primary else theme.surface)
-                        .clickable { period = p },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        p.frLabel, color = if (on) MaterialTheme.colorScheme.onPrimary else theme.text,
-                        style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1, softWrap = false, overflow = TextOverflow.Clip
-                    )
-                }
-            }
-        }
+        // 1. Sélecteur de période
+        PeriodSegment(period) { period = it }
 
-        // 2. Bandeau résumé : 5 valeurs (primary) séparées par de fins traits verticaux
+        // 2. Bandeau résumé
         val days = if (period == Period.GLOBAL) summary.activeDays else elapsedDays(range)
         val avg = if (days > 0) summary.playCount.toFloat() / days else 0f
-        val cells = listOf(
-            formatCount(summary.playCount) to "Écoutes",
-            formatDuration(summary.totalDurationMs) to "Temps",
-            "${summary.distinctTracks}" to "Titres",
-            "${summary.distinctArtists}" to "Artistes",
-            String.format(Locale.FRANCE, if (avg == avg.toInt().toFloat()) "%.0f" else "%.1f", avg) to "Moy/jour"
+        SummaryStrip(
+            listOf(
+                StripCell(formatCount(summary.playCount), "Écoutes"),
+                StripCell(formatDuration(summary.totalDurationMs), "Temps"),
+                StripCell("${summary.distinctTracks}", "Titres"),
+                StripCell("${summary.distinctArtists}", "Artistes"),
+                StripCell(formatAverage(avg), "Moy/jour")
+            )
         )
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp)).background(theme.surface).padding(vertical = 14.dp)
-        ) {
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
-                cells.forEachIndexed { i, (value, label) ->
-                    if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 6.dp).background(theme.textSecondary.copy(alpha = 0.35f)))
-                    Column(Modifier.weight(1f).goldShimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(value, color = theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
-                        Text(label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
-                    }
-                }
-            }
-        }
         Text(
             periodCaption(period, range), color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center

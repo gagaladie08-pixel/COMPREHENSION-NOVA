@@ -2,6 +2,9 @@ package com.novastats.app.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.novastats.app.domain.Period
 import com.novastats.app.ui.navigation.NovaTab
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.goldShimmer
@@ -167,3 +171,55 @@ fun EmptyState(emoji: String, title: String, message: String) {
 fun PlaceholderScreen(tab: NovaTab, subtitle: String) {
     EmptyState(tab.emoji, tab.label, "$subtitle\n\nÀ venir — la base de données et les règles sont déjà prêtes.")
 }
+
+/* ===================== En-tête « maquette » : sélecteur de période + bandeau résumé ===================== */
+
+/**
+ * Sélecteur de période : 5 boutons de largeur égale, coins 14 dp, libellés FR (Jour · Semaine · Mois · Année · Global).
+ * Le bouton actif est plein (primary du thème), les autres sur surface.
+ */
+@Composable
+fun PeriodSegment(selected: Period, modifier: Modifier = Modifier, periods: List<Period> = Period.entries, onSelect: (Period) -> Unit) {
+    val theme = Nova.theme
+    Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        periods.forEach { p ->
+            val on = selected == p
+            Box(
+                Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp))
+                    .background(if (on) theme.primary else theme.surface)
+                    .clickable { onSelect(p) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    p.frLabel, color = if (on) MaterialTheme.colorScheme.onPrimary else theme.text,
+                    style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1, softWrap = false, overflow = TextOverflow.Clip
+                )
+            }
+        }
+    }
+}
+
+/** Cellule du bandeau résumé : valeur (primary par défaut) + libellé. */
+data class StripCell(val value: String, val label: String, val color: Color? = null)
+
+/** Bandeau résumé : carte arrondie 20 dp sur surface, cellules de largeur égale séparées par de fins traits verticaux. */
+@Composable
+fun SummaryStrip(cells: List<StripCell>, modifier: Modifier = Modifier, content: (@Composable () -> Unit)? = null) {
+    val theme = Nova.theme
+    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp)).background(theme.surface).padding(vertical = 14.dp)) {
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+            cells.forEachIndexed { i, c ->
+                if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 6.dp).background(theme.textSecondary.copy(alpha = 0.35f)))
+                Column(Modifier.weight(1f).goldShimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(c.value, color = c.color ?: theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
+                    Text(c.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+        if (content != null) Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).padding(top = 6.dp)) { content() }
+    }
+}
+
+/** Moyenne par jour au format FR : « 136,6 » (ou « 12 » si entière). */
+fun formatAverage(avg: Float): String = String.format(Locale.FRANCE, if (avg == avg.toInt().toFloat()) "%.0f" else "%.1f", avg)

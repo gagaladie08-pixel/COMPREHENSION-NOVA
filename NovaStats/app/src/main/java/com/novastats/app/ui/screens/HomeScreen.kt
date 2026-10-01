@@ -160,15 +160,16 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         /* ---------- 2. Aujourd'hui ---------- */
         item {
             SectionTitle("Aujourd'hui")
-            NovaCard {
-                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceAround) {
-                    StatPill(formatCount(todayStats?.playCount ?: 0), "écoutes")
-                    StatPill(formatDuration(todayStats?.totalDurationMs ?: 0), "temps", accent = theme.secondary)
-                    StatPill("${todayStats?.distinctArtists ?: 0}", "artistes", accent = theme.accent)
-                    StatPill("${todayStats?.distinctAlbums ?: 0}", "albums", accent = theme.glowSecondary)
-                    StatPill("${todayStats?.distinctTracks ?: 0}", "titres")
-                }
-            }
+            // Même bandeau que l'onglet Stats
+            SummaryStrip(
+                listOf(
+                    StripCell(formatCount(todayStats?.playCount ?: 0), "Écoutes"),
+                    StripCell(formatDuration(todayStats?.totalDurationMs ?: 0), "Temps"),
+                    StripCell("${todayStats?.distinctTracks ?: 0}", "Titres"),
+                    StripCell("${todayStats?.distinctArtists ?: 0}", "Artistes"),
+                    StripCell("${todayStats?.distinctAlbums ?: 0}", "Albums")
+                )
+            )
         }
 
         /* ---------- 3. Top du moment ---------- */
