@@ -157,7 +157,7 @@ fun PantheonScreen() {
             val status = PantheonStatus.fromDb(row.s.currentStatus) ?: PantheonStatus.STAR
             val certs = summaryOf(certsByArtist[row.s.artistId].orEmpty())
             val progress = nextStatusProgress(status, row.playCount, certs)?.takeIf { it.fraction >= 0.6f }
-            PantheonCard(row, status, certs, progress) { detail = DetailTarget.Artist(row.s.artistId) }
+            PantheonCard(row, status, certs, progress) { detail = DetailTarget.Pantheon(row.s.artistId) }
         }
         if (soon.isNotEmpty()) {
             item { SectionTitle("🔜 Bientôt dans le Panthéon", Modifier.padding(top = 12.dp)) }

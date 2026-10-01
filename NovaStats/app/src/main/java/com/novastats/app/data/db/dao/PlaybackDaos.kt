@@ -171,6 +171,7 @@ interface DailyPlayDao {
     suspend fun firstDate(): String?
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE track_id = :id GROUP BY date ORDER BY date") suspend fun seriesForTrack(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE album_id = :id GROUP BY date ORDER BY date") suspend fun seriesForAlbum(id: Long): List<DayCount>
+    @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE artist_id = :id GROUP BY date ORDER BY date") suspend fun seriesForArtist(id: Long): List<DayCount>
     @Query("SELECT DISTINCT date FROM daily_plays WHERE date BETWEEN :from AND :to ORDER BY date") suspend fun activeDatesBetween(from: String, to: String): List<String>
     @Query("SELECT artist_id AS id, SUM(play_count) AS plays, SUM(total_duration_ms) AS duration_ms FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY artist_id") suspend fun artistPlaysBetween(from: String, to: String): List<IdCount>
     @Query("SELECT track_id AS id, SUM(play_count) AS plays, SUM(total_duration_ms) AS duration_ms FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY track_id") suspend fun trackPlaysBetween(from: String, to: String): List<IdCount>

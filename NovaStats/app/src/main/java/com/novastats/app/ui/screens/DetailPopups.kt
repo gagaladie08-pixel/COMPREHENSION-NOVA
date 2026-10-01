@@ -1,32 +1,22 @@
 package com.novastats.app.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,45 +25,51 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.novastats.app.NovaStatsApp
+import com.novastats.app.data.db.dao.ArtistCertRow
 import com.novastats.app.data.db.dao.RankedTrack
 import com.novastats.app.data.db.entity.AlbumEntity
 import com.novastats.app.data.db.entity.ArtistEntity
 import com.novastats.app.data.db.entity.CertificationEntity
+import com.novastats.app.data.db.entity.EntityType
+import com.novastats.app.data.db.entity.HallOfFameEntity
+import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.TrackEntity
+import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
+import com.novastats.app.domain.CertificationRules
+import com.novastats.app.domain.ChartAppearance
+import com.novastats.app.domain.ChartHistory
+import com.novastats.app.domain.ChartHistoryStats
 import com.novastats.app.domain.Dates
+import com.novastats.app.domain.HallOfFameRules
 import com.novastats.app.domain.PantheonStatus
-import com.novastats.app.data.db.entity.PantheonHistoryEntity
-import com.novastats.app.data.db.entity.HallOfFameEntity
 import com.novastats.app.domain.Period
+import com.novastats.app.data.db.dao.DayCount
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /*
- * Popups de détail (appui long dans Stats, clic dans l'Accueil) — cahier des charges :
- * overlay noir 85 %, carte 92 % de largeur, coins 16 dp, fermeture par clic extérieur OU bouton FERMER,
- * scroll interne, animation fade. Bordures : chanson = primary, artiste = glowSecondary, album = secondary.
+ * POPUPS.md — popups de détail déclenchés par appui long :
+ *   1. 🎵 Chanson (bordure primary)        2. 🎤 Artiste (glowSecondary)      3. 💿 Album (secondary)
+ *   6. 👑 Panthéon (bordure = statut)      7. 🏛️ Hall of Fame (bordure = badge le plus prestigieux)
+ * Tous reposent sur NovaPopupCard (overlay 85 %, 92 %, 16 dp, scroll interne, FERMER, fade, dégradé bordure → fond).
  */
 
 /** Cible d'un popup de détail. */
@@ -81,15 +77,33 @@ sealed interface DetailTarget {
     data class Track(val id: Long) : DetailTarget
     data class Artist(val id: Long) : DetailTarget
     data class Album(val id: Long) : DetailTarget
+    /** Fiche artiste Panthéon (bordure selon le statut). */
+    data class Pantheon(val artistId: Long) : DetailTarget
+    /** Historique complet d'une entrée Hall of Fame. */
+    data class HallOfFame(val entityId: Long, val entityType: String) : DetailTarget
 }
 
 private val dateFmt = SimpleDateFormat("d MMM yyyy", Locale.FRANCE)
+private val ceremonyFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)
 fun formatDate(ms: Long?): String = ms?.let { dateFmt.format(it) } ?: "—"
+private fun formatIso(iso: String?): String = iso?.let { runCatching { Dates.parse(it).format(ceremonyFmt) }.getOrNull() } ?: "—"
 
 fun certificationLabel(c: CertificationEntity?): String? {
     c ?: return null
     val level = CertLevel.entries.firstOrNull { it.dbName == c.level } ?: return null
     return Certification(level, c.multiplier).label()
+}
+
+/** Badge certification (emoji + libellé) coloré selon le niveau. */
+@Composable
+fun CertBadge(level: CertLevel?, multiplier: Int = 1, fallback: String = "Non certifié") {
+    val theme = Nova.theme
+    val color = if (level == null) theme.textSecondary else certColor(level)
+    val text = level?.let { Certification(it, multiplier).label() } ?: fallback
+    Text(
+        text, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).border(1.dp, color.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.10f)).padding(horizontal = 10.dp, vertical = 4.dp)
+    )
 }
 
 @Composable
@@ -99,84 +113,25 @@ fun DetailPopupHost(target: DetailTarget?, onDismiss: () -> Unit) {
         is DetailTarget.Track -> TrackPopup(target.id, onDismiss)
         is DetailTarget.Artist -> ArtistPopup(target.id, onDismiss)
         is DetailTarget.Album -> AlbumPopup(target.id, onDismiss)
+        is DetailTarget.Pantheon -> PantheonPopup(target.artistId, onDismiss)
+        is DetailTarget.HallOfFame -> HallOfFamePopup(target.entityId, target.entityType, onDismiss)
     }
 }
 
-/** Squelette commun : overlay, carte, bandeau, scroll interne, bouton FERMER, fade. */
-@Composable
-internal fun PopupScaffold(
-    borderColor: Color,
-    onDismiss: () -> Unit,
-    heightFraction: Float = 0.86f,
-    fixedHeight: Boolean = false,
-    banner: @Composable () -> Unit,
-    content: @Composable () -> Unit
-) {
-    val theme = Nova.theme
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true)) {
-        AnimatedVisibility(visible = visible, enter = fadeIn(tween(220)), exit = fadeOut(tween(160))) {
-            Box(
-                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
-                contentAlignment = Alignment.Center
-            ) {
-                val maxH = (LocalConfiguration.current.screenHeightDp * heightFraction).dp
-                Column(
-                    (if (fixedHeight) Modifier.fillMaxWidth(0.92f).height(maxH) else Modifier.fillMaxWidth(0.92f).heightIn(max = maxH))
-                        .shadow(24.dp, RoundedCornerShape(16.dp), ambientColor = borderColor, spotColor = borderColor)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(theme.surface)
-                        .border(2.dp, borderColor, RoundedCornerShape(16.dp))
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                ) {
-                    banner()
-                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) { content() }
-                    HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
-                    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                        Text("FERMER", color = borderColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                    }
-                }
-            }
+/** Positions Billboard (dernier classement) par période pour une entité. */
+private suspend fun billboardRanks(app: NovaStatsApp, entityType: String, id: Long): Map<Period, Int?> {
+    val dao = app.database.billboardDao()
+    return Period.entries.associateWith { p ->
+        val h = when (entityType) {
+            EntityType.TRACK -> dao.trackHistory(p.dbName, id)
+            EntityType.ALBUM -> dao.albumHistory(p.dbName, id)
+            else -> dao.artistHistory(p.dbName, id)
         }
+        h.lastOrNull()?.position
     }
 }
 
-@Composable
-private fun InfoRow(label: String, value: String, valueColor: Color = Nova.theme.text) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Nova.theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
-        Text(value, color = valueColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.End)
-    }
-}
-
-@Composable
-private fun PopupSectionTitle(text: String) {
-    Text(text, color = Nova.theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-}
-
-/** Tableau des positions par période : Daily · Weekly · Monthly · Yearly · Global. */
-@Composable
-private fun PositionsTable(ranks: Map<Period, Int?>) {
-    val theme = Nova.theme
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Period.entries.forEach { p ->
-            val r = ranks[p]
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(p.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                Text(
-                    positionLabel(r), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium,
-                    color = when (r) { null -> theme.textSecondary.copy(alpha = 0.6f); 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; 3 -> Color(0xFFCD7F32); else -> theme.text }
-                )
-            }
-        }
-    }
-}
-
-private fun blurredBg(): Modifier = Modifier.fillMaxSize().blur(24.dp).alpha(0.55f)
-
-/* ================================ CHANSON ================================ */
+/* ================================ 1. 🎵 CHANSON ================================ */
 
 @Composable
 private fun TrackPopup(trackId: Long, onDismiss: () -> Unit) {
@@ -187,7 +142,7 @@ private fun TrackPopup(trackId: Long, onDismiss: () -> Unit) {
     var artists by remember { mutableStateOf("") }
     var album by remember { mutableStateOf<AlbumEntity?>(null) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
-    val cert by remember { db.certificationDao().observe(trackId, "TRACK") }.collectAsStateWithLifecycle(initialValue = null)
+    val cert by remember { db.certificationDao().observe(trackId, EntityType.TRACK) }.collectAsStateWithLifecycle(initialValue = null)
 
     LaunchedEffect(trackId) {
         val t = db.trackDao().getById(trackId) ?: return@LaunchedEffect
@@ -201,18 +156,18 @@ private fun TrackPopup(trackId: Long, onDismiss: () -> Unit) {
         }
     }
     val t = track
-    PopupScaffold(
+    NovaPopupCard(
         borderColor = theme.primary, onDismiss = onDismiss,
         banner = {
-            Box(Modifier.fillMaxWidth().height(180.dp).background(Brush.verticalGradient(listOf(theme.primary.copy(alpha = 0.35f), theme.surface))), contentAlignment = Alignment.Center) {
-                if (t?.coverUrl != null) AsyncImage(model = t.coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = blurredBg())
-                Box(Modifier.size(132.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = theme.primary).border(2.dp, theme.primary, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
+            // 180 dp — pochette carrée centrée uniquement
+            Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(132.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = theme.primary, ambientColor = theme.primary).border(2.dp, theme.primary, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
                     CoverArt(t?.coverUrl, t?.title ?: "?", size = 132)
                 }
             }
         }
     ) {
-        if (t == null) { Text("Chargement…", color = theme.textSecondary); return@PopupScaffold }
+        if (t == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
         Text(t.title, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp)
         Text(artists, color = theme.primary, fontWeight = FontWeight.SemiBold)
         album?.let { Text(it.title, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium) }
@@ -220,27 +175,49 @@ private fun TrackPopup(trackId: Long, onDismiss: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             StatPill(formatCount(t.playCount), "écoutes")
-            StatPill(formatDuration(t.totalDurationMs), "temps", accent = theme.secondary)
+            StatPill(formatDuration(t.totalDurationMs), "temps cumulé", accent = theme.secondary)
         }
-        PopupSectionTitle("🏅 Certification")
-        val label = certificationLabel(cert)
-        if (label != null) InfoRow(label, "obtenue le ${formatDate(cert?.certifiedAt)}", valueColor = NovaColors.Gold)
-        else {
-            val next = com.novastats.app.domain.CertificationRules.TRACK.next(t.playCount)
-            val need = com.novastats.app.domain.CertificationRules.TRACK.required(next)
-            InfoRow("Aucune", "${next.label()} dans ${(need - t.playCount).coerceAtLeast(0)} écoutes")
+        PopupSection("🏅 Certification")
+        val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CertBadge(lvl, cert?.multiplier ?: 1)
+            if (lvl != null) Text("obtenue le ${formatDate(cert?.certifiedAt)}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            else {
+                val next = CertificationRules.TRACK.next(t.playCount)
+                val need = CertificationRules.TRACK.required(next)
+                Text("${next.label()} dans ${(need - t.playCount).coerceAtLeast(0)} écoutes", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
         }
-        PopupSectionTitle("📊 Positions actuelles")
+        PopupSection("📊 Positions par période")
         PositionsTable(ranks)
-        PopupSectionTitle("📅 Historique")
-        InfoRow("Première écoute", formatDate(t.firstPlayedAt))
-        InfoRow("Dernière écoute", formatDate(t.lastPlayedAt))
-        InfoRow("Streak", "${t.currentStreak} j (record ${t.bestStreak} j)")
-        InfoRow("Rang de découverte", t.discoveryRank?.let { "#$it" } ?: "—")
+        PopupSection("📅 Historique")
+        PopupInfoRow("Première écoute", formatDate(t.firstPlayedAt))
+        PopupInfoRow("Dernière écoute", formatDate(t.lastPlayedAt))
+        PopupInfoRow("Streak", "${t.currentStreak} j (record ${t.bestStreak} j)")
+        PopupInfoRow("Rang de découverte", t.discoveryRank?.let { "#$it" } ?: "—")
     }
 }
 
-/* ================================ ARTISTE ================================ */
+/* ================================ 2. 🎤 ARTISTE ================================ */
+
+/** Bannière artiste 180 dp : fond flou + dégradé noir, photo en cercle 90 dp + bordure glow, nom en MAJUSCULES, statut Panthéon coloré. */
+@Composable
+private fun ArtistBanner(a: ArtistEntity?, ring: Color, status: PantheonStatus?, statusColor: Color, holographic: Boolean = false) {
+    val theme = Nova.theme
+    Box(Modifier.fillMaxWidth().height(180.dp)) {
+        BlurredBackdrop(a?.photoUrl, ring, Modifier.fillMaxSize())
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            val ringBrush = if (holographic) Brush.sweepGradient(HoloColors) else Brush.linearGradient(listOf(ring, ring))
+            Box(Modifier.size(90.dp).shadow(22.dp, RoundedCornerShape(50), ambientColor = ring, spotColor = ring).border(3.dp, ringBrush, RoundedCornerShape(50)).clip(RoundedCornerShape(50))) {
+                CoverArt(a?.photoUrl, a?.name ?: "?", size = 90, circle = true)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text((a?.name ?: "").uppercase(), color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            if (status != null) Text("${status.emoji} ${status.label.uppercase()}", color = statusColor, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.5.sp)
+            else Text("Pas encore au Panthéon", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
 
 @Composable
 private fun ArtistPopup(artistId: Long, onDismiss: () -> Unit) {
@@ -254,78 +231,61 @@ private fun ArtistPopup(artistId: Long, onDismiss: () -> Unit) {
     var periodPlays by remember { mutableStateOf(0) }
     var periodTotal by remember { mutableStateOf(0) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
-
     var history by remember { mutableStateOf<List<PantheonHistoryEntity>>(emptyList()) }
     var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
+
     LaunchedEffect(artistId) {
         artist = db.artistDao().getById(artistId)
         history = db.pantheonDao().history(artistId)
-        hof = db.hallOfFameDao().ofEntity(artistId, "ARTIST")
+        hof = db.hallOfFameDao().ofEntity(artistId, EntityType.ARTIST)
         topTracks = db.trackDao().topOfArtist(artistId, 5)
         albums = db.albumDao().ofArtist(artistId)
         totalAllTime = db.scrobbleDao().countConfirmed()
         val week = Dates.statsRangeFor(Period.WEEKLY)
         periodPlays = db.artistDao().playsForPeriod(artistId, week.fromIso, week.toIso)
         periodTotal = db.dailyPlayDao().playsBetween(week.fromIso, week.toIso)
-        ranks = Period.entries.associateWith { p ->
-            val r = Dates.statsRangeFor(p)
-            db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso)
-        }
+        ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) }
     }
     val a = artist
     val status = PantheonStatus.fromDb(a?.pantheonStatus)
-    val statusColor = status?.let { runCatching { Color(android.graphics.Color.parseColor(it.colorHex)) }.getOrNull() } ?: theme.glowSecondary
-    PopupScaffold(
+    val statusColor = status?.let { pantheonColor(it) } ?: theme.glowSecondary
+    NovaPopupCard(
         borderColor = theme.glowSecondary, onDismiss = onDismiss,
-        banner = {
-            Box(Modifier.fillMaxWidth().height(170.dp).background(Brush.verticalGradient(listOf(theme.glowSecondary.copy(alpha = 0.4f), theme.surface))), contentAlignment = Alignment.Center) {
-                if (a?.photoUrl != null) AsyncImage(model = a.photoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = blurredBg())
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(90.dp).shadow(20.dp, RoundedCornerShape(50), ambientColor = theme.glowSecondary, spotColor = theme.glowSecondary).border(3.dp, theme.glowSecondary, RoundedCornerShape(50)).clip(RoundedCornerShape(50))) {
-                        CoverArt(a?.photoUrl, a?.name ?: "?", size = 90, circle = true)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text((a?.name ?: "").uppercase(), color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = 1.sp)
-                }
-            }
-        }
+        banner = { ArtistBanner(a, theme.glowSecondary, status, statusColor) }
     ) {
-        if (a == null) { Text("Chargement…", color = theme.textSecondary); return@PopupScaffold }
-        Text(status?.let { "${it.emoji} ${it.label.uppercase()}" } ?: "Pas encore au Panthéon (Star à 425 écoutes)", color = statusColor, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(8.dp))
+        if (a == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             StatPill(formatCount(a.playCount), "écoutes")
-            StatPill(formatDuration(a.totalDurationMs), "temps", accent = theme.secondary)
+            StatPill(formatDuration(a.totalDurationMs), "temps total", accent = theme.secondary)
             StatPill("${a.distinctTracks}", "titres", accent = theme.accent)
             StatPill("${a.distinctAlbums}", "albums", accent = theme.glowSecondary)
         }
-        if (history.isNotEmpty()) {
-            PopupSectionTitle("👑 Parcours au Panthéon")
-            history.forEach { h ->
-                val st = PantheonStatus.fromDb(h.status)
-                InfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶")
-            }
+        PopupSection("👑 Statut Panthéon", theme.glowSecondary)
+        PopupInfoRow("Statut actuel", status?.let { "${it.emoji} ${it.label}" } ?: "Aucun (Star à 425 écoutes)", valueColor = statusColor)
+        history.forEach { h ->
+            val st = PantheonStatus.fromDb(h.status)
+            PopupInfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶", valueColor = st?.let { pantheonColor(it) } ?: theme.text)
         }
         if (hof.isNotEmpty()) {
-            PopupSectionTitle("🏛️ Hall of Fame")
-            hof.forEach { e -> InfoRow("${e.entryType.replace('_', ' ')} · ${e.periodType.lowercase().replaceFirstChar { it.uppercase() }}", formatDate(java.time.LocalDate.parse(e.entryDate).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())) }
+            PopupSection("🏛️ Hall of Fame", theme.glowSecondary)
+            hof.forEach { e -> PopupInfoRow(hofBadgeLabel(e.entryType) + " · " + e.periodType.lowercase().replaceFirstChar { it.uppercase() }, formatIso(e.entryDate)) }
         }
-        PopupSectionTitle("📊 Positions actuelles")
+        PopupSection("📊 Positions par période", theme.glowSecondary)
         PositionsTable(ranks)
-        PopupSectionTitle("🎵 Top chansons")
+        PopupSection("🎵 Top chansons", theme.glowSecondary)
         if (topTracks.isEmpty()) Text("—", color = theme.textSecondary)
-        topTracks.forEachIndexed { i, t -> InfoRow("${i + 1}. ${t.track.title}", "${formatCount(t.periodPlays)} ▶") }
-        PopupSectionTitle("💿 Albums dans la bibliothèque")
+        topTracks.forEachIndexed { i, t -> PopupInfoRow("${i + 1}. ${t.track.title}", "${formatCount(t.periodPlays)} ▶") }
+        PopupSection("💿 Albums en bibliothèque", theme.glowSecondary)
         if (albums.isEmpty()) Text("Aucun album crédité (titres en featuring uniquement)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-        albums.forEach { al -> InfoRow(al.title, "${formatCount(al.playCount)} ▶") }
-        PopupSectionTitle("📅 Historique & parts d'écoute")
-        InfoRow("Première écoute", formatDate(a.firstPlayedAt))
-        InfoRow("Part All Time", if (totalAllTime > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * a.playCount / totalAllTime) else "—")
-        InfoRow("Part 7 derniers jours", if (periodTotal > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * periodPlays / periodTotal) else "—")
+        albums.forEach { al -> PopupInfoRow(al.title, "${formatCount(al.playCount)} ▶") }
+        PopupSection("📅 Historique & parts d'écoute", theme.glowSecondary)
+        PopupInfoRow("Première écoute", formatDate(a.firstPlayedAt))
+        PopupInfoRow("Part All Time", if (totalAllTime > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * a.playCount / totalAllTime) else "—")
+        PopupInfoRow("Part 7 derniers jours", if (periodTotal > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * periodPlays / periodTotal) else "—")
     }
 }
 
-/* ================================ ALBUM ================================ */
+/* ================================ 3. 💿 ALBUM ================================ */
 
 @Composable
 private fun AlbumPopup(albumId: Long, onDismiss: () -> Unit) {
@@ -336,53 +296,270 @@ private fun AlbumPopup(albumId: Long, onDismiss: () -> Unit) {
     var artistName by remember { mutableStateOf("") }
     var tracks by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
-    val cert by remember { db.certificationDao().observe(albumId, "ALBUM") }.collectAsStateWithLifecycle(initialValue = null)
+    val cert by remember { db.certificationDao().observe(albumId, EntityType.ALBUM) }.collectAsStateWithLifecycle(initialValue = null)
 
     LaunchedEffect(albumId) {
         val al = db.albumDao().getById(albumId) ?: return@LaunchedEffect
         album = al
         artistName = db.artistDao().getById(al.artistId)?.name ?: ""
         tracks = db.trackDao().ofAlbum(albumId)
-        ranks = Period.entries.associateWith { p ->
-            val r = Dates.statsRangeFor(p)
-            db.albumDao().rankForPeriod(albumId, r.fromIso, r.toIso)
-        }
+        ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.albumDao().rankForPeriod(albumId, r.fromIso, r.toIso) }
     }
     val al = album
-    PopupScaffold(
+    NovaPopupCard(
         borderColor = theme.secondary, onDismiss = onDismiss,
         banner = {
-            Box(Modifier.fillMaxWidth().height(170.dp).background(Brush.verticalGradient(listOf(theme.secondary.copy(alpha = 0.35f), theme.surface))), contentAlignment = Alignment.Center) {
-                if (al?.coverUrl != null) AsyncImage(model = al.coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = blurredBg())
-                Box(Modifier.size(120.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = theme.secondary).border(2.dp, theme.secondary, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
+            // Pochette 120 × 120 dp sur fond flou
+            Box(Modifier.fillMaxWidth().height(170.dp), contentAlignment = Alignment.Center) {
+                BlurredBackdrop(al?.coverUrl, theme.secondary, Modifier.fillMaxSize())
+                Box(Modifier.size(120.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = theme.secondary, ambientColor = theme.secondary).border(2.dp, theme.secondary, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
                     CoverArt(al?.coverUrl, al?.title ?: "?", size = 120)
                 }
             }
         }
     ) {
-        if (al == null) { Text("Chargement…", color = theme.textSecondary); return@PopupScaffold }
+        if (al == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
         Text(al.title, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp)
         Text(artistName, color = theme.secondary, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             StatPill(formatCount(al.playCount), "écoutes")
-            StatPill(formatDuration(al.totalDurationMs), "temps", accent = theme.secondary)
+            StatPill(formatDuration(al.totalDurationMs), "temps total", accent = theme.secondary)
             StatPill("${al.distinctTracksPlayed}", "titres écoutés", accent = theme.accent)
         }
-        PopupSectionTitle("🏅 Certification")
-        val label = certificationLabel(cert)
-        if (label != null) InfoRow(label, "obtenue le ${formatDate(cert?.certifiedAt)}", valueColor = NovaColors.Gold)
-        else {
-            val next = com.novastats.app.domain.CertificationRules.ALBUM.next(al.playCount)
-            val need = com.novastats.app.domain.CertificationRules.ALBUM.required(next)
-            InfoRow("Aucune", "${next.label()} dans ${(need - al.playCount).coerceAtLeast(0)} écoutes")
+        PopupSection("🏅 Certification album", theme.secondary)
+        val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CertBadge(lvl, cert?.multiplier ?: 1)
+            if (lvl != null) Text("obtenue le ${formatDate(cert?.certifiedAt)}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            else {
+                val next = CertificationRules.ALBUM.next(al.playCount)
+                val need = CertificationRules.ALBUM.required(next)
+                Text("${next.label()} dans ${(need - al.playCount).coerceAtLeast(0)} écoutes", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
         }
-        PopupSectionTitle("📊 Positions actuelles")
+        PopupSection("📊 Positions par période", theme.secondary)
         PositionsTable(ranks)
-        PopupSectionTitle("🎵 Titres (${tracks.size})")
-        tracks.forEachIndexed { i, t -> InfoRow("${i + 1}. ${t.track.title}", "${formatCount(t.periodPlays)} ▶") }
-        PopupSectionTitle("📅 Historique")
-        InfoRow("Première écoute", formatDate(al.firstPlayedAt))
-        InfoRow("Dernière écoute", formatDate(al.lastPlayedAt))
+        PopupSection("🎵 Chansons (${tracks.size})", theme.secondary)
+        tracks.forEachIndexed { i, t -> PopupInfoRow("${i + 1}. ${t.track.title}", "${formatCount(t.periodPlays)} ▶") }
+        PopupSection("📅 Historique", theme.secondary)
+        PopupInfoRow("Première écoute", formatDate(al.firstPlayedAt))
+        PopupInfoRow("Dernière écoute", formatDate(al.lastPlayedAt))
+    }
+}
+
+/* ================================ 6. 👑 PANTHÉON ================================ */
+
+private data class PantheonDetail(
+    val artist: ArtistEntity, val history: List<PantheonHistoryEntity>, val certs: List<ArtistCertRow>,
+    val series: List<DayCount>, val statsRanks: Map<Period, Int?>, val billboardRanks: Map<Period, Int?>
+)
+
+@Composable
+private fun PantheonPopup(artistId: Long, onDismiss: () -> Unit) {
+    val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
+    val theme = Nova.theme
+    var d by remember { mutableStateOf<PantheonDetail?>(null) }
+    LaunchedEffect(artistId) {
+        val a = db.artistDao().getById(artistId) ?: return@LaunchedEffect
+        d = PantheonDetail(
+            a, db.pantheonDao().history(artistId), db.certificationDao().certsOfArtist(artistId), db.dailyPlayDao().seriesForArtist(artistId),
+            Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) },
+            billboardRanks(app, EntityType.ARTIST, artistId)
+        )
+    }
+    val det = d
+    val status = PantheonStatus.fromDb(det?.artist?.pantheonStatus)
+    val mythic = status == PantheonStatus.MYTHIQUE
+    val color = status?.let { pantheonColor(it) } ?: theme.glowSecondary
+    // Glow léger / moyen / doré / intense / holographique
+    val glow = when (status) { PantheonStatus.STAR -> 8; PantheonStatus.SUPERSTAR -> 14; PantheonStatus.MEGASTAR -> 20; PantheonStatus.LEGENDE -> 28; PantheonStatus.MYTHIQUE -> 32; null -> 6 }
+
+    NovaPopupCard(
+        borderColor = color, onDismiss = onDismiss, glowDp = glow, holographic = mythic,
+        banner = { ArtistBanner(det?.artist, color, status, if (mythic) Color.White else color, holographic = mythic) }
+    ) {
+        if (det == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
+        val a = det.artist
+        // Statut en grand
+        Text(status?.let { "${it.emoji} ${it.label.uppercase()}" } ?: "EN ROUTE VERS LE PANTHÉON", color = if (mythic) Color.White else color, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Center, letterSpacing = 2.sp, modifier = Modifier.fillMaxWidth())
+        Text("${formatCount(a.playCount)} écoutes · ${formatDuration(a.totalDurationMs)}", color = theme.textSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        // Progression vers le statut suivant
+        val summary = summaryOf(det.certs)
+        nextStatusProgress(status, a.playCount, summary)?.let { p ->
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(progress = { p.fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), color = pantheonColor(p.next), trackColor = theme.background)
+            Text(p.message, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+        }
+
+        PopupSection("📜 Historique des statuts", color)
+        if (det.history.isEmpty()) Text("Aucun statut atteint pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        det.history.forEach { h ->
+            val st = PantheonStatus.fromDb(h.status)
+            PopupInfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶", valueColor = st?.let { pantheonColor(it) } ?: theme.text)
+        }
+
+        val certTracks = det.certs.filter { it.entityType == EntityType.TRACK }.sortedByDescending { certRank(it) }
+        val certAlbums = det.certs.filter { it.entityType == EntityType.ALBUM }.sortedByDescending { certRank(it) }
+        PopupSection("🎵 Chansons certifiées (${certTracks.size})", color)
+        if (certTracks.isEmpty()) Text("Aucune chanson certifiée.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        certTracks.forEach { c -> CertLine(c) }
+        PopupSection("💿 Albums certifiés (${certAlbums.size})", color)
+        if (certAlbums.isEmpty()) Text("Aucun album certifié.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        certAlbums.forEach { c -> CertLine(c) }
+
+        PopupSection("📈 Courbe d'écoutes (cumul)", color)
+        val cumul = remember(det.series) { var acc = 0; det.series.map { acc += it.playCount; acc.toFloat() } }
+        val thresholds = PantheonStatus.entries.filter { it.playsThreshold <= (a.playCount * 1.6f) || it == (status?.let { s -> PantheonStatus.entries.getOrNull(s.ordinal + 1) } ?: PantheonStatus.STAR) }
+            .map { it.playsThreshold.toFloat() to pantheonColor(it) }
+        if (cumul.isEmpty()) Text("Pas encore de données.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(130.dp), color = if (mythic) HoloColors[3] else color, thresholds = thresholds)
+
+        PopupSection("📊 Positions Stats", color)
+        PositionsTable(det.statsRanks)
+        PopupSection("🏆 Positions Billboard (dernier classement)", color)
+        PositionsTable(det.billboardRanks)
+        Spacer(Modifier.height(4.dp))
+        Text("Première écoute : ${formatDate(a.firstPlayedAt)}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+private fun certRank(c: ArtistCertRow): Int = (CertLevel.entries.firstOrNull { it.dbName == c.level }?.ordinal ?: -1) * 100 + c.multiplier
+
+@Composable
+private fun CertLine(c: ArtistCertRow) {
+    val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(c.name ?: "—", color = Nova.theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
+        CertBadge(lvl, c.multiplier)
+    }
+}
+
+/* ================================ 7. 🏛️ HALL OF FAME ================================ */
+
+private val HofDirectDebut = Color(0xFF7B2FBE)
+private val HofGlobal = Color(0xFF0D1BFF)
+
+fun hofBadgeLabel(type: String) = when (type) {
+    HallOfFameRules.DIRECT_DEBUT -> "🚀 DIRECT DEBUT"; HallOfFameRules.LONG_RUN -> "👑 LONG RUN"
+    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
+}
+fun hofBadgeColor(type: String): Color = when (type) {
+    HallOfFameRules.DIRECT_DEBUT -> HofDirectDebut; HallOfFameRules.LONG_RUN -> NovaColors.Gold; else -> HofGlobal
+}
+fun hofBadgePrestige(type: String) = when (type) {
+    HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
+}
+
+private data class HofDetail(
+    val name: String, val subtitle: String?, val imageUrl: String?, val entries: List<HallOfFameEntity>,
+    /** Courbe de toutes les positions hebdo (null = hors chart) + ancres + stats. */
+    val positions: List<Int?>, val anchors: List<LocalDate>, val stats: ChartHistoryStats, val chartPeriod: Period,
+    val cert: CertificationEntity?, val playCount: Int
+)
+
+@Composable
+private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () -> Unit) {
+    val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
+    val theme = Nova.theme
+    var d by remember { mutableStateOf<HofDetail?>(null) }
+    LaunchedEffect(entityId, entityType) {
+        val entries = db.hallOfFameDao().ofEntity(entityId, entityType)
+        var name: String? = null; var subtitle: String? = null; var image: String? = null; var plays = 0
+        when (entityType) {
+            EntityType.ARTIST -> db.artistDao().getById(entityId)?.let { name = it.name; image = it.photoUrl; plays = it.playCount }
+            EntityType.ALBUM -> db.albumDao().getById(entityId)?.let { name = it.title; subtitle = db.artistDao().getById(it.artistId)?.name; image = it.coverUrl; plays = it.playCount }
+            else -> db.trackDao().getById(entityId)?.let { name = it.title; subtitle = db.artistDao().getById(it.artistId)?.name; image = it.coverUrl; plays = it.playCount }
+        }
+        // Historique Billboard complet — la période du chart = celle de l'entrée la plus prestigieuse (Global → hebdo)
+        val mainPeriod = entries.maxByOrNull { hofBadgePrestige(it.entryType) }?.periodType?.let { pt -> Period.entries.firstOrNull { it.dbName == pt } } ?: Period.WEEKLY
+        val chartPeriod = if (mainPeriod == Period.GLOBAL || mainPeriod == Period.DAILY) Period.WEEKLY else mainPeriod
+        val dao = db.billboardDao()
+        val rows = when (entityType) {
+            EntityType.ARTIST -> dao.artistHistory(chartPeriod.dbName, entityId)
+            EntityType.ALBUM -> dao.albumHistory(chartPeriod.dbName, entityId)
+            else -> dao.trackHistory(chartPeriod.dbName, entityId)
+        }
+        val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
+        val anchors = if (appearances.isEmpty()) emptyList() else BillboardDates.allAnchors(chartPeriod, appearances.minOf { it.date }, Dates.today())
+        val byDate = appearances.associateBy { it.date }
+        d = HofDetail(
+            name ?: "Inconnu", subtitle, image, entries,
+            anchors.map { byDate[it]?.position }, anchors, ChartHistory.stats(appearances, anchors), chartPeriod,
+            db.certificationDao().current(entityId, entityType), plays
+        )
+    }
+    val det = d
+    val main = det?.entries?.maxByOrNull { hofBadgePrestige(it.entryType) }?.entryType ?: HallOfFameRules.DIRECT_DEBUT
+    val color = hofBadgeColor(main)
+    val isGlobal = main == HallOfFameRules.TRIPLE_DEBUT || main == HallOfFameRules.LEGENDARY_RUN
+
+    NovaPopupCard(
+        borderColor = color, onDismiss = onDismiss, glowDp = if (isGlobal) 28 else 14,
+        banner = {
+            // Style cérémonie : pochette / photo grand format sur fond flou
+            Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                BlurredBackdrop(det?.imageUrl, color, Modifier.fillMaxSize())
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (isGlobal) "✦ ✧ ✦   G L O B A L   ✦ ✧ ✦" else "🏛️  H A L L   O F   F A M E", color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.labelSmall, letterSpacing = 2.sp)
+                    Spacer(Modifier.height(8.dp))
+                    val circle = entityType == EntityType.ARTIST
+                    Box(Modifier.size(110.dp).shadow(22.dp, RoundedCornerShape(if (circle) 50 else 12), ambientColor = color, spotColor = color).border(3.dp, color, RoundedCornerShape(if (circle) 50 else 12)).clip(RoundedCornerShape(if (circle) 50 else 12))) {
+                        CoverArt(det?.imageUrl, det?.name ?: "?", size = 110, circle = circle)
+                    }
+                }
+            }
+        }
+    ) {
+        if (det == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
+        Text(det.name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        det.subtitle?.let { Text(it, color = theme.textSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+        Spacer(Modifier.height(8.dp))
+        // Tous les badges côte à côte
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
+            det.entries.map { it.entryType }.distinct().sortedByDescending { hofBadgePrestige(it) }.forEach { b ->
+                Text(hofBadgeLabel(b), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(hofBadgeColor(b).copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp))
+            }
+        }
+        val s = det.stats
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+            PopupBadge("⭐", s.peak?.let { "#${it.position}" } ?: "—", "Peak", color)
+            PopupBadge("📅", "${s.periodsInChart}", BillboardDates.unitLabel(det.chartPeriod, s.periodsInChart).replaceFirstChar { it.uppercase() }, color)
+            PopupBadge("👑", "${s.longestRunAt1}", "Série #1", color)
+            PopupBadge("🔟", "${s.longestRunTop10}", "Série Top 10", color)
+        }
+
+        PopupSection("📈 Montée au sommet & règne (${det.chartPeriod.label})", color)
+        if (det.positions.isEmpty()) Text("Pas d'historique Billboard disponible.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        else {
+            val maxPos = (det.positions.filterNotNull().maxOrNull() ?: 10).coerceAtLeast(5).toFloat()
+            val peakIdx = s.peak?.let { pk -> det.anchors.indexOf(pk.date).takeIf { it >= 0 } }
+            NovaCurveChart(det.positions.map { it?.toFloat() }, Modifier.fillMaxWidth().height(170.dp), color = color, invertY = true, minY = 1f, maxY = maxPos,
+                gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true)
+        }
+
+        PopupSection("🎊 Historique complet de l'entrée", color)
+        det.entries.sortedBy { it.entryDate }.forEach { e ->
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("${hofBadgeLabel(e.entryType)} · ${e.periodType.lowercase().replaceFirstChar { it.uppercase() }}", color = hofBadgeColor(e.entryType), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                Text("Consacré le ${formatIso(e.entryDate)}", color = theme.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                val reign = e.reignStart?.let { rs -> "du ${formatIso(rs)} au ${formatIso(e.reignEnd ?: rs)}" }
+                if (e.weeksAt1 > 0 || reign != null) Text("👑 ${if (e.weeksAt1 > 0) "${e.weeksAt1} semaine${if (e.weeksAt1 > 1) "s" else ""} au #1" else "Règne"}${reign?.let { " · $it" } ?: ""}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("▶ ${formatCount(e.playCountAtEntry)} écoutes au moment de l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        PopupSection("📊 Aujourd'hui", color)
+        PopupInfoRow("Écoutes actuelles", "${formatCount(det.playCount)} ▶")
+        PopupInfoRow("Première entrée", s.firstEntry?.let { "#${it.position} · ${it.date.format(ceremonyFmt)}" } ?: "—")
+        PopupInfoRow("Peak", s.peak?.let { "#${it.position} · ${it.date.format(ceremonyFmt)}" } ?: "—")
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Certification actuelle", color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
+            CertBadge(det.cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }, det.cert?.multiplier ?: 1)
+        }
     }
 }

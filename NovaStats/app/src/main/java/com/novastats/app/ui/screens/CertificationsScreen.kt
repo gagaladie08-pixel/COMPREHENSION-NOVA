@@ -290,22 +290,26 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
     val diamond = current?.level == CertLevel.DIAMOND
     val glow by rememberInfiniteTransition(label = "dg").animateFloat(0.4f, 1f, infiniteRepeatable(tween(1300), RepeatMode.Reverse), label = "dga")
 
-    PopupScaffold(
-        borderColor = if (diamond) color.copy(alpha = glow) else color, onDismiss = onDismiss,
+    // Bordure / dégradé selon le niveau (pas le thème) : Argent · Or · Platine · Diamant + glow
+    val glowDp = when (current?.level) { CertLevel.DIAMOND -> 32; CertLevel.PLATINUM -> 20; CertLevel.GOLD -> 14; CertLevel.SILVER -> 8; null -> 4 }
+    NovaPopupCard(
+        borderColor = if (diamond) color.copy(alpha = 0.6f + 0.4f * glow) else color, onDismiss = onDismiss, glowDp = glowDp,
         banner = {
-            Box(Modifier.fillMaxWidth().height(180.dp).background(Brush.verticalGradient(listOf(color.copy(alpha = 0.45f), theme.surface))), contentAlignment = Alignment.Center) {
-                if (det?.imageUrl != null) AsyncImage(model = det.imageUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(24.dp).alpha(0.5f))
+            Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                BlurredBackdrop(det?.imageUrl, color, Modifier.fillMaxSize())
                 Box(Modifier.size(130.dp).shadow(if (diamond) 28.dp else 14.dp, RoundedCornerShape(12.dp), ambientColor = color, spotColor = color).border(3.dp, color, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
                     CoverArt(det?.imageUrl, det?.name ?: "?", size = 130)
                 }
             }
         }
     ) {
-        if (det == null) { Text("Chargement…", color = theme.textSecondary); return@PopupScaffold }
+        if (det == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
         Text(det.name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(det.subtitle, color = theme.primary, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(10.dp))
-        Text(current?.label() ?: "Pas encore certifié", color = color, fontWeight = FontWeight.Black, fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        // Niveau actuel en grand avec emoji
+        Text(current?.level?.emoji ?: "🎯", fontSize = 40.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Text(current?.label()?.uppercase() ?: "PAS ENCORE CERTIFIÉ", color = color, fontWeight = FontWeight.Black, fontSize = 28.sp, letterSpacing = 2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Text("${formatCount(det.playCount)} écoutes", color = theme.textSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
 
         // Progression vers le prochain palier
@@ -328,7 +332,13 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
         }
 
         SectionLabel("📈 Courbe d'écoutes (cumul)")
-        PlaysCurve(det.series, color, det.history, thresholds, Modifier.fillMaxWidth().height(120.dp))
+        val cumul = remember(det.series) { var acc = 0; det.series.map { acc += it.playCount; acc.toFloat() } }
+        val levelLines = remember(det.history, next) {
+            det.history.mapNotNull { h -> CertLevel.entries.firstOrNull { it.dbName == h.level }?.let { thresholds.required(Certification(it, h.multiplier)).toFloat() to certColor(it) } } +
+                (need.toFloat() to certColor(next.level))
+        }
+        if (cumul.isEmpty()) Text("Pas encore de données.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(130.dp), color = color, thresholds = levelLines)
 
         SectionLabel("📊 Positions Stats")
         RanksRow(det.statsRanks)
@@ -358,35 +368,3 @@ private fun RanksRow(ranks: Map<Period, Int?>) {
     }
 }
 
-/** Courbe cumulée des écoutes avec lignes horizontales aux seuils déjà franchis / suivant. */
-@Composable
-private fun PlaysCurve(series: List<DayCount>, color: Color, history: List<CertificationHistoryEntity>, thresholds: CertificationRules.Thresholds, modifier: Modifier) {
-    val theme = Nova.theme
-    val textColor = theme.textSecondary
-    val cumul = remember(series) { var acc = 0; series.map { acc += it.playCount; acc } }
-    if (cumul.isEmpty()) { Text("Pas encore de données.", color = textColor, style = MaterialTheme.typography.bodySmall); return }
-    val total = cumul.last()
-    val next = thresholds.required(thresholds.next(total))
-    val maxY = maxOf(total, next).toFloat()
-    val levels = remember(history, next) { history.map { h -> CertLevel.entries.firstOrNull { it.dbName == h.level }?.let { thresholds.required(Certification(it, h.multiplier)) to certColor(it) } }.filterNotNull() }
-    val anim = rememberCurveAnim(theme, series.size)
-    Canvas(modifier) {
-        val w = size.width; val h = size.height
-        val padL = 34.dp.toPx(); val padT = 6.dp.toPx(); val padB = 6.dp.toPx()
-        val plotW = w - padL; val plotH = h - padT - padB
-        fun x(i: Int) = padL + if (cumul.size == 1) plotW / 2 else plotW * i / (cumul.size - 1)
-        fun y(v: Float) = padT + plotH * (1 - v / maxY)
-        val paint = android.graphics.Paint().apply {
-            this.color = android.graphics.Color.argb(200, (textColor.red * 255).toInt(), (textColor.green * 255).toInt(), (textColor.blue * 255).toInt())
-            textSize = 9.sp.toPx(); isAntiAlias = true
-        }
-        (levels + (next to certColor(thresholds.next(total).level))).forEach { (v, c) ->
-            drawLine(c.copy(alpha = 0.5f), Offset(padL, y(v.toFloat())), Offset(w, y(v.toFloat())), strokeWidth = 1.dp.toPx())
-            drawContext.canvas.nativeCanvas.drawText("$v", 0f, y(v.toFloat()) + 3.dp.toPx(), paint)
-        }
-        val pts = cumul.mapIndexed { i, v -> Offset(x(i), y(v.toFloat())) }
-        // Courbe thématisée (trait = couleur du palier, style / glow / décor = thème)
-        drawNovaCurve(theme, pts, baselineY = padT + plotH, anim = anim, strokeOverride = color)
-        drawCircle(color, radius = 4.dp.toPx(), center = pts.last())
-    }
-}

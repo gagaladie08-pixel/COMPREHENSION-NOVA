@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -119,7 +121,49 @@ private fun Tag(text: String) {
     )
 }
 
-/* ================================ POPUP 90 % ================================ */
+/* ================================ 8. 🏅 POPUP RECORDS — 90 %, composant dédié ================================ */
+
+/**
+ * POPUPS.md §8 : structure à part — 90 % de l'écran, scroll interne, onglets internes Titres / Artistes / Albums,
+ * Top 10 avec barre de progression proportionnelle au max (couleur primary), #1 mis en valeur 🥇,
+ * fermeture par bouton bas + clic extérieur. Les périodes restent sélectionnables (point ouvert du spec).
+ */
+@Composable
+private fun RecordsPopupCard(borderColor: Color, onDismiss: () -> Unit, header: @Composable () -> Unit, tabs: @Composable () -> Unit, content: @Composable () -> Unit) {
+    val theme = Nova.theme
+    var visible by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { visible = true }
+    val shape = RoundedCornerShape(16.dp)
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true)) {
+        androidx.compose.animation.AnimatedVisibility(visible = visible, enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220)), exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160))) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f))
+                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                contentAlignment = Alignment.Center
+            ) {
+                val h = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.90f).dp
+                Column(
+                    Modifier.fillMaxWidth(0.90f).height(h)
+                        .shadow(16.dp, shape, ambientColor = borderColor, spotColor = borderColor)
+                        .clip(shape)
+                        .background(Brush.verticalGradient(listOf(borderColor.copy(alpha = 0.28f), theme.background)))
+                        .border(1.5.dp, borderColor, shape)
+                        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
+                ) {
+                    header()
+                    // Onglets internes (fixes) puis contenu scrollable
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) { tabs() }
+                    androidx.compose.material3.HorizontalDivider(color = borderColor.copy(alpha = 0.25f))
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 8.dp)) { content() }
+                    androidx.compose.material3.HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
+                    androidx.compose.material3.TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                        Text("FERMER", color = borderColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun RecordPopup(defs: List<RecordDef>, onDismiss: () -> Unit, onEntity: (DetailTarget) -> Unit) {
@@ -143,34 +187,43 @@ private fun RecordPopup(defs: List<RecordDef>, onDismiss: () -> Unit, onEntity: 
     val rows by remember(def, period, category, sub) {
         dao.top10(def.id, period?.dbName, category.dbName, sub?.dbName, def.ascending)
     }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val maxValue = remember(rows) { rows.maxOfOrNull { it.r.value } ?: 0.0 }
 
-    PopupScaffold(borderColor = theme.primary, onDismiss = onDismiss, heightFraction = 0.9f, fixedHeight = true, banner = {
-        Column(
-            Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.55f), theme.secondary.copy(alpha = 0.35f)))).padding(16.dp)
-        ) {
-            Text("${def.emoji} ${def.title}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-            Text(def.description, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
+    RecordsPopupCard(
+        borderColor = theme.primary, onDismiss = onDismiss,
+        header = {
+            Column(Modifier.fillMaxWidth().background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.55f), theme.secondary.copy(alpha = 0.35f)))).padding(16.dp)) {
+                Text("${def.emoji} ${def.title}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                Text(def.description, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        tabs = {
+            if (defs.size > 1) {
+                ChipRow(defs.map { "${it.emoji} ${it.title}" }, defs.indexOf(def)) { selectDef(defs[it]) }
+                Spacer(Modifier.height(6.dp))
+            }
+            // Onglets internes Titres / Artistes / Albums
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.8f)).padding(3.dp)) {
+                def.categories.forEach { c ->
+                    val on = c == category
+                    Text(
+                        "${c.emoji} ${sectionLabel(c)}", color = if (on) theme.background else theme.text, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) theme.primary else Color.Transparent).clickable { selectCategory(c) }.padding(vertical = 8.dp)
+                    )
+                }
+            }
+            if (def.periods.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                ChipRow(def.periods.map { it.label }, def.periods.indexOf(period)) { period = def.periods[it] }
+            }
+            val subs = def.subs[category].orEmpty()
+            if (subs.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                ChipRow(subs.map { it.label }, subs.indexOf(sub)) { sub = subs[it] }
+            }
         }
-    }) {
-        if (defs.size > 1) {
-            ChipRow(defs.map { "${it.emoji} ${it.title}" }, defs.indexOf(def)) { selectDef(defs[it]) }
-            Spacer(Modifier.height(6.dp))
-        }
-        if (def.periods.isNotEmpty()) {
-            Text("PÉRIODE", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
-            ChipRow(def.periods.map { it.label }, def.periods.indexOf(period)) { period = def.periods[it] }
-            Spacer(Modifier.height(6.dp))
-        }
-        Text("SECTION", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
-        ChipRow(def.categories.map { "${it.emoji} ${sectionLabel(it)}" }, def.categories.indexOf(category)) { selectCategory(def.categories[it]) }
-        val subs = def.subs[category].orEmpty()
-        if (subs.isNotEmpty()) {
-            Spacer(Modifier.height(6.dp))
-            Text("SOUS-SECTION", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp)
-            ChipRow(subs.map { it.label }, subs.indexOf(sub)) { sub = subs[it] }
-        }
-        Spacer(Modifier.height(10.dp))
-
+    ) {
         if (rows.isEmpty()) {
             Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("🕳️", fontSize = 40.sp)
@@ -178,12 +231,12 @@ private fun RecordPopup(defs: List<RecordDef>, onDismiss: () -> Unit, onEntity: 
                 Text("Il faut plus d'historique pour cette combinaison (période · section).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             }
         } else {
-            rows.forEachIndexed { i, row -> RecordEntryRow(i + 1, row, def, period, category, onEntity) }
+            rows.forEachIndexed { i, row -> RecordEntryRow(i + 1, row, def, period, category, maxValue, onEntity) }
         }
     }
 }
 
-private fun sectionLabel(c: RecordCategory) = when (c) { RecordCategory.TRACK -> "Song"; RecordCategory.ALBUM -> "Album"; RecordCategory.ARTIST -> "Artist" }
+private fun sectionLabel(c: RecordCategory) = when (c) { RecordCategory.TRACK -> "Titres"; RecordCategory.ALBUM -> "Albums"; RecordCategory.ARTIST -> "Artistes" }
 
 @Composable
 private fun ChipRow(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
@@ -203,29 +256,39 @@ private fun ChipRow(labels: List<String>, selected: Int, onSelect: (Int) -> Unit
 }
 
 @Composable
-private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Period?, category: RecordCategory, onEntity: (DetailTarget) -> Unit) {
+private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Period?, category: RecordCategory, maxValue: Double, onEntity: (DetailTarget) -> Unit) {
     val theme = Nova.theme
+    val first = rank == 1
     val posColor = when (rank) { 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; 3 -> Color(0xFFCD7F32); else -> theme.textSecondary }
     val target = when (category) {
         RecordCategory.TRACK -> DetailTarget.Track(row.r.entityId)
         RecordCategory.ARTIST -> DetailTarget.Artist(row.r.entityId)
         RecordCategory.ALBUM -> DetailTarget.Album(row.r.entityId)
     }
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onEntity(target) }.padding(vertical = 6.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+    // Barre proportionnelle au max (ex. 47 semaines = 100 %) ; records « ascendants » (plus petit = mieux) → inversé
+    val fraction = if (maxValue <= 0.0) 0f else if (def.ascending) (1.0 - (row.r.value / maxValue) * 0.5).toFloat().coerceIn(0.1f, 1f) else (row.r.value / maxValue).toFloat().coerceIn(0.02f, 1f)
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
+            .then(if (first) Modifier.background(Brush.horizontalGradient(listOf(NovaColors.Gold.copy(alpha = 0.18f), Color.Transparent))).border(1.dp, NovaColors.Gold.copy(alpha = 0.5f), RoundedCornerShape(12.dp)) else Modifier)
+            .clickable { onEntity(target) }.padding(vertical = if (first) 10.dp else 6.dp, horizontal = 8.dp)
     ) {
-        Text(if (rank <= 3) listOf("🥇", "🥈", "🥉")[rank - 1] else "#$rank", color = posColor, fontWeight = FontWeight.Bold, modifier = Modifier.width(36.dp))
-        CoverArt(row.imageUrl, row.name ?: "?", size = 44, circle = category == RecordCategory.ARTIST)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(row.name ?: "Inconnu", color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val sub = listOfNotNull(row.subtitle, row.r.extraData).joinToString(" · ")
-            if (sub.isNotBlank()) Text(sub, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (rank <= 3) listOf("🥇", "🥈", "🥉")[rank - 1] else "#$rank", color = posColor, fontWeight = FontWeight.Bold, fontSize = if (first) 22.sp else 14.sp, modifier = Modifier.width(36.dp))
+            CoverArt(row.imageUrl, row.name ?: "?", size = if (first) 52 else 44, circle = category == RecordCategory.ARTIST)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(row.name ?: "Inconnu", color = if (first) NovaColors.Gold else theme.text, fontWeight = if (first) FontWeight.Black else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val subText = listOfNotNull(row.subtitle, row.r.extraData).joinToString(" · ")
+                if (subText.isNotBlank()) Text(subText, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(formatRecordValue(def, period, row.r.value), color = if (first) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (first) 17.sp else 14.sp)
+                row.r.valueDate?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
+            }
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(formatRecordValue(def, period, row.r.value), color = theme.primary, fontWeight = FontWeight.Bold)
-            row.r.valueDate?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
+        // Barre de progression (primary du thème)
+        Box(Modifier.fillMaxWidth().padding(top = 6.dp, start = 36.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(theme.textSecondary.copy(alpha = 0.15f))) {
+            Box(Modifier.fillMaxWidth(fraction).height(5.dp).background(if (first) Brush.horizontalGradient(listOf(theme.primary, NovaColors.Gold)) else Brush.horizontalGradient(listOf(theme.primary, theme.primary.copy(alpha = 0.6f)))))
         }
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -157,11 +158,8 @@ fun HallOfFameScreen() {
         }
         items(cards, key = { it.entityId }) { card ->
             HofCardView(card, isGlobal, certByEntity[card.entityType to card.entityId]) {
-                detail = when (card.entityType) {
-                    EntityType.ARTIST -> DetailTarget.Artist(card.entityId)
-                    EntityType.ALBUM -> DetailTarget.Album(card.entityId)
-                    else -> DetailTarget.Track(card.entityId)
-                }
+                // 7. Popup Hall of Fame : historique complet d'entrée + courbe de TOUTES les positions Billboard
+                detail = DetailTarget.HallOfFame(card.entityId, card.entityType)
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -181,12 +179,15 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
         animationSpec = infiniteRepeatable(tween(if (global) 1400 else 2200), RepeatMode.Reverse), label = "glowAlpha"
     )
     val coverSize = if (global) 96 else 72
+    // Global → carte 100 % de la largeur (pas de marge), glow intense + particules étoilées
+    val cardShape = RoundedCornerShape(if (global) 0.dp else 16.dp)
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = if (global) 12.dp else 16.dp, vertical = 6.dp)
-            .shadow(if (global) 18.dp else 8.dp, RoundedCornerShape(16.dp), ambientColor = color, spotColor = color)
-            .clip(RoundedCornerShape(16.dp))
+        Modifier.fillMaxWidth().padding(horizontal = if (global) 0.dp else 16.dp, vertical = 6.dp)
+            .shadow(if (global) 22.dp else 8.dp, cardShape, ambientColor = color, spotColor = color)
+            .clip(cardShape)
             .background(Brush.linearGradient(listOf(color.copy(alpha = pulse * 0.6f), theme.surface, theme.surface)))
-            .border(if (global) 2.dp else 1.dp, color.copy(alpha = pulse + 0.3f), RoundedCornerShape(16.dp))
+            .border(if (global) 2.dp else 1.dp, color.copy(alpha = pulse + 0.3f), cardShape)
+            .then(if (global) Modifier.starParticles(pulse) else Modifier)
             .combinedClickable(onClick = onOpen, onLongClick = onOpen)
             .padding(14.dp)
     ) {
@@ -229,3 +230,17 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
         }
     }
 }
+
+/** Particules étoilées (carte Global, bleu cosmique) : petites étoiles qui scintillent au rythme du glow. */
+private fun Modifier.starParticles(pulse: Float): Modifier = this.then(
+    Modifier.drawWithContent {
+        drawContent()
+        val stars = listOf(0.05f to 0.2f, 0.12f to 0.7f, 0.22f to 0.35f, 0.33f to 0.85f, 0.41f to 0.15f, 0.55f to 0.6f, 0.63f to 0.25f, 0.72f to 0.9f, 0.81f to 0.4f, 0.9f to 0.75f, 0.96f to 0.12f, 0.48f to 0.95f)
+        stars.forEachIndexed { i, (fx, fy) ->
+            val a = ((pulse * 2f + i * 0.17f) % 1f)
+            val alpha = if (a < 0.5f) a * 2f else (1f - a) * 2f
+            val r = 1.2f + (i % 3) * 0.9f
+            drawCircle(Color.White.copy(alpha = alpha * 0.9f), radius = r * density, center = androidx.compose.ui.geometry.Offset(size.width * fx, size.height * fy))
+        }
+    }
+)
