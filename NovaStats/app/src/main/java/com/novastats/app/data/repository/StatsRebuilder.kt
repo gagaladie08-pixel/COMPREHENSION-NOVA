@@ -77,6 +77,9 @@ class StatsRebuilder(private val db: NovaDatabase) {
         onProgress("Records…")
         RecordsEngine(db).rebuildAll(onProgress)
 
+        onProgress("Nova Awards…")
+        if (fullBillboard) AwardsEngine(db).rebuildAll() else AwardsEngine(db).refreshAll()
+
         if (fullBillboard) return emptyList()
         val news = ArrayList<Achievement>()
         for (c in db.certificationDao().allCurrent()) {

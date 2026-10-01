@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.Flow
 /* ===== Lignes "Dernières actualités" (Accueil §4) ===== */
 data class CertificationNews(@Embedded val h: CertificationHistoryEntity, val name: String?)
 data class PantheonNews(@Embedded val h: PantheonHistoryEntity, val name: String?)
+data class LevelCount(val level: String, val n: Int)
+
 data class HallOfFameNews(@Embedded val h: HallOfFameEntity, val name: String?)
 
 /** Entrée Hall of Fame avec nom / sous-titre (artiste) / image. */
@@ -49,6 +51,18 @@ data class PantheonRow(
     val name: String,
     @androidx.room.ColumnInfo(name = "photo_url") val photoUrl: String?,
     @androidx.room.ColumnInfo(name = "play_count") val playCount: Int
+)
+
+/** Titre ou album + sa certification actuelle (null si pas encore certifié) — onglet Certifications. */
+data class CertCandidate(
+    @androidx.room.ColumnInfo(name = "entity_id") val entityId: Long,
+    val name: String,
+    val subtitle: String?,
+    @androidx.room.ColumnInfo(name = "image_url") val imageUrl: String?,
+    @androidx.room.ColumnInfo(name = "play_count") val playCount: Int,
+    val level: String?,
+    val multiplier: Int?,
+    @androidx.room.ColumnInfo(name = "certified_at") val certifiedAt: Long?
 )
 
 /** Une certification rattachée à son artiste (titres via l'artiste principal, albums via l'artiste). */
@@ -81,6 +95,11 @@ interface CertificationDao {
     @Query("SELECT * FROM certification_history") suspend fun allHistory(): List<CertificationHistoryEntity>
     @Query("SELECT * FROM certifications") suspend fun allCurrent(): List<CertificationEntity>
     @Query("SELECT * FROM certifications") fun allCurrentFlow(): Flow<List<CertificationEntity>>
+    @Query("SELECT t.track_id AS entity_id, t.title AS name, a.name AS subtitle, t.cover_url AS image_url, t.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM tracks t JOIN artists a ON a.artist_id = t.artist_id LEFT JOIN certifications c ON c.entity_id = t.track_id AND c.entity_type = 'TRACK' WHERE t.play_count > 0 ORDER BY t.play_count DESC")
+    fun trackCandidates(): Flow<List<CertCandidate>>
+    @Query("SELECT al.album_id AS entity_id, al.title AS name, a.name AS subtitle, al.cover_url AS image_url, al.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM albums al JOIN artists a ON a.artist_id = al.artist_id LEFT JOIN certifications c ON c.entity_id = al.album_id AND c.entity_type = 'ALBUM' WHERE al.play_count > 0 ORDER BY al.play_count DESC")
+    fun albumCandidates(): Flow<List<CertCandidate>>
+    @Query("SELECT level, COUNT(*) AS n FROM certifications WHERE entity_type = :type GROUP BY level") fun countsByLevel(type: String): Flow<List<LevelCount>>
     @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM'")
     fun artistCertRows(): Flow<List<ArtistCertRow>>
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
@@ -201,6 +220,12 @@ interface NovaAwardDao {
     @Query("SELECT * FROM nova_awards WHERE year = :year") fun forYear(year: Int): Flow<List<NovaAwardEntity>>
     @Query("SELECT * FROM nova_awards_history WHERE year = :year") fun historyForYear(year: Int): Flow<List<NovaAwardHistoryEntity>>
     @Query("SELECT DISTINCT year FROM nova_awards_history ORDER BY year DESC") fun archivedYears(): Flow<List<Int>>
+    @Query("SELECT DISTINCT year FROM nova_awards ORDER BY year DESC") fun years(): Flow<List<Int>>
+    @Query("SELECT COUNT(*) FROM nova_awards_history WHERE year = :year") suspend fun historyCount(year: Int): Int
+    @Query("SELECT * FROM nova_awards WHERE year = :year") suspend fun forYearOnce(year: Int): List<NovaAwardEntity>
+    @Query("DELETE FROM nova_awards WHERE year = :year") suspend fun clearYear(year: Int)
+    @Query("DELETE FROM nova_awards") suspend fun clear()
+    @Query("DELETE FROM nova_awards_history") suspend fun clearHistory()
 }
 
 @Dao

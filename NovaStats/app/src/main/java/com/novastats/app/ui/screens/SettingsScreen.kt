@@ -362,9 +362,9 @@ private fun NotificationsPage() {
 
     val groups = listOf(
         "🏆 Certifications" to listOf(
-            SettingsRepository.Notif.CERT_SILVER to "🥉 Argent (25 écoutes · album 50)", SettingsRepository.Notif.CERT_GOLD to "🥈 Or (50 · 100)",
-            SettingsRepository.Notif.CERT_PLATINUM to "🥇 Platine (100 · 200)", SettingsRepository.Notif.CERT_DIAMOND to "💎 Diamant (350 · 700)",
-            SettingsRepository.Notif.CERT_MULTIPLIERS to "✖️ Multi-Diamant (2x, 3x…)"
+            SettingsRepository.Notif.CERT_SILVER to "🥉 Argent (25 écoutes · album 50) — son léger", SettingsRepository.Notif.CERT_GOLD to "🥈 Or (50 · 100) — son léger",
+            SettingsRepository.Notif.CERT_PLATINUM to "🥇 Platine (100 · 200) — son intermédiaire", SettingsRepository.Notif.CERT_DIAMOND to "💎 Diamant (350 · 700) — son épique + vibration",
+            SettingsRepository.Notif.CERT_MULTIPLIERS to "✖️ Multi-Diamant (2x, 3x…) — son épique + vibration"
         ),
         "👑 Panthéon" to listOf(
             SettingsRepository.Notif.P_STAR to "⭐ Star", SettingsRepository.Notif.P_SUPERSTAR to "🌟 Superstar", SettingsRepository.Notif.P_MEGASTAR to "💫 Megastar",

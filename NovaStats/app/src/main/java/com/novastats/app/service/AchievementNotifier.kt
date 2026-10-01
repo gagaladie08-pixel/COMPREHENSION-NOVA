@@ -39,7 +39,13 @@ object AchievementNotifier {
             if (!canPost || key in disabled) continue
             val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
             val pi = PendingIntent.getActivity(context, a.entityId.toInt(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val n = NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_ACHIEVEMENTS)
+            val channel = when (key) {
+                SettingsRepository.Notif.CERT_SILVER, SettingsRepository.Notif.CERT_GOLD -> NovaStatsApp.CHANNEL_CERT_LIGHT
+                SettingsRepository.Notif.CERT_PLATINUM -> NovaStatsApp.CHANNEL_CERT_MID
+                SettingsRepository.Notif.CERT_DIAMOND, SettingsRepository.Notif.CERT_MULTIPLIERS -> NovaStatsApp.CHANNEL_CERT_EPIC
+                else -> NovaStatsApp.CHANNEL_ACHIEVEMENTS
+            }
+            val n = NotificationCompat.Builder(context, channel)
                 .setSmallIcon(android.R.drawable.star_on)
                 .setContentTitle(title)
                 .setContentText(text)

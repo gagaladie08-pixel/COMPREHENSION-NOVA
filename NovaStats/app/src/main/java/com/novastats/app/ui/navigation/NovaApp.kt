@@ -49,6 +49,8 @@ import com.novastats.app.ui.screens.HomeScreen
 import com.novastats.app.ui.screens.PlaceholderScreen
 import com.novastats.app.ui.screens.RecordsScreen
 import com.novastats.app.ui.screens.HallOfFameScreen
+import com.novastats.app.ui.screens.CertificationsScreen
+import com.novastats.app.ui.screens.AwardsScreen
 import com.novastats.app.ui.screens.PantheonScreen
 import com.novastats.app.ui.screens.SettingsScreen
 import com.novastats.app.ui.screens.StatsScreen
@@ -121,10 +123,10 @@ fun NovaApp() {
             composable(NovaTab.STATS.route) { StatsScreen() }
             composable(NovaTab.BILLBOARD.route) { BillboardScreen() }
             composable(NovaTab.RECORDS.route) { RecordsScreen() }
-            composable(NovaTab.CERTIFICATIONS.route) { PlaceholderScreen(NovaTab.CERTIFICATIONS, "Argent · Or · Platine · Diamant") }
+            composable(NovaTab.CERTIFICATIONS.route) { CertificationsScreen() }
             composable(NovaTab.HALL_OF_FAME.route) { HallOfFameScreen() }
             composable(NovaTab.PANTHEON.route) { PantheonScreen() }
-            composable(NovaTab.AWARDS.route) { PlaceholderScreen(NovaTab.AWARDS, "9 récompenses annuelles") }
+            composable(NovaTab.AWARDS.route) { AwardsScreen() }
             composable(NovaTab.SETTINGS.route) { SettingsScreen() }
         }
     }

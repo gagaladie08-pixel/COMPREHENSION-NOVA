@@ -39,6 +39,7 @@ class SettingsRepository(private val context: Context) {
         val LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
         val HAPTICS = booleanPreferencesKey("haptics")
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
+        val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
     }
 
     /** Clés des 11 notifications (cahier des charges — toutes actives par défaut). */
@@ -97,6 +98,11 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTrackWhenMuted(v: Boolean) = context.dataStore.edit { it[Keys.TRACK_MUTED] = v }
     suspend fun setWatchdog(v: Boolean) = context.dataStore.edit { it[Keys.WATCHDOG] = v }
     suspend fun setFirstLaunchDone() = context.dataStore.edit { it[Keys.FIRST_LAUNCH_DONE] = true }
+
+    /* ---- Nova Awards ---- */
+    /** Années dont la cérémonie de révélation (cartes une par une) a déjà été jouée. */
+    val awardsRevealedYears: Flow<Set<String>> = context.dataStore.data.map { it[Keys.AWARDS_REVEALED] ?: emptySet() }
+    suspend fun markAwardsRevealed(year: Int) = context.dataStore.edit { it[Keys.AWARDS_REVEALED] = (it[Keys.AWARDS_REVEALED] ?: emptySet()) + year.toString() }
 
     /* ---- Notifications ---- */
     /** Notifications désactivées (toutes actives par défaut). */

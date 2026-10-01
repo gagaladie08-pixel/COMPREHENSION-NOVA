@@ -24,6 +24,10 @@ data class RecentScrobble(
     @androidx.room.ColumnInfo(name = "cover_url") val coverUrl: String?
 )
 
+data class DayCount(val date: String, @androidx.room.ColumnInfo(name = "play_count") val playCount: Int)
+data class IdCount(val id: Long, val plays: Int, @androidx.room.ColumnInfo(name = "duration_ms") val durationMs: Long)
+data class ArtistMonths(@androidx.room.ColumnInfo(name = "artist_id") val artistId: Long, val months: Int, val plays: Int)
+
 data class BestTrackDay(
     @Embedded val daily: DailyPlayEntity,
     @androidx.room.ColumnInfo(name = "title") val title: String
@@ -165,6 +169,12 @@ interface DailyPlayDao {
 
     @Query("SELECT MIN(date) FROM daily_plays")
     suspend fun firstDate(): String?
+    @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE track_id = :id GROUP BY date ORDER BY date") suspend fun seriesForTrack(id: Long): List<DayCount>
+    @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE album_id = :id GROUP BY date ORDER BY date") suspend fun seriesForAlbum(id: Long): List<DayCount>
+    @Query("SELECT DISTINCT date FROM daily_plays WHERE date BETWEEN :from AND :to ORDER BY date") suspend fun activeDatesBetween(from: String, to: String): List<String>
+    @Query("SELECT artist_id AS id, SUM(play_count) AS plays, SUM(total_duration_ms) AS duration_ms FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY artist_id") suspend fun artistPlaysBetween(from: String, to: String): List<IdCount>
+    @Query("SELECT track_id AS id, SUM(play_count) AS plays, SUM(total_duration_ms) AS duration_ms FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY track_id") suspend fun trackPlaysBetween(from: String, to: String): List<IdCount>
+    @Query("SELECT artist_id, COUNT(DISTINCT substr(date, 1, 7)) AS months, SUM(play_count) AS plays FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY artist_id ORDER BY months DESC, plays DESC, SUM(total_duration_ms) DESC LIMIT 1") suspend fun mostLoyalArtist(from: String, to: String): ArtistMonths?
 }
 
 @Dao
@@ -221,6 +231,7 @@ interface SessionDao {
     @Update suspend fun update(session: SessionEntity)
     @Query("SELECT * FROM sessions ORDER BY started_at DESC LIMIT 1") suspend fun latest(): SessionEntity?
     @Query("SELECT * FROM sessions ORDER BY total_duration_ms DESC LIMIT 1") suspend fun longest(): SessionEntity?
+    @Query("SELECT * FROM sessions WHERE started_at BETWEEN :fromMs AND :toMs ORDER BY total_duration_ms DESC LIMIT 1") suspend fun longestBetween(fromMs: Long, toMs: Long): SessionEntity?
     @Query("DELETE FROM sessions") suspend fun clear()
 }
 

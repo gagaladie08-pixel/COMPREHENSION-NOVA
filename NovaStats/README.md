@@ -71,12 +71,12 @@ app/src/main/java/com/novastats/app/
 | 🎵 Détection v3.0 | ✅ Tracker + service MediaSession/Notification, whitelist apps, blacklist artistes/mots-clés, filtre > 10 min |
 | 🏠 Accueil | ✅ 8 sections : lecture en cours (pochette, progression, source, statut), aujourd'hui, top du moment, actualités, prochaines certifs, records, récents, streak |
 | 📊 Stats | ✅ Titres/Artistes/Albums × 5 périodes (Weekly = 7 jours glissants), recherche, bandeau, popups détaillées (appui long) |
-| 💎 Certifications | 🟡 Règles + calcul + dates rétroactives (écran à venir) |
+| 💎 Certifications | ✅ Chansons / Albums, chips par palier avec compteurs, radar des 5 prochains paliers, tri niveau → écoutes, dates rétroactives + durée, recherche, fiche colorée par niveau (historique, progression, courbe, positions), sons distincts par palier |
 | 👑 Panthéon | ✅ Liste par statut (Mythique en tête), recherche, progression vers le statut suivant, « Bientôt dans le Panthéon », parcours dans la fiche artiste |
 | 🏆 Billboard | ✅ Hot 100 / Artist 50 / 75 Albums × 5 périodes, LIVE = dernière période close (la période en cours n'a jamais de snapshot), rattrapage automatique des snapshots manquants, navigation historique, fiche détaillée, recherche |
 | 🏛️ Hall of Fame | ✅ Weekly / Monthly / Global × Chansons / Artistes / Albums, une carte par entité avec tous ses badges (Direct Debut, Long Run, Triple Debut, Legendary Run), tri par prestige puis durée de règne |
 | 🏅 Records | ✅ 24 records (`domain/Records.kt` + `RecordsEngine`), recalculés après chaque écoute / import, popup 90 % avec Périodes · Sections · Sous-sections |
-| 🏆 Nova Awards | ⬜ Tables prêtes |
+| 🏆 Nova Awards | ✅ 9 récompenses, déblocage à 2 mois, LIVE / FINAL par année, révélation une par une, cérémonie 31 déc., partage texte |
 | 🎨 15 thèmes | ✅ Palettes + sélecteur |
 | ⚙️ Paramètres | ✅ 8 sous-pages : Détection · Apparence · Notifications (11) · Données (export JSON v2 compatible v1, import, sauvegarde auto, suppression) · Éditeur · Service & diagnostic · APIs · À propos |
 | 🌐 APIs (cascade 9 sources) | ✅ iTunes · Spotify · Last.fm · MusicBrainz/CAA · TheAudioDB · Deezer · Discogs · Fanart.tv · Google ; score de confiance, consensus, cache 6 mois/1 mois/négatif 7 j, fiabilité dynamique, worker en arrière-plan |
