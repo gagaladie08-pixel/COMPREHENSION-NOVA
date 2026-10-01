@@ -67,7 +67,7 @@ class NovaKeepAliveService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             return NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_SERVICE)
-                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setSmallIcon(com.novastats.app.R.drawable.ic_notification)
                 .setContentTitle("🎧 NovaStats veille")
                 .setContentText(text)
                 .setContentIntent(open)

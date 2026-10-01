@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_bg_cyber_nova" />
-    <foreground android:drawable="@drawable/ic_launcher_fg_cyber_nova" />
+    <background android:drawable="@drawable/ic_launcher_bg_rainbow_pop" />
+    <foreground android:drawable="@drawable/ic_launcher_fg_rainbow_pop" />
     <monochrome android:drawable="@drawable/ic_launcher_mono" />
 </adaptive-icon>

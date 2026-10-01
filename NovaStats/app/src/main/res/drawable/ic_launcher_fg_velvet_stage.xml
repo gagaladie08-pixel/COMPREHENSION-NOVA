@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- N stylisé — dégradé #8B0000 → #722F37 → #CFB53B (Velvet Stage) -->
+    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76">
+                <item android:offset="0" android:color="#8B0000" />
+                <item android:offset="0.5" android:color="#722F37" />
+                <item android:offset="1" android:color="#CFB53B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Onde sonore intégrée — accent à 70 % -->
+    <path android:pathData="M30,51 V57 M38,47 V61 M46,42 V66 M54,38 V70 M62,42 V66 M70,47 V61 M78,51 V57" android:strokeColor="#FFD700" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+</vector>

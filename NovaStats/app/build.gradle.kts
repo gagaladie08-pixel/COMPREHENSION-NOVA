@@ -33,8 +33,8 @@ android {
         applicationId = "com.novastats.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.7.2"
+        versionCode = 10
+        versionName = "0.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -103,6 +103,7 @@ ksp {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

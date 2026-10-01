@@ -46,7 +46,7 @@ object AchievementNotifier {
                 else -> NovaStatsApp.CHANNEL_ACHIEVEMENTS
             }
             val n = NotificationCompat.Builder(context, channel)
-                .setSmallIcon(android.R.drawable.star_on)
+                .setSmallIcon(com.novastats.app.R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -68,7 +68,7 @@ object AchievementNotifier {
         val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
         val pi = PendingIntent.getActivity(context, 7_777, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_CERT_EPIC)
-            .setSmallIcon(android.R.drawable.star_on).setContentTitle("🎉 Ta première écoute !")
+            .setSmallIcon(com.novastats.app.R.drawable.ic_notification).setContentTitle("🎉 Ta première écoute !")
             .setContentText("$display — Ton histoire commence maintenant")
             .setStyle(NotificationCompat.BigTextStyle().bigText("$display\nTon histoire commence maintenant.\n🏆 Premier Scrobble débloqué ! Ton premier jour. Le début d'une ère."))
             .setContentIntent(pi).setAutoCancel(true).build()

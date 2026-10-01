@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Fond : dégradé vertical #0A0010 → #1A0030 (Neon Disco) -->
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108">
+                <item android:offset="0" android:color="#0A0010" />
+                <item android:offset="1" android:color="#1A0030" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

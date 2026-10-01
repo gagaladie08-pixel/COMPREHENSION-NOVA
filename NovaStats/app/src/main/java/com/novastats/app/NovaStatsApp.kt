@@ -3,6 +3,7 @@ package com.novastats.app
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import kotlinx.coroutines.launch
 import android.media.AudioAttributes
 import android.net.Uri
 import com.novastats.app.data.api.MetadataEnricher
@@ -38,7 +39,11 @@ class NovaStatsApp : Application() {
         BackupWorker.schedulePeriodic(this)
         com.novastats.app.service.DetectionState.bind(this)
         com.novastats.app.service.Watchdog.schedule(this)
+        // Icône du launcher = thème actif (15 activity-alias, un seul activé)
+        appScope.launch { settings.themeId.collect { id -> com.novastats.app.ui.theme.IconSwitcher.apply(this@NovaStatsApp, id) } }
     }
+
+    private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
     private fun createNotificationChannels() {
         val nm = getSystemService(NotificationManager::class.java)

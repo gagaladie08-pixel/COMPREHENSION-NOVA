@@ -1,0 +1,9 @@
+<resources>
+    <!-- Android 12+ : icône animée (animated-vector) — scale 0 → 1 avec overshoot, puis pulsation de l'onde -->
+    <style name="Theme.NovaStats.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#050510</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_anim</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="postSplashScreenTheme">@style/Theme.NovaStats</item>
+    </style>
+</resources>
