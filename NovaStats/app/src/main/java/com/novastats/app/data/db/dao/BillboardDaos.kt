@@ -149,6 +149,10 @@ interface BillboardDao {
     )
     suspend fun albumHistory(type: String, id: Long): List<PriorRow>
 
+    /** Dates de tous les snapshots d'un type (Multi-Chart : jours observés). */
+    @Query("SELECT DISTINCT date FROM snapshots WHERE type = :type ORDER BY date")
+    suspend fun snapshotDates(type: String): List<String>
+
     /* ===== Séries complètes d'un type de chart (moteur des Records) ===== */
 
     @Query(

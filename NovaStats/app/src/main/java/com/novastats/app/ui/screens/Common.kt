@@ -31,8 +31,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.ui.graphics.graphicsLayer
 import coil.compose.AsyncImage
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.navigation.NovaTab
@@ -104,18 +112,46 @@ fun StatPill(value: String, label: String, modifier: Modifier = Modifier, accent
 
 /** Pochette (ou dégradé de secours avec initiale). */
 @Composable
-fun CoverArt(url: String?, fallbackText: String, size: Int = 48, circle: Boolean = false) {
+fun CoverArt(url: String?, fallbackText: String, size: Int = 48, circle: Boolean = false, zoomable: Boolean = false) {
     val shape = if (circle) RoundedCornerShape(50) else RoundedCornerShape(8.dp)
     val theme = Nova.theme
+    var full by remember { mutableStateOf(false) }
+    if (full && url != null) FullscreenImage(url, fallbackText) { full = false }
     Box(
         modifier = Modifier.size(size.dp).clip(shape)
-            .background(Brush.linearGradient(listOf(theme.primary.copy(alpha = 0.6f), theme.glowSecondary.copy(alpha = 0.6f)))),
+            .background(Brush.linearGradient(listOf(theme.primary.copy(alpha = 0.6f), theme.glowSecondary.copy(alpha = 0.6f))))
+            .then(if (zoomable && url != null) Modifier.clickable { full = true } else Modifier),
         contentAlignment = Alignment.Center
     ) {
         if (url != null) {
             AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxSize())
         } else {
             Text(fallbackText.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Black, fontSize = (size / 2.2).sp)
+        }
+    }
+}
+
+/** Image plein écran (appui sur une pochette / photo dans un popup) : fond noir, pincer pour zoomer, appui pour fermer. */
+@Composable
+fun FullscreenImage(url: String, title: String, onDismiss: () -> Unit) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val state = androidx.compose.foundation.gestures.rememberTransformableState { zoom, pan, _ ->
+        scale = (scale * zoom).coerceIn(1f, 5f)
+        offset = if (scale <= 1f) androidx.compose.ui.geometry.Offset.Zero else offset + pan
+    }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.96f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)) {
+            AsyncImage(
+                model = url, contentDescription = title, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+                    .transformable(state)
+                    .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y)
+            )
+            Text(title, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp, start = 24.dp, end = 24.dp))
+            Text("✕", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp,
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.15f)).clickable(onClick = onDismiss).padding(horizontal = 12.dp, vertical = 4.dp))
         }
     }
 }

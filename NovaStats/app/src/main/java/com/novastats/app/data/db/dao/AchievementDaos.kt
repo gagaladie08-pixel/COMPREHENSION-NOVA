@@ -208,6 +208,27 @@ interface RecordDao {
     )
     fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean): Flow<List<RecordRow>>
 
+    /** 🔍 Recherche d'un titre / artiste / album dans tous les records (nom contenant [q]). */
+    @Query(
+        """
+        SELECT * FROM (
+            SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT a.name FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+            FROM records_cache r
+        ) WHERE name LIKE '%' || :q || '%' OR subtitle LIKE '%' || :q || '%'
+        ORDER BY value DESC LIMIT 200
+        """
+    )
+    suspend fun search(q: String): List<RecordRow>
+
     @Query("SELECT COUNT(*) FROM records_cache") fun countFlow(): Flow<Int>
     @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
     @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>

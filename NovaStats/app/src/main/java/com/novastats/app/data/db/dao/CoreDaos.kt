@@ -533,6 +533,9 @@ interface TrackLinkDao {
     suspend fun artistIdsForTrack(trackId: Long): List<Long>
 
     @Query("SELECT * FROM track_artists") suspend fun allTrackArtists(): List<TrackArtistEntity>
+    /** Titres crédités à un artiste (principal + featuring) + titres dont il est l'artiste principal. */
+    @Query("SELECT track_id FROM track_artists WHERE artist_id = :artistId UNION SELECT track_id FROM tracks WHERE artist_id = :artistId")
+    suspend fun trackIdsForArtist(artistId: Long): List<Long>
     @Query("DELETE FROM track_artists WHERE artist_id = :from AND track_id IN (SELECT track_id FROM track_artists WHERE artist_id = :into)") suspend fun dropDuplicateLinks(from: Long, into: Long)
     @Query("UPDATE track_artists SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
     @Query("DELETE FROM track_artists WHERE track_id = :trackId") suspend fun clearTrackArtists(trackId: Long)

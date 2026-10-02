@@ -196,7 +196,7 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
             // 180 dp — pochette carrée centrée uniquement
             Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(132.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = theme.primary, ambientColor = theme.primary).border(2.dp, theme.primary, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
-                    CoverArt(t?.coverUrl, t?.title ?: "?", size = 132)
+                    CoverArt(t?.coverUrl, t?.title ?: "?", size = 132, zoomable = true)
                 }
             }
         }
@@ -255,7 +255,7 @@ private fun ArtistBanner(a: ArtistEntity?, ring: Color, status: PantheonStatus?,
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             val ringBrush = if (holographic) Brush.sweepGradient(HoloColors) else Brush.linearGradient(listOf(ring, ring))
             Box(Modifier.size(90.dp).shadow(22.dp, RoundedCornerShape(50), ambientColor = ring, spotColor = ring).border(3.dp, ringBrush, RoundedCornerShape(50)).clip(RoundedCornerShape(50))) {
-                CoverArt(a?.photoUrl, a?.name ?: "?", size = 90, circle = true)
+                CoverArt(a?.photoUrl, a?.name ?: "?", size = 90, circle = true, zoomable = true)
             }
             Spacer(Modifier.height(8.dp))
             Text((a?.name ?: "").uppercase(), color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 16.dp))
@@ -534,7 +534,7 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
             Box(Modifier.fillMaxWidth().height(170.dp), contentAlignment = Alignment.Center) {
                 BlurredBackdrop(al?.coverUrl, theme.secondary, Modifier.fillMaxSize())
                 Box(Modifier.size(120.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = theme.secondary, ambientColor = theme.secondary).border(2.dp, theme.secondary, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
-                    CoverArt(al?.coverUrl, al?.title ?: "?", size = 120)
+                    CoverArt(al?.coverUrl, al?.title ?: "?", size = 120, zoomable = true)
                 }
             }
         }
@@ -744,7 +744,7 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
                     Spacer(Modifier.height(8.dp))
                     val circle = entityType == EntityType.ARTIST
                     Box(Modifier.size(110.dp).shadow(22.dp, RoundedCornerShape(if (circle) 50 else 12), ambientColor = color, spotColor = color).border(3.dp, color, RoundedCornerShape(if (circle) 50 else 12)).clip(RoundedCornerShape(if (circle) 50 else 12))) {
-                        CoverArt(det?.imageUrl, det?.name ?: "?", size = 110, circle = circle)
+                        CoverArt(det?.imageUrl, det?.name ?: "?", size = 110, circle = circle, zoomable = true)
                     }
                 }
             }

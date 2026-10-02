@@ -37,7 +37,39 @@ data class RecordDef(
     val screen: String = id
 )
 
+/** Familles de records (onglet Records : puces horizontales façon niveaux de certification). */
+enum class RecordGroup(val emoji: String, val label: String, val description: String) {
+    DURATION("⏳", "Durée dans le chart", "Combien de temps un élément est resté classé, dans le Top 10, au #1…"),
+    MOVEMENT("📈", "Mouvements de position", "Les plus grands bonds, chutes, retours et ascensions"),
+    DEBUT("🚀", "Débuts", "Les entrées les plus fortes dans le chart"),
+    SPEED("⚡", "Vitesse", "Les certifications et statuts Panthéon atteints le plus vite"),
+    TOTALS("🧮", "Cumuls", "Les plus gros volumes : écoutes, certifications, Hall of Fame, Global, multi-charts"),
+    DOMINATION("🎼", "Domination", "Les artistes / albums qui occupent le chart avec plusieurs titres à la fois")
+}
+
 object RecordCatalog {
+    /** Groupe de chaque record (ordre d'affichage dans l'onglet). */
+    val groupOf: Map<String, RecordGroup> = mapOf(
+        "MOST_CUMULATIVE" to RecordGroup.DURATION, "MOST_CUMULATIVE_TOP10" to RecordGroup.DURATION, "MOST_TIME_AT_1" to RecordGroup.DURATION,
+        "MOST_CONSISTENT" to RecordGroup.DURATION, "MOST_BLOCKED_TOP5" to RecordGroup.DURATION,
+        "BIGGEST_JUMP" to RecordGroup.MOVEMENT, "BIGGEST_FALL" to RecordGroup.MOVEMENT, "BIGGEST_COMEBACK" to RecordGroup.MOVEMENT, "BIGGEST_CLIMBER" to RecordGroup.MOVEMENT,
+        "SLEEPER_HIT" to RecordGroup.MOVEMENT, "FASTEST_RISE" to RecordGroup.MOVEMENT, "LONGEST_ROAD" to RecordGroup.MOVEMENT,
+        "MOST_DEBUT_1" to RecordGroup.DEBUT, "MOST_DEBUT_TOP10" to RecordGroup.DEBUT, "BIGGEST_DEBUT" to RecordGroup.DEBUT,
+        "FASTEST_CERT" to RecordGroup.SPEED, "FASTEST_PANTHEON" to RecordGroup.SPEED,
+        "BIGGEST_PERIOD" to RecordGroup.TOTALS, "MOST_CERTIFICATIONS" to RecordGroup.TOTALS, "MOST_HOF" to RecordGroup.TOTALS, "MOST_GLOBAL" to RecordGroup.TOTALS, "MULTI_CHART" to RecordGroup.TOTALS,
+        "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
+        "MOST_SIMULTANEOUS" to RecordGroup.DOMINATION, "MOST_SUCCESSIVE_1" to RecordGroup.DOMINATION
+    )
+    fun inGroup(g: RecordGroup): List<RecordDef> = groupOf.filterValues { it == g }.keys.mapNotNull { id -> ALL.firstOrNull { it.id == id } }
+
+    /** Index de période (jours epoch / semaines ISO / mois / années) — partagé moteur + explications. */
+    fun periodIndex(date: java.time.LocalDate, p: Period): Int = when (p) {
+        Period.DAILY -> date.toEpochDay().toInt()
+        Period.WEEKLY -> Math.floorDiv(date.toEpochDay() + 3, 7L).toInt()
+        Period.MONTHLY -> date.year * 12 + date.monthValue
+        Period.YEARLY -> date.year
+        Period.GLOBAL -> 0
+    }
     private val chartPeriods = listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY)
     private val all3 = listOf(RecordCategory.TRACK, RecordCategory.ARTIST, RecordCategory.ALBUM)
     private val artistAlbum = listOf(RecordCategory.ARTIST, RecordCategory.ALBUM)

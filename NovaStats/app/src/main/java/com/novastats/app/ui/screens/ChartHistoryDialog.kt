@@ -53,7 +53,7 @@ fun ChartHistoryDialog(h: EntityHistory, onDismiss: () -> Unit) {
             Box(Modifier.fillMaxWidth().height(180.dp)) {
                 BlurredBackdrop(h.item.coverUrl, Gold, Modifier.fillMaxSize())
                 Row(Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CoverArt(h.item.coverUrl, h.item.name, size = 96, circle = h.item.circle)
+                    CoverArt(h.item.coverUrl, h.item.name, size = 96, circle = h.item.circle, zoomable = true)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text("${h.chart.emoji} ${h.chart.label} · ${h.period.label}", color = Gold, style = MaterialTheme.typography.labelSmall)

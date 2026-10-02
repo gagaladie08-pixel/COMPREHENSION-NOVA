@@ -27,6 +27,7 @@ class NovaStatsApp : Application() {
     val library: LibraryRepository by lazy { LibraryRepository(database) }
     val rebuilder: StatsRebuilder by lazy { StatsRebuilder(database) }
     val billboard: BillboardEngine by lazy { BillboardEngine(database) }
+    val recordExplainer: com.novastats.app.data.repository.RecordExplainer by lazy { com.novastats.app.data.repository.RecordExplainer(database) }
     val enricher: MetadataEnricher by lazy {
         MetadataEnricher(database, settings).also { e ->
             e.onTrackFlagged = { trackId, title, artist, proposal, score -> com.novastats.app.service.ReviewNotifier.notifyFlagged(this, trackId, title, artist, proposal, score) }

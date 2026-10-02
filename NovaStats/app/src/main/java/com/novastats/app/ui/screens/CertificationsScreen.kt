@@ -301,7 +301,7 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
             Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
                 BlurredBackdrop(det?.imageUrl, color, Modifier.fillMaxSize())
                 Box(Modifier.size(130.dp).shadow(if (diamond) 28.dp else 14.dp, RoundedCornerShape(12.dp), ambientColor = color, spotColor = color).border(3.dp, color, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))) {
-                    CoverArt(det?.imageUrl, det?.name ?: "?", size = 130)
+                    CoverArt(det?.imageUrl, det?.name ?: "?", size = 130, zoomable = true)
                 }
             }
         }
