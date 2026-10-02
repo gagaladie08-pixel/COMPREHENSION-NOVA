@@ -100,4 +100,25 @@ class MetadataMatchingTest {
         val artists = MetadataMatching.orderSources({ it.artistPriority }, emptyMap()) { true }
         assertEquals(listOf(ApiSource.DEEZER, ApiSource.FANART, ApiSource.WIKIDATA, ApiSource.THEAUDIODB, ApiSource.LASTFM, ApiSource.GENIUS, ApiSource.YOUTUBE), artists)
     }
+
+    @Test
+    fun `contexte bibliothèque — bonus, pénalité, titre absent, non vérifiable`() {
+        val base = ScoredCandidate(cand(ApiSource.ITUNES, "Money", "LISA"), 90, listOf("titre +30", "artiste +30"))
+        val known = setOf("rockstar", "born again", "new woman", "fxck up the world", "moonlit floor")
+        // L'album candidat contient le titre + 2 titres connus → +20
+        val ok = MetadataMatching.libraryCheck(base, listOf("Money", "Rockstar", "New Woman", "Elastigirl"), "money", known)
+        assertEquals(100, ok.score)
+        assertTrue(ok.reasons.any { it.startsWith("2 titres en commun") })
+        // Homonyme : aucun titre en commun alors qu'on en connaît 5 et que la liste en a 4 → −25
+        val homonym = MetadataMatching.libraryCheck(base, listOf("Money", "Blue Skies", "Rain", "Old Town"), "money", known)
+        assertEquals(65, homonym.score)
+        // Titre absent de l'album (mauvaise édition) et rien en commun → −30 −25
+        val wrong = MetadataMatching.libraryCheck(base, listOf("Blue Skies", "Rain", "Old Town", "Sunset"), "money", known)
+        assertEquals(35, wrong.score)
+        // Pas assez de titres connus pour trancher → inchangé
+        assertEquals(90, MetadataMatching.libraryCheck(base, listOf("Money", "Blue Skies"), "money", setOf("rockstar")).score)
+        // Source non vérifiable : 90 → 89 (🟡 À vérifier), 80 inchangé
+        assertEquals(89, MetadataMatching.libraryCheck(base, null, "money", known).score)
+        assertEquals(80, MetadataMatching.libraryCheck(base.copy(score = 80), null, "money", known).score)
+    }
 }

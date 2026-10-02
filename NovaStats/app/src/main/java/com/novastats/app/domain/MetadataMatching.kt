@@ -64,7 +64,11 @@ data class MetaCandidate(
     val releaseDate: String? = null,
     val bio: String? = null,
     val mbid: String? = null,
-    val spotifyId: String? = null
+    val spotifyId: String? = null,
+    /** Identifiant de l'album chez la source (pour récupérer sa liste de pistes → vérification bibliothèque). */
+    val externalAlbumId: String? = null,
+    /** Identifiant de l'artiste chez la source (pour récupérer ses titres connus → vérification bibliothèque). */
+    val externalArtistId: String? = null
 )
 
 /** Candidat évalué. */
@@ -201,6 +205,41 @@ object MetadataMatching {
             if (sameAlbum || sameDuration || sameName) { agreed += a; agreed += b }
         }
         return agreed
+    }
+
+    /**
+     * Stratégie « contexte bibliothèque » (0.8.7) : on croise la liste de pistes de l'album candidat (ou les titres
+     * connus de l'artiste candidat) avec les titres déjà enregistrés dans NovaStats.
+     *  - [titles] = null → la source ne permet pas la vérification : score plafonné à 89 (accepté mais 🟡 À vérifier)
+     *  - [wantedTitle] absent de la liste → −30 (mauvaise édition / autre chanson)
+     *  - ≥ 1 titre en commun avec [knownTitles] → +20 « confirmé par ta bibliothèque »
+     *  - aucun titre en commun alors que la bibliothèque en connaît ≥ [minKnown] et la liste en a ≥ [minList] → −[penalty]
+     *    (homonyme, reprise, karaoké…)
+     * [knownTitles] doit déjà être normalisé (TitleNormalizer.normalizeKey) et ne pas contenir [wantedTitle].
+     */
+    fun libraryCheck(
+        sc: ScoredCandidate,
+        titles: List<String>?,
+        wantedTitle: String?,
+        knownTitles: Set<String>,
+        minKnown: Int = 5,
+        minList: Int = 4,
+        penalty: Int = 25
+    ): ScoredCandidate {
+        if (titles == null) {
+            return if (sc.score >= TRUSTED) sc.copy(score = TRUSTED - 1, reasons = sc.reasons + "non vérifiable → max ${TRUSTED - 1}") else sc
+        }
+        val reasons = sc.reasons.toMutableList()
+        var score = sc.score
+        val keys = titles.map { TitleNormalizer.normalizeKey(it) }.filter { it.isNotBlank() }
+        if (wantedTitle != null && keys.isNotEmpty() && keys.none { k -> similarity(k, wantedTitle) >= 0.85 }) { score -= 30; reasons += "titre absent de cet album −30" }
+        val overlap = keys.count { it in knownTitles }
+        when {
+            overlap >= 1 -> { score += 20; reasons += "$overlap titre${if (overlap > 1) "s" else ""} en commun avec ta bibliothèque +20" }
+            knownTitles.size >= minKnown && keys.size >= minList -> { score -= penalty; reasons += "aucun titre en commun avec ta bibliothèque −$penalty" }
+            else -> reasons += "bibliothèque : pas assez de titres pour trancher"
+        }
+        return sc.copy(score = score.coerceIn(0, 100), reasons = reasons)
     }
 
     /** Stratégie 6 : durée de cache selon le score. Retourne null si le résultat ne doit pas être mis en cache. */

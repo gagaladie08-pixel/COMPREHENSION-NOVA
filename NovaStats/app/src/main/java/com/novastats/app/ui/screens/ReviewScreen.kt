@@ -245,7 +245,7 @@ private fun ReviewPopup(
     // Propositions de l'app (jusqu'à 3)
     var proposals by remember(item.trackId) { mutableStateOf<List<ScoredCandidate>?>(null) }
     LaunchedEffect(item.trackId) {
-        proposals = runCatching { app.enricher.proposeTrack(item.rawTitle ?: item.title, item.rawArtist ?: item.artist, item.album, item.durationMs) }.getOrDefault(emptyList())
+        proposals = runCatching { app.enricher.proposeTrack(item.rawTitle ?: item.title, item.rawArtist ?: item.artist, item.album, item.durationMs, trackId = item.trackId) }.getOrDefault(emptyList())
     }
 
     var menu by remember { mutableStateOf(false) }
@@ -357,6 +357,11 @@ private fun ReviewPopup(
                             Column(Modifier.weight(1f)) {
                                 Text(c.name + (c.artist?.let { " — $it" } ?: ""), color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("${c.source.emoji} ${c.source.label}${c.album?.let { " · $it" } ?: ""}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                // Verdict bibliothèque : titres en commun / absent / non vérifiable
+                                p.reasons.lastOrNull { it.contains("bibliothèque") || it.contains("absent de cet album") || it.contains("non vérifiable") }?.let { note ->
+                                    val good = note.contains("en commun")
+                                    Text((if (good) "✅ " else "⚠️ ") + note.substringBefore(" +").substringBefore(" −").substringBefore(" →"), color = if (good) Color(0xFF2ECC71) else ReviewYellow, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                             Text("${p.score} %", color = if (p.score >= 90) Color(0xFF2ECC71) else ReviewYellow, fontWeight = FontWeight.Bold)
                         }

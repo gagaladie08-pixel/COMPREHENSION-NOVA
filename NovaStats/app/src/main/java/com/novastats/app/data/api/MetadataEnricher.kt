@@ -134,22 +134,62 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         else -> true
     }
 
+    /* ------------------------------------------------------------------ */
+    /*  Contexte bibliothèque (0.8.7) : vérification par les titres déjà enregistrés  */
+    /* ------------------------------------------------------------------ */
+
+    private val tracklistCache = android.util.LruCache<String, List<String>>(400)
+    private val artistTitlesCache = android.util.LruCache<String, List<String>>(200)
+    private val NONE = emptyList<String>()
+
+    /** Liste de pistes de l'album du candidat (null = source sans vérification possible). Mise en cache par (source, id). */
+    private suspend fun tracklistOf(c: MetaCandidate): List<String>? {
+        val id = c.externalAlbumId ?: return null
+        val api = apis[c.source] ?: return null
+        val key = "${c.source.name}|$id"
+        tracklistCache.get(key)?.let { return it.takeIf { l -> l !== NONE } }
+        val list = runCatching { api.albumTracks(id) }.getOrNull()
+        tracklistCache.put(key, list ?: NONE)
+        return list
+    }
+
+    /** Titres connus de l'artiste candidat ; les sources « mbid » (Fanart, Wikidata, TheAudioDB, Last.fm) passent par MusicBrainz. */
+    private suspend fun artistTitlesOf(c: MetaCandidate): List<String>? {
+        val id = c.externalArtistId ?: c.mbid ?: return null
+        val api = apis[c.source] ?: return null
+        val key = "${c.source.name}|$id"
+        artistTitlesCache.get(key)?.let { return it.takeIf { l -> l !== NONE } }
+        var list = runCatching { api.artistTitles(id) }.getOrNull()
+        if (list == null && c.mbid != null) list = runCatching { musicBrainz.artistTitles(c.mbid) }.getOrNull()
+        artistTitlesCache.put(key, list ?: NONE)
+        return list
+    }
+
+    private fun keysOf(titles: List<String>, exclude: String? = null): Set<String> {
+        val ex = exclude?.let { TitleNormalizer.normalizeKey(it) }
+        return titles.map { TitleNormalizer.normalizeKey(it) }.filter { it.isNotBlank() && it != ex }.toSet()
+    }
+
     /**
      * ⚠️ À corriger — propositions pour le popup de correction : jusqu'à 3 candidats (source + score) issus des
      * sources sans clé ou configurées (hors Google), interrogées en parallèle. Un appui remplit tous les champs.
      */
-    suspend fun proposeTrack(title: String, artist: String, album: String?, durationMs: Long?): List<ScoredCandidate> {
+    suspend fun proposeTrack(title: String, artist: String, album: String?, durationMs: Long?, trackId: Long? = null): List<ScoredCandidate> {
         if (title.isBlank()) return emptyList()
+        val known = trackId?.let { id -> db.trackDao().getById(id)?.let { t -> keysOf(db.trackDao().titlesOfArtist(t.artistId), exclude = t.title) } } ?: emptySet()
+        val wanted = TitleNormalizer.normalizeKey(title)
         val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.trackPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.trackPriority }.take(6)
         val results: List<MetaCandidate> = coroutineScope {
             sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchTrack(title, artist.ifBlank { "" }) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
         }.flatten()
         val consensus = MetadataMatching.consensusSet(results)
-        return results.map { c -> MetadataMatching.scoreTrack(c, title, artist, album, durationMs, c in consensus) }
+        val top = results.map { c -> MetadataMatching.scoreTrack(c, title, artist, album, durationMs, c in consensus) }
             .filter { it.score >= 50 }
             .sortedByDescending { it.score }
             .distinctBy { TitleNormalizer.normalizeKey(it.candidate.name) + "|" + TitleNormalizer.normalizeKey(it.candidate.artist ?: "") }
             .take(3)
+        // Vérification bibliothèque (liste de pistes de l'album candidat vs titres connus de l'artiste)
+        return top.map { sc -> MetadataMatching.libraryCheck(sc, tracklistOf(sc.candidate), wanted, known) }.sortedByDescending { it.score }
     }
 
     /** Sources (pour l'écran Réglages) : actives d'abord, puis sans clé, puis retirées. */
@@ -218,7 +258,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             db.apiCacheDao().clearEntity(EntityType.ALBUM, target.id, DataType.COVER)
             val al = db.albumDao().getById(target.id)
             val artist = al?.let { db.artistDao().getById(it.artistId)?.name }
-            if (al == null || artist == null) false else { EnrichmentState.current("💿 ${al.title}"); enrichAlbum(al, artist) }
+            if (al == null || artist == null) false else { EnrichmentState.current("💿 ${al.title}"); enrichAlbum(al, artist, overwriteTracks = true) }
         }
         else -> {
             db.apiCacheDao().clearEntity(EntityType.TRACK, target.id, DataType.COVER)
@@ -265,10 +305,13 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     /* ------------------------------------------------------------------ */
 
     suspend fun enrichArtist(a: ArtistEntity): Boolean {
+        val known = keysOf(db.trackDao().titlesOfArtist(a.artistId))
         val best = cascade(
             EntityType.ARTIST, a.artistId, DataType.PHOTO, { it.artistPriority },
             query = { api -> api.searchArtist(a.name) },
-            score = { c, _ -> MetadataMatching.scoreArtist(c, a.name) }
+            score = { c, _ -> MetadataMatching.scoreArtist(c, a.name) },
+            // Homonymes : les titres connus du candidat doivent recouper au moins un des tiens
+            verify = { sc -> MetadataMatching.libraryCheck(sc, artistTitlesOf(sc.candidate), null, known, minKnown = 3, minList = 5, penalty = 40) }
         )
         if (best == null) { negativeCache(EntityType.ARTIST, a.artistId, DataType.PHOTO); return false }
         val c = best.candidate
@@ -281,7 +324,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         // Une bio peut venir d'une autre source que la photo (Last.fm / TheAudioDB) — on la récupère si absente
         if (a.bio == null && c.bio == null) fetchBio(a)
         positiveCache(EntityType.ARTIST, a.artistId, DataType.PHOTO, best)
-        EnrichmentState.log("✅ ${a.name} → photo ${c.source.label} (${best.score})")
+        EnrichmentState.log("✅ ${a.name} → photo ${c.source.label} (${best.score})${libraryNote(best)}")
         return true
     }
 
@@ -294,26 +337,54 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         }
     }
 
-    suspend fun enrichAlbum(al: AlbumEntity, artistName: String): Boolean {
+    /**
+     * [mustContain] : titre qui doit figurer dans la liste de pistes de l'album candidat (appel depuis enrichTrack).
+     * [overwriteTracks] : remplace aussi la pochette des titres de l'album qui en avaient déjà une (ré-enrichissement).
+     */
+    suspend fun enrichAlbum(al: AlbumEntity, artistName: String, mustContain: String? = null, overwriteTracks: Boolean = false): Boolean {
+        val known = keysOf(db.trackDao().titlesOfAlbum(al.albumId), exclude = mustContain)
         val best = cascade(
             EntityType.ALBUM, al.albumId, DataType.COVER, { it.albumPriority },
             query = { api -> api.searchAlbum(al.title, artistName) },
-            score = { c, consensus -> MetadataMatching.scoreAlbum(c, al.title, artistName, consensus) }
+            score = { c, consensus -> MetadataMatching.scoreAlbum(c, al.title, artistName, consensus) },
+            verify = { sc -> MetadataMatching.libraryCheck(sc, tracklistOf(sc.candidate), mustContain?.let { TitleNormalizer.normalizeKey(it) }, known, minKnown = 2, minList = 2, penalty = 30) }
         )
         if (best == null || best.candidate.imageUrl == null) { negativeCache(EntityType.ALBUM, al.albumId, DataType.COVER); return false }
         val c = best.candidate
         db.albumDao().update(al.copy(coverUrl = c.imageUrl, coverSource = c.source.label, releaseDate = al.releaseDate ?: c.releaseDate, mbid = al.mbid ?: c.mbid))
-        db.albumDao().propagateCoverToTracks(al.albumId, c.imageUrl, c.source.label)
+        if (overwriteTracks) db.albumDao().overwriteCoverOfTracks(al.albumId, c.imageUrl, c.source.label)
+        else db.albumDao().propagateCoverToTracks(al.albumId, c.imageUrl, c.source.label)
         positiveCache(EntityType.ALBUM, al.albumId, DataType.COVER, best)
-        EnrichmentState.log("✅ ${al.title} → pochette ${c.source.label} (${best.score})")
+        EnrichmentState.log("✅ ${al.title} → pochette ${c.source.label} (${best.score})${libraryNote(best)}")
         return true
     }
 
+    private fun libraryNote(best: ScoredCandidate): String =
+        best.reasons.lastOrNull { it.contains("bibliothèque") || it.contains("non vérifiable") || it.contains("absent de cet album") }?.let { " · $it" } ?: ""
+
     suspend fun enrichTrack(t: TrackEntity, artistName: String, album: AlbumEntity?): Boolean {
+        // 1. Album connu : on résout d'abord l'album (liste de pistes vérifiée : doit contenir ce titre) — tous les titres
+        //    de l'album héritent de la même pochette, et un album déjà résolu n'appelle aucune API.
+        if (album != null) {
+            if (album.coverUrl != null && t.coverUrl == null) {
+                db.trackDao().update(t.copy(coverUrl = album.coverUrl, coverSource = album.coverSource))
+                EnrichmentState.log("✅ ${t.title} → pochette de l'album « ${album.title} » (déjà résolue)")
+                return true
+            }
+            if (album.coverUrl == null && enrichAlbum(album, artistName, mustContain = t.title)) {
+                val resolved = db.albumDao().getById(album.albumId)
+                if (resolved?.coverUrl != null) db.trackDao().update(t.copy(coverUrl = resolved.coverUrl, coverSource = resolved.coverSource))
+                return true
+            }
+        }
+        // 2. Recherche par titre, vérifiée par les titres connus de l'artiste
+        val known = keysOf(db.trackDao().titlesOfArtist(t.artistId), exclude = t.title)
+        val wanted = TitleNormalizer.normalizeKey(t.title)
         val best = cascade(
             EntityType.TRACK, t.trackId, DataType.COVER, { it.trackPriority },
             query = { api -> api.searchTrack(t.title, artistName) },
-            score = { c, consensus -> MetadataMatching.scoreTrack(c, t.title, artistName, album?.title, t.durationMs, consensus) }
+            score = { c, consensus -> MetadataMatching.scoreTrack(c, t.title, artistName, album?.title, t.durationMs, consensus) },
+            verify = { sc -> MetadataMatching.libraryCheck(sc, tracklistOf(sc.candidate), wanted, known) }
         )
         if (best == null || best.candidate.imageUrl == null) { negativeCache(EntityType.TRACK, t.trackId, DataType.COVER); return false }
         val c = best.candidate
@@ -332,7 +403,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             positiveCache(EntityType.ALBUM, album.albumId, DataType.COVER, best)
         }
         positiveCache(EntityType.TRACK, t.trackId, DataType.COVER, best)
-        EnrichmentState.log("✅ ${t.title} → pochette ${c.source.label} (${best.score})")
+        EnrichmentState.log("✅ ${t.title} → pochette ${c.source.label} (${best.score})${libraryNote(best)}")
         if (best.score < MetadataMatching.TRUSTED) runCatching { onTrackFlagged?.invoke(t.trackId, t.title, artistName, "${c.name}${c.artist?.let { " — $it" } ?: ""} · ${c.source.label}", best.score) }
         return true
     }
@@ -352,7 +423,9 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         dataType: String,
         basePriority: (ApiSource) -> Int,
         query: suspend (MusicApi) -> List<MetaCandidate>,
-        score: (MetaCandidate, Boolean) -> ScoredCandidate
+        score: (MetaCandidate, Boolean) -> ScoredCandidate,
+        /** Vérification « bibliothèque » appliquée aux 3 meilleurs candidats (≥ 50) de chaque groupe. */
+        verify: suspend (ScoredCandidate) -> ScoredCandidate = { it }
     ): ScoredCandidate? {
         val reliability = db.apiCacheDao().allReliability().mapNotNull { r ->
             ApiSource.entries.firstOrNull { it.label == r.apiName }?.let { it to (r.successCount to r.failCount) }
@@ -375,10 +448,17 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             seen += fresh
             val consensus = MetadataMatching.consensusSet(seen)
 
-            val scored = fresh.map { c ->
+            val rawScored = fresh.map { c ->
                 if (c.source.isLastResort) ScoredCandidate(c, MetadataMatching.ACCEPT, listOf("dernier recours"))
                 else score(c, c in consensus)
             }.filter { it.candidate.imageUrl != null } // on cherche toujours une image (pochette / photo)
+            // Vérification bibliothèque : 3 meilleurs candidats ≥ 50 ; les autres ne peuvent pas dépasser 89
+            val toVerify = rawScored.filter { it.score >= 50 && !it.candidate.source.isLastResort }.sortedByDescending { it.score }.take(3).toSet()
+            val scored = rawScored.map { sc ->
+                if (sc in toVerify) verify(sc)
+                else if (sc.score >= MetadataMatching.TRUSTED) sc.copy(score = MetadataMatching.TRUSTED - 1, reasons = sc.reasons + "non vérifié → max ${MetadataMatching.TRUSTED - 1}")
+                else sc
+            }
 
             val best = scored.filter { it.score >= MetadataMatching.ACCEPT }.maxByOrNull { it.score }
             // Fiabilité : une source "réussit" si elle a fourni le résultat retenu, "échoue" si elle a répondu sans résultat acceptable

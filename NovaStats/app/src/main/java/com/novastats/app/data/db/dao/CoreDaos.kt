@@ -78,6 +78,9 @@ interface TrackDao {
     suspend fun missingCover(now: Long, limit: Int): List<TrackEntity>
 
     @Query("SELECT COUNT(*) FROM tracks WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+    /** Contexte bibliothèque (vérification des pochettes) : titres connus d'un artiste / d'un album. */
+    @Query("SELECT title FROM tracks WHERE artist_id = :artistId") suspend fun titlesOfArtist(artistId: Long): List<String>
+    @Query("SELECT title FROM tracks WHERE album_id = :albumId") suspend fun titlesOfAlbum(albumId: Long): List<String>
     /** « Tout ré-enrichir » : tous les titres sauf ceux dont la pochette a été choisie à la main. */
     @Query("SELECT track_id FROM tracks WHERE cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
 
@@ -415,6 +418,8 @@ interface AlbumDao {
     /** Pochette d'album connue → appliquée aux titres de l'album qui n'en ont pas. */
     @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND cover_url IS NULL")
     suspend fun propagateCoverToTracks(albumId: Long, url: String, source: String)
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND (cover_source IS NULL OR cover_source != 'USER')")
+    suspend fun overwriteCoverOfTracks(albumId: Long, url: String, source: String)
 
     @Query("SELECT COUNT(*) FROM albums")
     fun countFlow(): Flow<Int>

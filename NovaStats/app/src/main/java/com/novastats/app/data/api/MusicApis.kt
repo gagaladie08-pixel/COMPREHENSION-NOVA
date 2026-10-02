@@ -17,6 +17,12 @@ interface MusicApi {
     suspend fun searchTrack(title: String, artist: String): List<MetaCandidate> = emptyList()
     suspend fun searchAlbum(title: String, artist: String): List<MetaCandidate> = emptyList()
     suspend fun searchArtist(name: String): List<MetaCandidate> = emptyList()
+
+    /** Liste des titres de l'album [externalAlbumId] chez cette source (null = vérification impossible). */
+    suspend fun albumTracks(externalAlbumId: String): List<String>? = null
+
+    /** Titres connus de l'artiste [externalArtistId] chez cette source (null = vérification impossible). */
+    suspend fun artistTitles(externalArtistId: String): List<String>? = null
 }
 
 private fun String.stripHtml() = replace(Regex("<[^>]+>"), "").replace(Regex("\\s+"), " ").trim().takeIf { it.isNotBlank() }
@@ -35,7 +41,8 @@ class ITunesApi : MusicApi {
         r.arr("results").objs().map {
             MetaCandidate(
                 source, it.str("trackName") ?: "", it.str("artistName"), it.str("collectionName"), hd(it.str("artworkUrl100")),
-                it.long("trackTimeMillis"), it.str("primaryGenreName"), it.str("releaseDate")?.take(10)
+                it.long("trackTimeMillis"), it.str("primaryGenreName"), it.str("releaseDate")?.take(10),
+                externalAlbumId = it.long("collectionId")?.toString(), externalArtistId = it.long("artistId")?.toString()
             )
         }
     }
@@ -45,9 +52,20 @@ class ITunesApi : MusicApi {
         r.arr("results").objs().map {
             MetaCandidate(
                 source, it.str("collectionName") ?: "", it.str("artistName"), null, hd(it.str("artworkUrl100")),
-                null, it.str("primaryGenreName"), it.str("releaseDate")?.take(10)
+                null, it.str("primaryGenreName"), it.str("releaseDate")?.take(10),
+                externalAlbumId = it.long("collectionId")?.toString(), externalArtistId = it.long("artistId")?.toString()
             )
         }
+    }
+
+    override suspend fun albumTracks(externalAlbumId: String): List<String>? = limiter.run {
+        HttpJson.get("https://itunes.apple.com/lookup?id=$externalAlbumId&entity=song&limit=200").arr("results").objs()
+            .filter { it.str("wrapperType") == "track" }.mapNotNull { it.str("trackName") }
+    }
+
+    override suspend fun artistTitles(externalArtistId: String): List<String>? = limiter.run {
+        HttpJson.get("https://itunes.apple.com/lookup?id=$externalArtistId&entity=song&limit=100").arr("results").objs()
+            .filter { it.str("wrapperType") == "track" }.mapNotNull { it.str("trackName") }
     }
 }
 
@@ -116,14 +134,24 @@ class LastFmApi : MusicApi {
         listOf(
             MetaCandidate(
                 source, t.str("name") ?: "", t.obj("artist").str("name"), album.str("title"), image(album),
-                t.long("duration")?.takeIf { it > 0 }, t.obj("toptags").arr("tag").firstObj().str("name"), mbid = t.str("mbid")
+                t.long("duration")?.takeIf { it > 0 }, t.obj("toptags").arr("tag").firstObj().str("name"), mbid = t.str("mbid"),
+                externalAlbumId = albumKey(album.str("artist") ?: t.obj("artist").str("name"), album.str("title"))
             )
         )
     }
 
+    private fun albumKey(artist: String?, album: String?): String? = if (artist != null && album != null) "$artist\u0001$album" else null
+
+    override suspend fun albumTracks(externalAlbumId: String): List<String>? {
+        val (artist, album) = externalAlbumId.split('\u0001', limit = 2).takeIf { it.size == 2 } ?: return null
+        return limiter.run {
+            HttpJson.get("$base${ApiKeys.lastFm}&method=album.getInfo&artist=${enc(artist)}&album=${enc(album)}").obj("album").obj("tracks").arr("track").objs().mapNotNull { it.str("name") }
+        }
+    }
+
     override suspend fun searchAlbum(title: String, artist: String): List<MetaCandidate> = limiter.run<List<MetaCandidate>> {
         val a = HttpJson.get("$base${ApiKeys.lastFm}&method=album.getInfo&artist=${enc(artist)}&album=${enc(title)}").obj("album") ?: return@run emptyList()
-        listOf(MetaCandidate(source, a.str("name") ?: "", a.str("artist"), null, image(a), null, a.obj("tags").arr("tag").firstObj().str("name"), mbid = a.str("mbid")))
+        listOf(MetaCandidate(source, a.str("name") ?: "", a.str("artist"), null, image(a), null, a.obj("tags").arr("tag").firstObj().str("name"), mbid = a.str("mbid"), externalAlbumId = albumKey(a.str("artist"), a.str("name"))))
     }
 
     override suspend fun searchArtist(name: String): List<MetaCandidate> = limiter.run<List<MetaCandidate>> {
@@ -163,7 +191,8 @@ class MusicBrainzApi : MusicApi {
             val cover = release.str("id")?.let { coverArt(it) }
             MetaCandidate(
                 source, rec.str("title") ?: "", rec.arr("artist-credit").firstObj().str("name"), release.str("title"), cover,
-                rec.long("length"), null, release.str("date"), mbid = rec.str("id")
+                rec.long("length"), null, release.str("date"), mbid = rec.str("id"),
+                externalAlbumId = release.str("id"), externalArtistId = rec.arr("artist-credit").firstObj().obj("artist").str("id")
             )
         }
     }
@@ -173,19 +202,28 @@ class MusicBrainzApi : MusicApi {
             HttpJson.get("$base/release?query=${enc("release:${q(title)} AND artist:${q(artist)}")}&fmt=json&limit=5").arr("releases").objs()
         }
         return rels.take(3).map { rel ->
-            MetaCandidate(source, rel.str("title") ?: "", rel.arr("artist-credit").firstObj().str("name"), null, rel.str("id")?.let { coverArt(it) }, null, null, rel.str("date"), mbid = rel.str("id"))
+            MetaCandidate(source, rel.str("title") ?: "", rel.arr("artist-credit").firstObj().str("name"), null, rel.str("id")?.let { coverArt(it) }, null, null, rel.str("date"), mbid = rel.str("id"), externalAlbumId = rel.str("id"), externalArtistId = rel.arr("artist-credit").firstObj().obj("artist").str("id"))
         }
     }
 
     /** Pas de photo chez MusicBrainz : sert à obtenir le mbid (Fanart.tv). */
     override suspend fun searchArtist(name: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("$base/artist?query=${enc("artist:${q(name)}")}&fmt=json&limit=3").arr("artists").objs().map {
-            MetaCandidate(source, it.str("name") ?: "", mbid = it.str("id"), genre = it.arr("tags").firstObj().str("name"))
+            MetaCandidate(source, it.str("name") ?: "", mbid = it.str("id"), genre = it.arr("tags").firstObj().str("name"), externalArtistId = it.str("id"))
         }
     }
 
     suspend fun artistMbid(name: String): String? =
         searchArtist(name).firstOrNull { MetadataMatching.similarity(it.name, name) >= 0.85 }?.mbid
+
+    override suspend fun albumTracks(externalAlbumId: String): List<String>? = limiter.run {
+        HttpJson.get("$base/release/$externalAlbumId?inc=recordings&fmt=json").arr("media").objs()
+            .flatMap { m -> m.arr("tracks").objs().mapNotNull { it.str("title") } }
+    }
+
+    override suspend fun artistTitles(externalArtistId: String): List<String>? = limiter.run {
+        HttpJson.get("$base/recording?query=${enc("arid:$externalArtistId")}&fmt=json&limit=100").arr("recordings").objs().mapNotNull { it.str("title") }
+    }
 }
 
 /* ======================================================================= */
@@ -214,7 +252,8 @@ class TheAudioDbApi : MusicApi {
         HttpJson.get("$base/search.php?s=${enc(name)}").arr("artists").objs().map {
             MetaCandidate(
                 source, it.str("strArtist") ?: "", imageUrl = it.str("strArtistThumb"), genre = it.str("strGenre"),
-                bio = (it.str("strBiographyFR") ?: it.str("strBiographyEN"))?.take(1500), mbid = it.str("strMusicBrainzID")
+                bio = (it.str("strBiographyFR") ?: it.str("strBiographyEN"))?.take(1500), mbid = it.str("strMusicBrainzID"),
+                externalArtistId = it.str("strMusicBrainzID")
             )
         }
     }
@@ -229,20 +268,31 @@ class DeezerApi : MusicApi {
 
     override suspend fun searchTrack(title: String, artist: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("https://api.deezer.com/search/track?q=${enc("artist:\"$artist\" track:\"$title\"")}&limit=10").arr("data").objs().map {
-            MetaCandidate(source, it.str("title") ?: "", it.obj("artist").str("name"), it.obj("album").str("title"), it.obj("album").str("cover_xl") ?: it.obj("album").str("cover_big"), it.long("duration")?.times(1000))
+            MetaCandidate(
+                source, it.str("title") ?: "", it.obj("artist").str("name"), it.obj("album").str("title"), it.obj("album").str("cover_xl") ?: it.obj("album").str("cover_big"), it.long("duration")?.times(1000),
+                externalAlbumId = it.obj("album").long("id")?.toString(), externalArtistId = it.obj("artist").long("id")?.toString()
+            )
         }
     }
 
     override suspend fun searchAlbum(title: String, artist: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("https://api.deezer.com/search/album?q=${enc("artist:\"$artist\" album:\"$title\"")}&limit=10").arr("data").objs().map {
-            MetaCandidate(source, it.str("title") ?: "", it.obj("artist").str("name"), null, it.str("cover_xl") ?: it.str("cover_big"))
+            MetaCandidate(source, it.str("title") ?: "", it.obj("artist").str("name"), null, it.str("cover_xl") ?: it.str("cover_big"), externalAlbumId = it.long("id")?.toString(), externalArtistId = it.obj("artist").long("id")?.toString())
         }
     }
 
     override suspend fun searchArtist(name: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("https://api.deezer.com/search/artist?q=${enc(name)}&limit=5").arr("data").objs().map {
-            MetaCandidate(source, it.str("name") ?: "", imageUrl = it.str("picture_xl") ?: it.str("picture_big"))
+            MetaCandidate(source, it.str("name") ?: "", imageUrl = it.str("picture_xl") ?: it.str("picture_big"), externalArtistId = it.long("id")?.toString())
         }
+    }
+
+    override suspend fun albumTracks(externalAlbumId: String): List<String>? = limiter.run {
+        HttpJson.get("https://api.deezer.com/album/$externalAlbumId/tracks?limit=100").arr("data").objs().mapNotNull { it.str("title") }
+    }
+
+    override suspend fun artistTitles(externalArtistId: String): List<String>? = limiter.run {
+        HttpJson.get("https://api.deezer.com/artist/$externalArtistId/top?limit=50").arr("data").objs().mapNotNull { it.str("title") }
     }
 }
 
@@ -262,13 +312,18 @@ class DiscogsApi : MusicApi {
             val parts = full.split(" - ", limit = 2)
             MetaCandidate(
                 source, parts.getOrElse(1) { full }.trim(), parts.getOrNull(0)?.trim()?.replace(Regex("\\s\\(\\d+\\)$"), ""), null,
-                it.str("cover_image")?.takeIf { u -> !u.contains("spacer.gif") }, null, it.arr("genre")?.firstOrNull().string, it.str("year")
+                it.str("cover_image")?.takeIf { u -> !u.contains("spacer.gif") }, null, it.arr("genre")?.firstOrNull().string, it.str("year"),
+                externalAlbumId = it.long("id")?.toString()
             )
         }
     }
 
     override suspend fun searchTrack(title: String, artist: String) = search("$artist - $title")
     override suspend fun searchAlbum(title: String, artist: String) = search("$artist - $title")
+
+    override suspend fun albumTracks(externalAlbumId: String): List<String>? = limiter.run {
+        HttpJson.get("https://api.discogs.com/releases/$externalAlbumId", headers()).arr("tracklist").objs().mapNotNull { it.str("title") }
+    }
 }
 
 /* ======================================================================= */
@@ -283,7 +338,7 @@ class FanartApi(private val musicBrainz: MusicBrainzApi) : MusicApi {
         return limiter.run<List<MetaCandidate>> {
             val r = HttpJson.get("https://webservice.fanart.tv/v3/music/$mbid?api_key=${ApiKeys.fanart}") ?: return@run emptyList()
             val url = r.arr("artistthumb").firstObj().str("url") ?: r.arr("artistbackground").firstObj().str("url") ?: return@run emptyList()
-            listOf(MetaCandidate(source, r.str("name") ?: name, imageUrl = url, mbid = mbid))
+            listOf(MetaCandidate(source, r.str("name") ?: name, imageUrl = url, mbid = mbid, externalArtistId = mbid))
         }
     }
 }
@@ -316,7 +371,7 @@ class WikidataApi : MusicApi {
             MetaCandidate(
                 source, hit.str("label") ?: name,
                 imageUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/${enc(file.replace(' ', '_'))}?width=800",
-                bio = hit.str("description"), mbid = mbid
+                bio = hit.str("description"), mbid = mbid, externalArtistId = mbid
             )
         }
     }
