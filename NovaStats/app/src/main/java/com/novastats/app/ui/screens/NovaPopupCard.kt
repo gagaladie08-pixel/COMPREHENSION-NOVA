@@ -84,7 +84,7 @@ fun NovaPopupCard(
     widthFraction: Float = 0.92f,
     heightFraction: Float = 0.88f,
     fixedHeight: Boolean = false,
-    /** Pochette / photo de l'élément : affichée en arrière-plan de tout le popup, floutée à 75 %. */
+    /** Pochette / photo de l'élément : affichée en arrière-plan de tout le popup, floutée à 55 %. */
     backdropUrl: String? = null,
     banner: @Composable () -> Unit,
     content: @Composable () -> Unit
@@ -184,7 +184,7 @@ fun PositionsTable(ranks: Map<Period, Int?>) {
 }
 
 /**
- * Arrière-plan de popup : pochette / photo de l'élément floutée à 75 % (rayon 24 dp sur 32 max), recouverte d'un
+ * Arrière-plan de popup : pochette / photo de l'élément floutée à 55 % (rayon 18 dp sur 32 max), recouverte d'un
  * voile du fond de l'app pour garder le texte lisible. Sous Android 12 (`blur` inopérant), l'image est simplement
  * très atténuée.
  */
@@ -195,7 +195,7 @@ fun PopupBackdrop(url: String, modifier: Modifier = Modifier) {
     Box(modifier) {
         AsyncImage(
             model = url, contentDescription = null, contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize().then(if (canBlur) Modifier.blur(24.dp) else Modifier).alpha(if (canBlur) 0.9f else 0.25f)
+            modifier = Modifier.fillMaxSize().then(if (canBlur) Modifier.blur(18.dp) else Modifier).alpha(if (canBlur) 0.9f else 0.25f)
         )
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(theme.background.copy(alpha = 0.55f), theme.background.copy(alpha = 0.78f)))))
     }
