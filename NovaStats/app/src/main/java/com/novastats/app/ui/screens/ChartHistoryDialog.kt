@@ -47,7 +47,7 @@ fun ChartHistoryDialog(h: EntityHistory, onDismiss: () -> Unit) {
     val peakIdx = s.peak?.let { pk -> anchors.indexOf(pk.date).takeIf { it >= 0 } }
 
     NovaPopupCard(
-        borderColor = Gold, onDismiss = onDismiss, glowDp = 18,
+        borderColor = Gold, onDismiss = onDismiss, glowDp = 18, backdropUrl = h.item.coverUrl,
         banner = {
             // Bannière 180 dp : Titre / Artiste + Peak en grand
             Box(Modifier.fillMaxWidth().height(180.dp)) {

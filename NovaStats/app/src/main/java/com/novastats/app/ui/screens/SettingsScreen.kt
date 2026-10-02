@@ -701,6 +701,10 @@ private fun ApisPage() {
     val missingAlbums by app.database.albumDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
     val reliability by app.database.apiCacheDao().reliability().collectAsStateWithLifecycle(initialValue = emptyList())
     val sources = remember { app.enricher.configuredSources() }
+    var confirmAll by remember { mutableStateOf(false) }
+    var picker by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = picker) { picker = false }
+    if (picker) { ReenrichPicker(onBack = { picker = false }); return }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         SectionTitle("🌐 Enrichissement")
@@ -724,13 +728,43 @@ private fun ApisPage() {
                     onClick = { EnrichmentWorker.enqueue(context, manual = true) }, enabled = !enrich.running,
                     colors = ButtonDefaults.buttonColors(containerColor = theme.primary), modifier = Modifier.fillMaxWidth()
                 ) { Text(if (enrich.running) "Enrichissement en cours…" else "🌐 Enrichir maintenant") }
+                Spacer(Modifier.height(6.dp))
+                // Ré-enrichissement forcé : tout, ou une sélection (page dédiée)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { confirmAll = true }, enabled = !enrich.running, modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.secondary)
+                    ) { Text("🔄 Tout ré-enrichir", maxLines = 1) }
+                    Button(
+                        onClick = { picker = true }, enabled = !enrich.running, modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.accent)
+                    ) { Text("🔄 Ré-enrichir…", maxLines = 1) }
+                }
+                Text(
+                    "Ré-enrichir ignore le cache et relance la cascade complète ; l'image actuelle n'est remplacée que si un résultat ≥ 70 est trouvé. « Tout » garde les images choisies à la main.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)
+                )
                 if (enrich.running) {
                     Spacer(Modifier.height(6.dp))
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = theme.primary)
-                    Text("${enrich.current ?: ""} · ${enrich.processed} traités, ${enrich.found} trouvés", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    if (enrich.total > 0) LinearProgressIndicator(progress = { enrich.processed.toFloat() / enrich.total }, modifier = Modifier.fillMaxWidth(), color = theme.primary)
+                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = theme.primary)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            (enrich.mode?.let { "$it · " } ?: "") + "${enrich.current ?: ""} · ${enrich.processed}${if (enrich.total > 0) "/${enrich.total}" else ""} traités, ${enrich.found} trouvés",
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { EnrichmentWorker.cancel(context) }) { Text("⏹️ Arrêter", color = Color(0xFFE74C3C), style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
             }
         }
+        if (confirmAll) AlertDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text("🔄 Tout ré-enrichir ?") },
+            text = { Text("Toutes les photos d'artistes, pochettes d'albums et de titres seront recherchées à nouveau (les plus écoutés d'abord). Les images choisies à la main sont conservées. Cela peut prendre plus d'une heure et consomme les quotas des APIs ; tu peux arrêter à tout moment.") },
+            confirmButton = { TextButton(onClick = { confirmAll = false; EnrichmentWorker.enqueueRefreshAll(context) }) { Text("Lancer", color = theme.primary, fontWeight = FontWeight.Bold) } },
+            dismissButton = { TextButton(onClick = { confirmAll = false }) { Text("Annuler") } }
+        )
         SectionTitle("📡 Sources")
         NovaCard {
             Column(Modifier.padding(16.dp)) {

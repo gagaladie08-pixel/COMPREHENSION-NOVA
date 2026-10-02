@@ -296,7 +296,7 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
     // Bordure / dégradé selon le niveau (pas le thème) : Argent · Or · Platine · Diamant + glow
     val glowDp = when (current?.level) { CertLevel.DIAMOND -> 32; CertLevel.PLATINUM -> 20; CertLevel.GOLD -> 14; CertLevel.SILVER -> 8; null -> 4 }
     NovaPopupCard(
-        borderColor = if (diamond) color.copy(alpha = 0.6f + 0.4f * glow) else color, onDismiss = onDismiss, glowDp = glowDp,
+        borderColor = if (diamond) color.copy(alpha = 0.6f + 0.4f * glow) else color, onDismiss = onDismiss, glowDp = glowDp, backdropUrl = det?.imageUrl,
         banner = {
             Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
                 BlurredBackdrop(det?.imageUrl, color, Modifier.fillMaxSize())

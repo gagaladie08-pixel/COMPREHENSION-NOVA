@@ -178,7 +178,7 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
     }
     val t = track
     NovaPopupCard(
-        borderColor = theme.primary, onDismiss = onDismiss,
+        borderColor = theme.primary, onDismiss = onDismiss, backdropUrl = t?.coverUrl,
         banner = {
             // 180 dp — pochette carrée centrée uniquement
             Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
@@ -294,7 +294,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     val status = PantheonStatus.fromDb(a?.pantheonStatus)
     val statusColor = status?.let { pantheonColor(it) } ?: theme.glowSecondary
     NovaPopupCard(
-        borderColor = theme.glowSecondary, onDismiss = onDismiss,
+        borderColor = theme.glowSecondary, onDismiss = onDismiss, backdropUrl = a?.photoUrl,
         banner = { ArtistBanner(a, theme.glowSecondary, status, statusColor) }
     ) {
         if (a == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
@@ -372,7 +372,7 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
     }
     val al = album
     NovaPopupCard(
-        borderColor = theme.secondary, onDismiss = onDismiss,
+        borderColor = theme.secondary, onDismiss = onDismiss, backdropUrl = al?.coverUrl,
         banner = {
             // Pochette 120 × 120 dp sur fond flou
             Box(Modifier.fillMaxWidth().height(170.dp), contentAlignment = Alignment.Center) {
@@ -456,7 +456,7 @@ private fun PantheonPopup(artistId: Long, onDismiss: () -> Unit) {
     val glow = when (status) { PantheonStatus.STAR -> 8; PantheonStatus.SUPERSTAR -> 14; PantheonStatus.MEGASTAR -> 20; PantheonStatus.LEGENDE -> 28; PantheonStatus.MYTHIQUE -> 32; null -> 6 }
 
     NovaPopupCard(
-        borderColor = color, onDismiss = onDismiss, glowDp = glow, holographic = mythic,
+        borderColor = color, onDismiss = onDismiss, glowDp = glow, holographic = mythic, backdropUrl = det?.artist?.photoUrl,
         banner = { ArtistBanner(det?.artist, color, status, if (mythic) Color.White else color, holographic = mythic) }
     ) {
         if (det == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
@@ -576,7 +576,7 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
     val isGlobal = main == HallOfFameRules.TRIPLE_DEBUT || main == HallOfFameRules.LEGENDARY_RUN
 
     NovaPopupCard(
-        borderColor = color, onDismiss = onDismiss, glowDp = if (isGlobal) 28 else 14,
+        borderColor = color, onDismiss = onDismiss, glowDp = if (isGlobal) 28 else 14, backdropUrl = det?.imageUrl,
         banner = {
             // Style cérémonie : pochette / photo grand format sur fond flou
             Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {

@@ -93,8 +93,8 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val rows = state.filtered
     val limit = state.limit
     val unit = BillboardDates.unitLabel(state.period, 2)
-    // Lignes à afficher : le classement réel puis les places vides « — » jusqu'à la limite du chart (hors recherche)
-    val totalRows = if (state.query.isBlank()) limit else rows.size
+    // Lignes à afficher : uniquement le classement réel (plus de places vides « — »)
+    val totalRows = rows.size
     // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de chart / période / date / recherche
     var visible by remember(state.chart, state.period, state.anchor, state.query) { mutableIntStateOf(TOP_INITIAL) }
     val shown = minOf(visible, totalRows)
@@ -214,13 +214,6 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }
 
-            // Places vides « — » jusqu'à la limite visible (hors recherche)
-            if (state.query.isBlank() && shown > state.items.size) {
-                items((state.items.size + 1..shown).toList(), key = { "empty-$it" }) { pos ->
-                    EmptyRow(pos)
-                    if (pos == 10) Top10Divider()
-                }
-            }
             if (totalRows > shown) item(key = "more") { LoadMoreButton(totalRows - shown) { visible += TOP_STEP } }
             else if (state.query.isBlank() && state.items.size < limit) {
                 item(key = "remaining") {
@@ -382,14 +375,3 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
     }
 }
 
-@Composable
-private fun EmptyRow(position: Int) {
-    val theme = Nova.theme
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("#$position", color = theme.textSecondary.copy(alpha = 0.5f), fontWeight = FontWeight.Bold, modifier = Modifier.width(52.dp), textAlign = TextAlign.Center)
-        Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(theme.surface))
-        Spacer(Modifier.width(12.dp))
-        Text("—", color = theme.textSecondary.copy(alpha = 0.5f), modifier = Modifier.weight(1f))
-        Text("—", color = theme.textSecondary.copy(alpha = 0.5f))
-    }
-}

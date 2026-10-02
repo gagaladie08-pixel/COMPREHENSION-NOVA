@@ -78,6 +78,8 @@ interface TrackDao {
     suspend fun missingCover(now: Long, limit: Int): List<TrackEntity>
 
     @Query("SELECT COUNT(*) FROM tracks WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+    /** « Tout ré-enrichir » : tous les titres sauf ceux dont la pochette a été choisie à la main. */
+    @Query("SELECT track_id FROM tracks WHERE cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
 
     /**
      * Classement Global (all-time). Tri : écoutes puis temps d'écoute (règle d'égalité).
@@ -294,6 +296,7 @@ interface ArtistDao {
     suspend fun missingPhoto(now: Long, limit: Int): List<ArtistEntity>
 
     @Query("SELECT COUNT(*) FROM artists WHERE photo_url IS NULL AND is_merged = 0") fun missingPhotoCount(): Flow<Int>
+    @Query("SELECT artist_id FROM artists WHERE is_merged = 0 AND (photo_source IS NULL OR photo_source != 'USER') ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
 
     @Query(
         """
@@ -408,6 +411,7 @@ interface AlbumDao {
     suspend fun missingCover(now: Long, limit: Int): List<AlbumEntity>
 
     @Query("SELECT COUNT(*) FROM albums WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+    @Query("SELECT album_id FROM albums WHERE cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
     /** Pochette d'album connue → appliquée aux titres de l'album qui n'en ont pas. */
     @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND cover_url IS NULL")
     suspend fun propagateCoverToTracks(albumId: Long, url: String, source: String)

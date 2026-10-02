@@ -262,9 +262,11 @@ private fun ReviewPopup(
     val allChecked = checked.size == plays.size && plays.isNotEmpty()
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
-        Column(Modifier.fillMaxSize().background(theme.background).statusBarsPadding().navigationBarsPadding().imePadding()) {
+      Box(Modifier.fillMaxSize().background(theme.background)) {
+        coverUrl.ifBlank { null }?.let { PopupBackdrop(it, Modifier.matchParentSize()) }
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             /* ---- Barre haute fixe ---- */
-            Row(Modifier.fillMaxWidth().background(theme.surface).padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(theme.surface.copy(alpha = 0.85f)).padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) { Text("✕", color = theme.text, fontWeight = FontWeight.Bold) }
                 Text("Corriger ce titre", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Text("${item.kind.emoji} ${item.score} %", color = color, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.15f)).padding(horizontal = 8.dp, vertical = 4.dp))
@@ -386,7 +388,7 @@ private fun ReviewPopup(
 
             /* ---- Barre basse fixe ---- */
             HorizontalDivider(color = theme.textSecondary.copy(alpha = 0.2f))
-            Row(Modifier.fillMaxWidth().background(theme.surface).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(theme.surface.copy(alpha = 0.85f)).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onDismiss) { Text("Annuler", color = theme.textSecondary) }
                 Button(
                     enabled = canValidate,
@@ -406,6 +408,7 @@ private fun ReviewPopup(
                 ) { Text("✅ Valider${if (checked.isNotEmpty() && !allChecked) " (${checked.size})" else ""}", fontWeight = FontWeight.Bold) }
             }
         }
+      }
     }
 
     if (confirmDelete) {

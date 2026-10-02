@@ -20,6 +20,7 @@ import com.novastats.app.domain.ScoredCandidate
 import com.novastats.app.domain.TitleNormalizer
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -33,6 +34,10 @@ object EnrichmentState {
         val current: String? = null,
         val processed: Int = 0,
         val found: Int = 0,
+        /** Nombre total d'entités du passage en cours (0 = lot standard, inconnu). */
+        val total: Int = 0,
+        /** Libellé du passage en cours (« Ré-enrichissement complet », « Ré-enrichissement (12) »…). */
+        val mode: String? = null,
         val lastRunAt: Long? = null,
         val log: List<String> = emptyList(),
         /** Dernière erreur HTTP/réseau par source (label → « 12/10 09:13 · HTTP 401 · clé ou token refusé »). */
@@ -90,10 +95,10 @@ object EnrichmentState {
         else -> "${t.javaClass.simpleName}${t.message?.let { " : ${it.take(60)}" } ?: ""}"
     }
 
-    fun start() = _state.update { it.copy(running = true, processed = 0, found = 0) }
+    fun start(total: Int = 0, mode: String? = null) = _state.update { it.copy(running = true, processed = 0, found = 0, total = total, mode = mode) }
     fun current(label: String?) = _state.update { it.copy(current = label) }
     fun done(found: Boolean) = _state.update { it.copy(processed = it.processed + 1, found = it.found + if (found) 1 else 0) }
-    fun stop() = _state.update { it.copy(running = false, current = null, lastRunAt = System.currentTimeMillis()) }
+    fun stop() = _state.update { it.copy(running = false, current = null, mode = null, lastRunAt = System.currentTimeMillis()) }
     fun log(msg: String) {
         Log.d("NovaEnrich", msg)
         _state.update { it.copy(log = (listOf("${fmt.format(System.currentTimeMillis())} $msg") + it.log).take(40)) }
@@ -188,6 +193,71 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val remaining = db.artistDao().missingPhoto(later, 1).size + db.albumDao().missingCover(later, 1).size + db.trackDao().missingCover(later, 1).size
         EnrichmentState.log("Lot terminé : $processed traités, $found enrichis${if (remaining > 0) ", suite à venir" else ""}")
         return BatchResult(processed, found, remaining)
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Ré-enrichissement forcé (boutons « Tout ré-enrichir » / « Ré-enrichir… »)  */
+    /* ------------------------------------------------------------------ */
+
+    data class RefreshTarget(val type: String, val id: Long) {
+        fun encode() = "$type:$id"
+        companion object { fun decode(s: String): RefreshTarget? = s.split(':').takeIf { it.size == 2 }?.let { (t, i) -> i.toLongOrNull()?.let { RefreshTarget(t, it) } } }
+    }
+
+    /**
+     * Ré-enrichit une entité : vide son cache (hors liste noire) puis relance la cascade complète.
+     * L'image actuelle n'est remplacée que si un résultat ≥ 70 est trouvé (sinon elle est conservée).
+     */
+    suspend fun refresh(target: RefreshTarget): Boolean = when (target.type) {
+        EntityType.ARTIST -> {
+            db.apiCacheDao().clearEntity(EntityType.ARTIST, target.id, DataType.PHOTO)
+            val a = db.artistDao().getById(target.id)
+            if (a == null) false else { EnrichmentState.current("🎤 ${a.name}"); enrichArtist(a) }
+        }
+        EntityType.ALBUM -> {
+            db.apiCacheDao().clearEntity(EntityType.ALBUM, target.id, DataType.COVER)
+            val al = db.albumDao().getById(target.id)
+            val artist = al?.let { db.artistDao().getById(it.artistId)?.name }
+            if (al == null || artist == null) false else { EnrichmentState.current("💿 ${al.title}"); enrichAlbum(al, artist) }
+        }
+        else -> {
+            db.apiCacheDao().clearEntity(EntityType.TRACK, target.id, DataType.COVER)
+            val t = db.trackDao().getById(target.id)
+            val artist = t?.let { db.artistDao().getById(it.artistId)?.name }
+            if (t == null || artist == null) false else {
+                EnrichmentState.current("🎵 ${t.title}")
+                enrichTrack(t, artist, t.albumId?.let { db.albumDao().getById(it) })
+            }
+        }
+    }
+
+    /** Ré-enrichit une sélection (page « Ré-enrichir… »). Annulable (WorkManager). */
+    suspend fun refreshSelected(targets: List<RefreshTarget>, mode: String = "Ré-enrichissement (${targets.size})"): BatchResult {
+        var processed = 0; var found = 0
+        EnrichmentState.start(total = targets.size, mode = mode)
+        EnrichmentState.log("🔄 $mode : ${targets.size} élément${if (targets.size > 1) "s" else ""}")
+        try {
+            for (t in targets) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val ok = try { refresh(t) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { EnrichmentState.log("⚠️ ${t.type} #${t.id} : ${EnrichmentState.describe(e)}"); false }
+                processed++; if (ok) found++; EnrichmentState.done(ok)
+            }
+        } finally {
+            EnrichmentState.stop()
+            EnrichmentState.log("🔄 $mode terminé : $processed traités, $found mis à jour")
+        }
+        return BatchResult(processed, found, 0)
+    }
+
+    /**
+     * « Tout ré-enrichir » : artistes → albums → titres, les plus écoutés d'abord. Les images choisies à la main
+     * (source USER) sont conservées ; les URL rejetées restent en liste noire.
+     */
+    suspend fun refreshAll(): BatchResult {
+        val targets = db.artistDao().idsForRefresh().map { RefreshTarget(EntityType.ARTIST, it) } +
+            db.albumDao().idsForRefresh().map { RefreshTarget(EntityType.ALBUM, it) } +
+            db.trackDao().idsForRefresh().map { RefreshTarget(EntityType.TRACK, it) }
+        return refreshSelected(targets, mode = "Ré-enrichissement complet")
     }
 
     /* ------------------------------------------------------------------ */
