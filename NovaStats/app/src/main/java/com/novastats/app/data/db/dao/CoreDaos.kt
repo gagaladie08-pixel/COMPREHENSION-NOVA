@@ -80,6 +80,9 @@ interface TrackDao {
     @Query("SELECT COUNT(*) FROM tracks WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
     /** Contexte bibliothèque (vérification des pochettes) : titres connus d'un artiste / d'un album. */
     @Query("SELECT title FROM tracks WHERE artist_id = :artistId") suspend fun titlesOfArtist(artistId: Long): List<String>
+    /** Titres où l'artiste est crédité (principal ou featuring) + titres des fiches homonymes (« X feat. Rihanna », « Rihanna, Y »). */
+    @Query("SELECT DISTINCT t.title FROM tracks t JOIN track_artists ta ON ta.track_id = t.track_id JOIN artists a ON a.artist_id = ta.artist_id WHERE ta.artist_id = :artistId OR LOWER(a.name) LIKE '%' || LOWER(:name) || '%'")
+    suspend fun titlesCreditedTo(artistId: Long, name: String): List<String>
     @Query("SELECT title FROM tracks WHERE album_id = :albumId") suspend fun titlesOfAlbum(albumId: Long): List<String>
     /** « Tout ré-enrichir » : tous les titres sauf ceux dont la pochette a été choisie à la main. */
     @Query("SELECT track_id FROM tracks WHERE cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>

@@ -117,6 +117,13 @@ class MetadataMatchingTest {
         assertEquals(35, wrong.score)
         // Pas assez de titres connus pour trancher → inchangé
         assertEquals(90, MetadataMatching.libraryCheck(base, listOf("Money", "Blue Skies"), "money", setOf("rockstar")).score)
+        // Titres pollués par les notifications : « Rockstar (Official Video) », « LISA - New Woman » → quand même reconnus
+        val polluted = setOf("rockstar official video", "lisa new woman ft rosalia", "moonlit floor kiss me", "fxck up the world", "born again")
+        val tolerant = MetadataMatching.libraryCheck(base, listOf("Money", "Rockstar", "New Woman", "Elastigirl"), "money", polluted)
+        assertEquals(100, tolerant.score)
+        assertTrue(tolerant.reasons.any { it.startsWith("2 titres en commun") })
+        assertTrue(MetadataMatching.titlesMatch("diamonds", "rihanna diamonds"))
+        assertTrue(!MetadataMatching.titlesMatch("work", "homework"))
         // Source non vérifiable : 90 → 89 (🟡 À vérifier), 80 inchangé
         assertEquals(89, MetadataMatching.libraryCheck(base, null, "money", known).score)
         assertEquals(80, MetadataMatching.libraryCheck(base.copy(score = 80), null, "money", known).score)

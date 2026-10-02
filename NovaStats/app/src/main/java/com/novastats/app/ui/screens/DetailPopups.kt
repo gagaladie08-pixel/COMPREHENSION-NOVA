@@ -1,6 +1,9 @@
 package com.novastats.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +62,8 @@ import com.novastats.app.domain.Dates
 import com.novastats.app.domain.HallOfFameRules
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.Period
+import com.novastats.app.domain.ScoredCandidate
+import kotlinx.coroutines.launch
 import com.novastats.app.data.db.dao.DayCount
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
@@ -314,6 +320,8 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
             StatPill("${a.distinctTracks}", "titres", accent = theme.accent)
             StatPill("${a.distinctAlbums}", "albums", accent = theme.glowSecondary)
         }
+        // 🖼️ Autres photos : propositions de toutes les sources, vérifiées avec ta bibliothèque ; un appui = photo 👤 USER
+        ArtistPhotoPicker(a, theme.glowSecondary) { artist = db.artistDao().getById(artistId) }
         PopupSection("👑 Statut Panthéon", theme.glowSecondary)
         PopupInfoRow("Statut actuel", status?.let { "${it.emoji} ${it.label}" } ?: "Aucun (Star à 425 écoutes)", valueColor = statusColor)
         history.forEach { h ->
@@ -341,6 +349,62 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         PopupInfoRow("Première écoute all time", formatDate(a.firstPlayedAt))
         PopupInfoRow("Part All Time", if (totalAllTime > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * a.playCount / totalAllTime) else "—")
         PopupInfoRow(if (scoped) "Part ${periodWord(period)}" else "Part 7 derniers jours", if (periodTotal > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * periodPlays / periodTotal) else "—")
+    }
+}
+
+@Composable
+private fun ArtistPhotoPicker(a: ArtistEntity, color: Color, onChanged: suspend () -> Unit) {
+    val app = LocalContext.current.applicationContext as NovaStatsApp
+    val theme = Nova.theme
+    val scope = rememberCoroutineScope()
+    var open by remember(a.artistId) { mutableStateOf(false) }
+    var props by remember(a.artistId) { mutableStateOf<List<ScoredCandidate>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(open) {
+        if (open && props == null) props = runCatching { app.enricher.proposeArtist(a.artistId, a.name) }.getOrDefault(emptyList())
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (open) "🖼️ Autres photos ▴" else "🖼️ Autres photos ▾", color = color, fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 5.dp)
+        )
+        a.photoSource?.let { Spacer(Modifier.width(8.dp)); Text("source : ${if (it == "USER") "👤 toi" else it}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
+    }
+    if (!open) return
+    val list = props
+    when {
+        list == null -> Text("Recherche en cours…", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().padding(6.dp), textAlign = TextAlign.Center)
+        list.isEmpty() -> Text("Aucune autre photo trouvée.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().padding(6.dp), textAlign = TextAlign.Center)
+        else -> Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            list.forEach { p ->
+                val c = p.candidate
+                val current = c.imageUrl == a.photoUrl
+                val note = p.reasons.lastOrNull { it.contains("bibliothèque") || it.contains("non vérifiable") }
+                val good = note?.contains("en commun") == true
+                Column(
+                    Modifier.width(96.dp).clip(RoundedCornerShape(12.dp))
+                        .background(if (current) color.copy(alpha = 0.18f) else theme.surface)
+                        .border(1.dp, if (current) color else Color.Transparent, RoundedCornerShape(12.dp))
+                        .clickable(enabled = !busy && !current) {
+                            busy = true
+                            scope.launch { runCatching { app.editor.setArtistPhoto(a.artistId, c.imageUrl) }; onChanged(); busy = false }
+                        }
+                        .padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CoverArt(c.imageUrl, c.name, size = 72, circle = true)
+                    Spacer(Modifier.height(4.dp))
+                    Text("${c.source.emoji} ${c.source.label}", color = theme.text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${p.score} %", color = if (p.score >= 90) Color(0xFF2ECC71) else if (p.score >= 70) Color(0xFFF1C40F) else theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    if (note != null) Text(
+                        if (good) "✅ " + note.substringBefore(" titre").trim() + " en commun" else if (note.contains("pas assez")) "❔ pas assez de titres" else if (note.contains("non vérifiable")) "❔ non vérifiable" else "⚠️ aucun en commun",
+                        color = if (good) Color(0xFF2ECC71) else theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, textAlign = TextAlign.Center
+                    )
+                    if (current) Text("actuelle", color = color, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
     }
 }
 

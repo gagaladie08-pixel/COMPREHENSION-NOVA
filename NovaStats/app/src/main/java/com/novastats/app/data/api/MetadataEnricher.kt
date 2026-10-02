@@ -165,6 +165,13 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         return list
     }
 
+    /** Titres connus d'un artiste : crédités (principal + featuring) et fiches dont le nom contient l'artiste. Noms trop courts : fiche seule. */
+    private suspend fun knownTitlesOf(artistId: Long, artistName: String?, exclude: String? = null): Set<String> {
+        val name = artistName?.trim().orEmpty()
+        val titles = if (name.length >= 3) db.trackDao().titlesCreditedTo(artistId, name) else db.trackDao().titlesOfArtist(artistId)
+        return keysOf(titles, exclude)
+    }
+
     private fun keysOf(titles: List<String>, exclude: String? = null): Set<String> {
         val ex = exclude?.let { TitleNormalizer.normalizeKey(it) }
         return titles.map { TitleNormalizer.normalizeKey(it) }.filter { it.isNotBlank() && it != ex }.toSet()
@@ -174,9 +181,29 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
      * ⚠️ À corriger — propositions pour le popup de correction : jusqu'à 3 candidats (source + score) issus des
      * sources sans clé ou configurées (hors Google), interrogées en parallèle. Un appui remplit tous les champs.
      */
+    /**
+     * Popup artiste → « 🖼️ Autres photos » : toutes les sources photo interrogées en parallèle, notées et vérifiées
+     * avec les titres de ta bibliothèque ; une par image, les 6 meilleures. Le choix est sauvegardé en 👤 USER.
+     */
+    suspend fun proposeArtist(artistId: Long, name: String): List<ScoredCandidate> {
+        if (name.isBlank()) return emptyList()
+        val known = knownTitlesOf(artistId, name)
+        val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.artistPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.artistPriority }.take(7)
+        val results: List<MetaCandidate> = coroutineScope {
+            sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchArtist(name) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
+        }.flatten().filter { !it.imageUrl.isNullOrBlank() }
+        val top = results.map { c -> MetadataMatching.scoreArtist(c, name) }
+            .filter { it.score >= 50 }
+            .sortedByDescending { it.score }
+            .distinctBy { it.candidate.imageUrl }
+            .take(6)
+        return top.map { sc -> MetadataMatching.libraryCheck(sc, artistTitlesOf(sc.candidate), null, known, minKnown = 2, minList = 3, penalty = 40) }
+            .sortedByDescending { it.score }
+    }
+
     suspend fun proposeTrack(title: String, artist: String, album: String?, durationMs: Long?, trackId: Long? = null): List<ScoredCandidate> {
         if (title.isBlank()) return emptyList()
-        val known = trackId?.let { id -> db.trackDao().getById(id)?.let { t -> keysOf(db.trackDao().titlesOfArtist(t.artistId), exclude = t.title) } } ?: emptySet()
+        val known = trackId?.let { id -> db.trackDao().getById(id)?.let { t -> knownTitlesOf(t.artistId, artist, exclude = t.title) } } ?: emptySet()
         val wanted = TitleNormalizer.normalizeKey(title)
         val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.trackPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.trackPriority }.take(6)
         val results: List<MetaCandidate> = coroutineScope {
@@ -305,13 +332,13 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     /* ------------------------------------------------------------------ */
 
     suspend fun enrichArtist(a: ArtistEntity): Boolean {
-        val known = keysOf(db.trackDao().titlesOfArtist(a.artistId))
+        val known = knownTitlesOf(a.artistId, a.name)
         val best = cascade(
             EntityType.ARTIST, a.artistId, DataType.PHOTO, { it.artistPriority },
             query = { api -> api.searchArtist(a.name) },
             score = { c, _ -> MetadataMatching.scoreArtist(c, a.name) },
             // Homonymes : les titres connus du candidat doivent recouper au moins un des tiens
-            verify = { sc -> MetadataMatching.libraryCheck(sc, artistTitlesOf(sc.candidate), null, known, minKnown = 3, minList = 5, penalty = 40) }
+            verify = { sc -> MetadataMatching.libraryCheck(sc, artistTitlesOf(sc.candidate), null, known, minKnown = 2, minList = 3, penalty = 40) }
         )
         if (best == null) { negativeCache(EntityType.ARTIST, a.artistId, DataType.PHOTO); return false }
         val c = best.candidate
@@ -378,7 +405,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             }
         }
         // 2. Recherche par titre, vérifiée par les titres connus de l'artiste
-        val known = keysOf(db.trackDao().titlesOfArtist(t.artistId), exclude = t.title)
+        val known = knownTitlesOf(t.artistId, artistName, exclude = t.title)
         val wanted = TitleNormalizer.normalizeKey(t.title)
         val best = cascade(
             EntityType.TRACK, t.trackId, DataType.COVER, { it.trackPriority },

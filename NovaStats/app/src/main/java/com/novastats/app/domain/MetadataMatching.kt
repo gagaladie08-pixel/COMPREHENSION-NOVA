@@ -222,8 +222,8 @@ object MetadataMatching {
         titles: List<String>?,
         wantedTitle: String?,
         knownTitles: Set<String>,
-        minKnown: Int = 5,
-        minList: Int = 4,
+        minKnown: Int = 3,
+        minList: Int = 3,
         penalty: Int = 25
     ): ScoredCandidate {
         if (titles == null) {
@@ -231,15 +231,26 @@ object MetadataMatching {
         }
         val reasons = sc.reasons.toMutableList()
         var score = sc.score
-        val keys = titles.map { TitleNormalizer.normalizeKey(it) }.filter { it.isNotBlank() }
-        if (wantedTitle != null && keys.isNotEmpty() && keys.none { k -> similarity(k, wantedTitle) >= 0.85 }) { score -= 30; reasons += "titre absent de cet album −30" }
-        val overlap = keys.count { it in knownTitles }
+        val keys = titles.map { TitleNormalizer.normalizeKey(it) }.filter { it.isNotBlank() }.distinct()
+        if (wantedTitle != null && keys.isNotEmpty() && keys.none { k -> titlesMatch(k, wantedTitle) }) { score -= 30; reasons += "titre absent de cet album −30" }
+        // Comparaison tolérante : « diamonds » ≈ « diamonds official video » ≈ « rihanna diamonds »
+        val overlap = keys.count { k -> knownTitles.any { known -> titlesMatch(k, known) } }
+        val counts = "${knownTitles.size} connu${if (knownTitles.size > 1) "s" else ""} / ${keys.size} dans la liste"
         when {
             overlap >= 1 -> { score += 20; reasons += "$overlap titre${if (overlap > 1) "s" else ""} en commun avec ta bibliothèque +20" }
-            knownTitles.size >= minKnown && keys.size >= minList -> { score -= penalty; reasons += "aucun titre en commun avec ta bibliothèque −$penalty" }
-            else -> reasons += "bibliothèque : pas assez de titres pour trancher"
+            knownTitles.size >= minKnown && keys.size >= minList -> { score -= penalty; reasons += "aucun titre en commun avec ta bibliothèque ($counts) −$penalty" }
+            else -> reasons += "bibliothèque : pas assez de titres pour trancher ($counts)"
         }
         return sc.copy(score = score.coerceIn(0, 100), reasons = reasons)
+    }
+
+    /** Deux clés de titre « parlent » du même morceau : égalité, inclusion (≥ 4 caractères) ou similarité ≥ 0,85. */
+    fun titlesMatch(a: String, b: String): Boolean {
+        if (a.isEmpty() || b.isEmpty()) return false
+        if (a == b) return true
+        val (short, long) = if (a.length <= b.length) a to b else b to a
+        if (short.length >= 4 && (long == short || long.startsWith("$short ") || long.endsWith(" $short") || long.contains(" $short "))) return true
+        return similarity(a, b) >= 0.85
     }
 
     /** Stratégie 6 : durée de cache selon le score. Retourne null si le résultat ne doit pas être mis en cache. */
