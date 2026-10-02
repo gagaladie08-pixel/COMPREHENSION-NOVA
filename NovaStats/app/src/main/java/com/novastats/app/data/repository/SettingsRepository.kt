@@ -126,7 +126,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setAutoEnrich(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_ENRICH] = v }
     suspend fun setEnrichWifiOnly(v: Boolean) = context.dataStore.edit { it[Keys.ENRICH_WIFI_ONLY] = v }
 
-    /** Quota Google Custom Search : 100 requêtes/jour gratuites — on s'arrête à [GOOGLE_DAILY_CAP]. */
+    /** Quota YouTube Data API (dernier recours) : 10 000 unités/jour = 100 recherches — on s'arrête à [GOOGLE_DAILY_CAP]. */
     suspend fun tryConsumeGoogleQuota(today: String): Boolean {
         var allowed = false
         context.dataStore.edit { p ->

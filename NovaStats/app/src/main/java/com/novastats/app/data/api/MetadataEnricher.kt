@@ -2,6 +2,7 @@ package com.novastats.app.data.api
 
 import android.util.Log
 import com.novastats.app.data.ApiKeys
+import com.novastats.app.data.api.HttpJson.HttpException
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.entity.AlbumEntity
 import com.novastats.app.data.db.entity.ApiCacheEntity
@@ -33,12 +34,61 @@ object EnrichmentState {
         val processed: Int = 0,
         val found: Int = 0,
         val lastRunAt: Long? = null,
-        val log: List<String> = emptyList()
+        val log: List<String> = emptyList(),
+        /** Dernière erreur HTTP/réseau par source (label → « 12/10 09:13 · HTTP 401 · clé ou token refusé »). */
+        val errors: Map<String, String> = emptyMap()
     )
 
     private val _state = MutableStateFlow(Snapshot())
     val state: StateFlow<Snapshot> = _state
     private val fmt = SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
+    private val dayFmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+    private var prefs: android.content.SharedPreferences? = null
+
+    /** Branche la persistance des dernières erreurs (SharedPreferences) — appelé par NovaStatsApp. */
+    fun attach(context: android.content.Context) {
+        val p = context.getSharedPreferences("nova_api_health", android.content.Context.MODE_PRIVATE)
+        prefs = p
+        val stored = p.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+        _state.update { it.copy(errors = stored) }
+    }
+
+    /** Une source vient d'échouer (exception réseau / HTTP) : mémorise une explication lisible. */
+    fun error(sourceLabel: String, t: Throwable) {
+        val text = "${dayFmt.format(System.currentTimeMillis())} · ${describe(t)}"
+        _state.update { it.copy(errors = it.errors + (sourceLabel to text)) }
+        prefs?.edit()?.putString(sourceLabel, text)?.apply()
+    }
+
+    /** Une source vient de répondre correctement : efface son erreur mémorisée. */
+    fun clearError(sourceLabel: String) {
+        if (sourceLabel !in _state.value.errors) return
+        _state.update { it.copy(errors = it.errors - sourceLabel) }
+        prefs?.edit()?.remove(sourceLabel)?.apply()
+    }
+
+    fun clearAllErrors() {
+        _state.update { it.copy(errors = emptyMap()) }
+        prefs?.edit()?.clear()?.apply()
+    }
+
+    /** Traduit une exception en cause probable, affichée telle quelle dans Réglages → APIs. */
+    fun describe(t: Throwable): String = when (t) {
+        is HttpException -> "HTTP ${t.code} · " + when (t.code) {
+            400 -> "requête refusée (paramètres)"
+            401 -> "clé ou token refusé"
+            403 -> "accès interdit (quota épuisé, droits ou abonnement requis)"
+            404 -> "introuvable"
+            429 -> "trop de requêtes (quota par minute dépassé)"
+            in 500..599 -> "serveur en panne"
+            else -> "erreur"
+        }
+        is java.net.UnknownHostException -> "pas de réseau (DNS)"
+        is java.net.SocketTimeoutException -> "délai dépassé"
+        is javax.net.ssl.SSLException -> "erreur SSL"
+        is java.io.IOException -> "erreur réseau : ${t.message?.take(60) ?: t.javaClass.simpleName}"
+        else -> "${t.javaClass.simpleName}${t.message?.let { " : ${it.take(60)}" } ?: ""}"
+    }
 
     fun start() = _state.update { it.copy(running = true, processed = 0, found = 0) }
     fun current(label: String?) = _state.update { it.copy(current = label) }
@@ -51,7 +101,8 @@ object EnrichmentState {
 }
 
 /**
- * Cascade d'enrichissement (9 APIs) + stratégies de précision :
+ * Cascade d'enrichissement (sources gratuites : iTunes · Deezer · MusicBrainz/CAA · Last.fm · Discogs · Genius ·
+ * Fanart.tv · Wikidata · TheAudioDB · YouTube en dernier recours) + stratégies de précision :
  *  normalisation · Levenshtein · durée ±5 s · consensus (3 APIs en parallèle) · score de confiance ·
  *  anomalies · cache intelligent (6 mois / 1 mois / négatif 7 jours) · blacklist · fiabilité dynamique.
  */
@@ -62,16 +113,19 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
     private val musicBrainz = MusicBrainzApi()
     private val apis: Map<ApiSource, MusicApi> = listOf(
-        ITunesApi(), SpotifyApi(), LastFmApi(), musicBrainz, TheAudioDbApi(), DeezerApi(), DiscogsApi(),
-        FanartApi(musicBrainz), GoogleImagesApi { settings.tryConsumeGoogleQuota(Dates.today().format(Dates.ISO)) }
+        ITunesApi(), DeezerApi(), musicBrainz, LastFmApi(), DiscogsApi(), GeniusApi(),
+        FanartApi(musicBrainz), WikidataApi(), TheAudioDbApi(),
+        YouTubeApi { settings.tryConsumeGoogleQuota(Dates.today().format(Dates.ISO)) }
     ).associateBy { it.source }
 
     private fun hasKey(s: ApiSource): Boolean = when (s) {
-        ApiSource.SPOTIFY -> ApiKeys.has(ApiKeys.spotifyClientId) && ApiKeys.has(ApiKeys.spotifyClientSecret)
         ApiSource.LASTFM -> ApiKeys.has(ApiKeys.lastFm)
         ApiSource.FANART -> ApiKeys.has(ApiKeys.fanart)
-        ApiSource.GOOGLE -> ApiKeys.has(ApiKeys.googleApiKey) && ApiKeys.has(ApiKeys.googleEngineId)
-        ApiSource.THEAUDIODB -> true // clé de test "2" par défaut
+        ApiSource.DISCOGS -> ApiKeys.has(ApiKeys.discogsToken) // sans token : HTTP 401 → on n'appelle pas
+        ApiSource.GENIUS -> ApiKeys.has(ApiKeys.genius)
+        ApiSource.YOUTUBE -> ApiKeys.has(ApiKeys.youtube)
+        ApiSource.SPOTIFY, ApiSource.GOOGLE -> false // retirées
+        ApiSource.THEAUDIODB -> true // clé publique "123" par défaut
         else -> true
     }
 
@@ -81,7 +135,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
      */
     suspend fun proposeTrack(title: String, artist: String, album: String?, durationMs: Long?): List<ScoredCandidate> {
         if (title.isBlank()) return emptyList()
-        val sources = ApiSource.entries.filter { !it.isLastResort && hasKey(it) && apis.containsKey(it) }.sortedBy { it.trackPriority }.take(6)
+        val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.trackPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.trackPriority }.take(6)
         val results: List<MetaCandidate> = coroutineScope {
             sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchTrack(title, artist.ifBlank { "" }) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
         }.flatten()
@@ -93,8 +147,10 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             .take(3)
     }
 
-    /** Sources configurées (pour l'écran Réglages). */
-    fun configuredSources(): List<Pair<ApiSource, Boolean>> = ApiSource.entries.map { it to (!it.requiresKey || hasKey(it)) }
+    /** Sources (pour l'écran Réglages) : actives d'abord, puis sans clé, puis retirées. */
+    fun configuredSources(): List<Pair<ApiSource, Boolean>> = ApiSource.entries
+        .map { it to (!it.retired && (!it.requiresKey || hasKey(it))) }
+        .sortedWith(compareBy({ it.first.retired }, { !it.second }, { minOf(it.first.trackPriority.takeIf { p -> p > 0 } ?: 99, it.first.artistPriority.takeIf { p -> p > 0 } ?: 99) }))
 
     /* ------------------------------------------------------------------ */
     /*  Lot de travail (appelé par EnrichmentWorker)                        */
@@ -217,7 +273,8 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
     /**
      * Interroge les sources par groupes de 3 en parallèle (consensus), score les candidats, s'arrête au premier
-     * résultat ≥ 70. Google n'est appelé que si tout le reste a échoué.
+     * résultat ≥ 70. YouTube (dernier recours, score forfaitaire 70 → 🟡 À vérifier) n'est appelé que si tout le
+     * reste a échoué.
      */
     private suspend fun cascade(
         entityType: String,
@@ -238,7 +295,11 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             val results: List<Pair<ApiSource, Result<List<MetaCandidate>>>> = coroutineScope {
                 group.map { s -> async { s to runCatching { query(apis.getValue(s)) } } }.map { it.await() }
             }
-            results.forEach { (s, r) -> r.exceptionOrNull()?.let { EnrichmentState.log("⚠️ ${s.label} : ${it.message?.take(80)}") } }
+            results.forEach { (s, r) ->
+                val e = r.exceptionOrNull()
+                if (e != null) { EnrichmentState.error(s.label, e); EnrichmentState.log("⚠️ ${s.label} : ${EnrichmentState.describe(e)}") }
+                else EnrichmentState.clearError(s.label)
+            }
             val fresh = results.flatMap { (_, r) -> r.getOrDefault(emptyList()) }
                 .filter { it.imageUrl == null || it.imageUrl !in blacklisted }
             seen += fresh

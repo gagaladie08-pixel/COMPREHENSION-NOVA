@@ -250,6 +250,7 @@ interface ApiCacheDao {
     @Query("SELECT * FROM api_reliability ORDER BY current_priority") fun reliability(): Flow<List<ApiReliabilityEntity>>
     @Query("SELECT * FROM api_reliability WHERE api_name = :name") suspend fun reliabilityFor(name: String): ApiReliabilityEntity?
     @Query("SELECT * FROM api_reliability") suspend fun allReliability(): List<ApiReliabilityEntity>
+    @Query("DELETE FROM api_reliability") suspend fun clearReliability()
     /** URLs à ne plus jamais proposer pour cette entité (stratégie 11). */
     @Query("SELECT cached_url FROM api_cache WHERE entity_type = :entityType AND entity_id = :entityId AND is_blacklisted = 1 AND cached_url IS NOT NULL")
     suspend fun blacklistedUrls(entityType: String, entityId: Long): List<String>

@@ -33,8 +33,8 @@ android {
         applicationId = "com.novastats.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.8.4"
+        versionCode = 15
+        versionName = "0.8.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -46,6 +46,8 @@ android {
         buildConfigField("String", "GOOGLE_ENGINE_ID", apiKey("GOOGLE_ENGINE_ID"))
         buildConfigField("String", "DISCOGS_TOKEN", apiKey("DISCOGS_TOKEN"))
         buildConfigField("String", "THEAUDIODB_API_KEY", apiKey("THEAUDIODB_API_KEY"))
+        buildConfigField("String", "GENIUS_ACCESS_TOKEN", apiKey("GENIUS_ACCESS_TOKEN"))
+        buildConfigField("String", "YOUTUBE_API_KEY", apiKey("YOUTUBE_API_KEY"))
     }
 
     // Clé de signature debug STABLE, versionnée dans le dépôt : sans elle, chaque exécution de GitHub Actions

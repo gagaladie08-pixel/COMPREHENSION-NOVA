@@ -4,8 +4,12 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * Les 9 sources de la cascade d'enrichissement, avec leur priorité par défaut.
- * Priorité 0 = non utilisée pour ce type ; Google = toujours en dernier recours (non ajustable).
+ * Sources de la cascade d'enrichissement (toutes gratuites), avec leur priorité par défaut.
+ * Priorité 0 = non utilisée pour ce type ; YouTube = toujours en dernier recours (non ajustable).
+ *
+ * Retirées (0.8.5) : Spotify (Development Mode réservé aux comptes Premium depuis le 9 mars 2026, flux
+ * Client Credentials en voie de suppression) et Google Images (Custom Search JSON API fermée aux nouveaux
+ * clients, arrêt le 1er janvier 2027). Les entrées restent dans l'enum pour les anciens `cover_source`.
  */
 enum class ApiSource(
     val label: String,
@@ -16,16 +20,29 @@ enum class ApiSource(
     val requiresKey: Boolean
 ) {
     ITUNES("iTunes", "🍎", 0, 1, 1, false),
-    SPOTIFY("Spotify", "🎵", 3, 2, 2, true),
-    LASTFM("Last.fm", "🎤", 4, 3, 3, true),
-    MUSICBRAINZ("MusicBrainz", "🌿", 0, 4, 4, false),
-    THEAUDIODB("TheAudioDB", "🎸", 2, 5, 5, true),
-    DEEZER("Deezer", "🎶", 5, 6, 6, false),
-    DISCOGS("Discogs", "💿", 0, 7, 7, false),
-    FANART("Fanart.tv", "🎨", 1, 0, 0, true),
-    GOOGLE("Google Images", "🔍", 6, 8, 8, true);
+    DEEZER("Deezer", "🎶", 1, 2, 2, false),
+    MUSICBRAINZ("MusicBrainz", "🌿", 0, 3, 3, false),
+    LASTFM("Last.fm", "🎤", 5, 4, 4, true),
+    DISCOGS("Discogs", "💿", 0, 5, 5, true),
+    GENIUS("Genius", "🧠", 6, 6, 6, true),
+    FANART("Fanart.tv", "🎨", 2, 0, 0, true),
+    WIKIDATA("Wikidata", "🌐", 3, 0, 0, false),
+    THEAUDIODB("TheAudioDB", "🎸", 4, 7, 0, false),
+    YOUTUBE("YouTube", "▶️", 7, 8, 7, true),
+    SPOTIFY("Spotify", "🎵", 0, 0, 0, true),
+    GOOGLE("Google Images", "🔍", 0, 0, 0, true);
 
-    val isLastResort: Boolean get() = this == GOOGLE
+    val isLastResort: Boolean get() = this == YOUTUBE || this == GOOGLE
+
+    /** Source retirée de la cascade (plus jamais interrogée). */
+    val retired: Boolean get() = this == SPOTIFY || this == GOOGLE
+
+    /** Raison affichée dans Réglages → APIs pour une source retirée. */
+    val retiredReason: String? get() = when (this) {
+        SPOTIFY -> "retirée · Premium obligatoire depuis mars 2026"
+        GOOGLE -> "retirée · API fermée, arrêt le 01/01/2027"
+        else -> null
+    }
 }
 
 /** Type de donnée enrichie (colonne data_type de api_cache). */
@@ -62,6 +79,8 @@ object MetadataMatching {
     const val ACCEPT = 70
     const val TRUSTED = 90
     const val DURATION_TOLERANCE_MS = 5_000L
+    const val EXACT_DURATION_MS = 3_000L
+    const val WRONG_DURATION_MS = 10_000L
 
     private val junkTitles = setOf("unknown", "track 01", "track 1", "untitled", "audio", "video", "unknown track")
     private val genericArtists = setOf("various artists", "various", "unknown artist", "unknown")
@@ -86,8 +105,10 @@ object MetadataMatching {
 
     /**
      * Score d'une piste (max 100) :
-     *  titre +30 · artiste +30 · durée ±5 s +10 · album reconnu +10 · consensus (2+ APIs d'accord) +20
+     *  titre +30 · artiste +30 · durée ±3 s +20 (±5 s +10, écart > 10 s −15) · album reconnu +10 ·
+     *  consensus (2+ APIs d'accord sur l'artiste ET l'album/la durée) +20
      *  anomalies : titre générique → rejet ; artiste générique −10 ; durée 0 ou > 20 min −10 ; pas d'image −15
+     *  garde-fou : artiste non confirmé (similarité < 0,85) → score plafonné à 69, jamais accepté sans révision
      */
     fun scoreTrack(
         c: MetaCandidate,
@@ -104,10 +125,18 @@ object MetadataMatching {
         val artistSim = c.artist?.let { similarity(it, wantedArtist) } ?: 0.0
         val a = matchPoints(artistSim, 30); if (a > 0) reasons += "artiste +$a"; score += a
         if (t == 0 || a == 0) return ScoredCandidate(c, 0, reasons + "titre ou artiste non reconnu")
-        if (wantedDurationMs != null && c.durationMs != null && abs(wantedDurationMs - c.durationMs) <= DURATION_TOLERANCE_MS) { score += 10; reasons += "durée +10" }
+        if (wantedDurationMs != null && c.durationMs != null) {
+            val diff = abs(wantedDurationMs - c.durationMs)
+            when {
+                diff <= EXACT_DURATION_MS -> { score += 20; reasons += "durée exacte +20" }
+                diff <= DURATION_TOLERANCE_MS -> { score += 10; reasons += "durée +10" }
+                diff > WRONG_DURATION_MS -> { score -= 15; reasons += "durée différente −15" }
+            }
+        }
         if (wantedAlbum != null && c.album != null && similarity(wantedAlbum, c.album) >= 0.85) { score += 10; reasons += "album +10" }
         if (consensus) { score += 20; reasons += "consensus +20" }
         score += anomalies(c, reasons)
+        if (a < 20 && score >= ACCEPT) { score = ACCEPT - 1; reasons += "artiste non confirmé → max ${ACCEPT - 1}" }
         return ScoredCandidate(c, score.coerceIn(0, 100), reasons)
     }
 
@@ -121,6 +150,7 @@ object MetadataMatching {
         if (!c.imageUrl.isNullOrBlank()) { score += 10; reasons += "pochette +10" }
         if (consensus) { score += 10; reasons += "consensus +10" }
         score += anomalies(c, reasons)
+        if (a < 30 && score >= ACCEPT) { score = ACCEPT - 1; reasons += "artiste non confirmé → max ${ACCEPT - 1}" }
         return ScoredCandidate(c, score.coerceIn(0, 100), reasons)
     }
 
@@ -148,21 +178,27 @@ object MetadataMatching {
     fun isSuspiciousImage(url: String): Boolean {
         val u = url.lowercase()
         return u.contains("2a96cbd8b46e442fc41c2b86b821562f") || // étoile grise Last.fm
-            u.contains("placeholder") || u.contains("noimage") || u.contains("no-image") || u.contains("default_artist")
+            u.contains("placeholder") || u.contains("noimage") || u.contains("no-image") || u.contains("default_artist") ||
+            u.contains("default_avatar") || u.contains("default_cover")
     }
 
     /**
-     * Consensus (stratégie 10) : au moins deux sources d'accord sur l'album (ou la durée ±5 s).
-     * Retourne l'ensemble des candidats confirmés par une autre source.
+     * Consensus (stratégie 10) : au moins deux sources d'accord sur **l'artiste** et sur l'album (ou la durée ±5 s ;
+     * ou le titre exact pour des candidats « album » sans durée). Un même titre chez deux artistes différents
+     * n'est plus un consensus. Retourne l'ensemble des candidats confirmés par une autre source.
      */
     fun consensusSet(candidates: List<MetaCandidate>): Set<MetaCandidate> {
         val agreed = mutableSetOf<MetaCandidate>()
         for (i in candidates.indices) for (j in i + 1 until candidates.size) {
             val a = candidates[i]; val b = candidates[j]
             if (a.source == b.source) continue
+            val sameArtist = a.artist != null && b.artist != null && similarity(a.artist, b.artist) >= 0.85
+            if (!sameArtist) continue
             val sameAlbum = a.album != null && b.album != null && similarity(a.album, b.album) >= 0.85
             val sameDuration = a.durationMs != null && b.durationMs != null && abs(a.durationMs - b.durationMs) <= DURATION_TOLERANCE_MS
-            if (sameAlbum || sameDuration) { agreed += a; agreed += b }
+            val albumCandidates = a.album == null && b.album == null && a.durationMs == null && b.durationMs == null
+            val sameName = albumCandidates && similarity(a.name, b.name) >= 0.999
+            if (sameAlbum || sameDuration || sameName) { agreed += a; agreed += b }
         }
         return agreed
     }
@@ -179,14 +215,15 @@ object MetadataMatching {
 
     /**
      * Stratégie 13 : ordre effectif de la cascade. Priorité par défaut, mais une source dont le taux de succès
-     * tombe sous 50 % (après ≥ 10 tentatives) recule de 3 places ; Google reste toujours dernier.
+     * tombe sous 50 % (après ≥ 10 tentatives) recule de 3 places ; YouTube reste toujours dernier ; les sources
+     * retirées ne sont jamais interrogées.
      */
     fun orderSources(
         basePriority: (ApiSource) -> Int,
         reliability: Map<ApiSource, Pair<Int, Int>>, // source → (succès, échecs)
         hasKey: (ApiSource) -> Boolean
     ): List<ApiSource> = ApiSource.entries
-        .filter { basePriority(it) > 0 && (!it.requiresKey || hasKey(it)) }
+        .filter { !it.retired && basePriority(it) > 0 && (!it.requiresKey || hasKey(it)) }
         .sortedWith(compareBy<ApiSource> { it.isLastResort }.thenBy { s ->
             val (ok, ko) = reliability[s] ?: (0 to 0)
             val penalty = if (ok + ko >= 10 && ok * 100 / (ok + ko) < 50) 3 else 0

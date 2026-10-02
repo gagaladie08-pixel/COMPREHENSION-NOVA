@@ -39,6 +39,7 @@ class NovaStatsApp : Application() {
         super.onCreate()
         instance = this
         createNotificationChannels()
+        com.novastats.app.data.api.EnrichmentState.attach(this)
         EnrichmentWorker.schedulePeriodic(this)
         BackupWorker.schedulePeriodic(this)
         com.novastats.app.service.DetectionState.bind(this)

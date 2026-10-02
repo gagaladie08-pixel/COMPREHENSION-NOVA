@@ -707,7 +707,7 @@ private fun ApisPage() {
         NovaCard {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Cascade de 9 sources : iTunes → Spotify → Last.fm → MusicBrainz → TheAudioDB → Deezer → Discogs → Google (dernier recours). Artistes : Fanart.tv → TheAudioDB → Spotify → Last.fm → Deezer → Google.",
+                    "Cascade 100 % gratuite. Titres / albums : iTunes → Deezer → MusicBrainz → Last.fm → Discogs → Genius → YouTube (dernier recours, toujours 🟡 À vérifier). Artistes : Deezer → Fanart.tv → Wikidata → TheAudioDB → Last.fm → Genius → YouTube. Une pochette n'est acceptée que si l'artiste est confirmé.",
                     color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(8.dp))
@@ -736,13 +736,38 @@ private fun ApisPage() {
             Column(Modifier.padding(16.dp)) {
                 sources.forEach { (src, configured) ->
                     val r = reliability.firstOrNull { it.apiName == src.label }
+                    val error = enrich.errors[src.label]
                     val stats = if (r == null || r.successCount + r.failCount == 0) "pas encore utilisée" else "${r.successRate.toInt()} % de succès (${r.successCount}/${r.successCount + r.failCount})"
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Dot(if (configured) Color(0xFF2ECC71) else Color(0xFF95A5A6))
-                        Spacer(Modifier.width(8.dp))
-                        Text("${src.emoji} ${src.label}", color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(130.dp))
-                        Text(if (configured) stats else "clé manquante", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    val dot = when {
+                        src.retired -> Color(0xFF95A5A6)
+                        !configured -> Color(0xFF95A5A6)
+                        error != null -> Color(0xFFE74C3C)
+                        else -> Color(0xFF2ECC71)
                     }
+                    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Dot(dot)
+                            Spacer(Modifier.width(8.dp))
+                            Text("${src.emoji} ${src.label}", color = if (src.retired) theme.textSecondary else theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(130.dp))
+                            Text(
+                                when {
+                                    src.retired -> src.retiredReason ?: "retirée"
+                                    !configured -> "clé manquante (secret GitHub ${secretName(src)})"
+                                    else -> stats
+                                },
+                                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (error != null && configured && !src.retired) {
+                            Text("⛔ $error", color = Color(0xFFE74C3C), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 18.dp))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = {
+                        scope.launch { app.database.apiCacheDao().clearReliability(); EnrichmentState.clearAllErrors() }
+                    }) { Text("↺ Remettre les compteurs à zéro", color = theme.primary, style = MaterialTheme.typography.bodySmall) }
                 }
                 if (enrich.log.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
@@ -752,6 +777,16 @@ private fun ApisPage() {
             }
         }
     }
+}
+
+/** Nom du secret GitHub Actions attendu pour une source (affiché quand la clé manque). */
+private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (src) {
+    com.novastats.app.domain.ApiSource.LASTFM -> "LASTFM_API_KEY"
+    com.novastats.app.domain.ApiSource.FANART -> "FANART_API_KEY"
+    com.novastats.app.domain.ApiSource.DISCOGS -> "DISCOGS_TOKEN"
+    com.novastats.app.domain.ApiSource.GENIUS -> "GENIUS_ACCESS_TOKEN"
+    com.novastats.app.domain.ApiSource.YOUTUBE -> "YOUTUBE_API_KEY"
+    else -> "—"
 }
 
 /* ================================ À PROPOS ================================ */
@@ -767,7 +802,7 @@ private val CHANGELOG = listOf(
     "0.1.x" to listOf(
         "🏠 Accueil 8 sections · 📊 Stats complètes avec popups et recherche",
         "📈 Billboard Daily/Weekly/Monthly/Yearly/Global, Hall of Fame",
-        "🌐 Cascade de 9 APIs pour pochettes et photos",
+        "🌐 Cascade de 10 sources gratuites pour pochettes et photos",
         "🎧 Détection MediaSession + fallback notifications, import JSON v1"
     )
 )

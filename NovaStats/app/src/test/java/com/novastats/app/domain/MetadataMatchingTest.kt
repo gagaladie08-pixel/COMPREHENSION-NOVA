@@ -20,11 +20,24 @@ class MetadataMatchingTest {
     }
 
     @Test
-    fun `score piste — exact avec durée et album = 80, consensus = 100`() {
+    fun `score piste — exact avec durée ±3 s et album = 90, consensus = 100`() {
         val c = cand(ApiSource.ITUNES, "CHOOM", "BABYMONSTER", "DRIP", duration = 180_000)
         val s = MetadataMatching.scoreTrack(c, "CHOOM", "Babymonster", "DRIP", 182_000, consensus = false)
-        assertEquals(80, s.score)
+        assertEquals(90, s.score) // 30 + 30 + 20 (durée exacte) + 10 (album)
         assertEquals(100, MetadataMatching.scoreTrack(c, "CHOOM", "Babymonster", "DRIP", 182_000, consensus = true).score)
+        // ±4 s → +10 seulement
+        assertEquals(80, MetadataMatching.scoreTrack(c, "CHOOM", "Babymonster", "DRIP", 184_000, consensus = false).score)
+    }
+
+    @Test
+    fun `garde-fous 0_8_5 — durée différente pénalisée, artiste approximatif plafonné à 69`() {
+        val wrongDuration = cand(ApiSource.ITUNES, "CHOOM", "Babymonster", duration = 200_000)
+        assertEquals(45, MetadataMatching.scoreTrack(wrongDuration, "CHOOM", "Babymonster", null, 180_000, consensus = false).score) // 60 − 15
+        // « Lila » ≈ « Lisa » (similarité 0,75 → +10 seulement) : même avec durée exacte, album et consensus, jamais accepté sans révision
+        val nearArtist = cand(ApiSource.DEEZER, "SERVE", "Lila", "Alter Ego", duration = 180_000)
+        val s = MetadataMatching.scoreTrack(nearArtist, "SERVE", "Lisa", "Alter Ego", 180_000, consensus = true)
+        assertEquals(MetadataMatching.ACCEPT - 1, s.score)
+        assertTrue(s.reasons.any { it.startsWith("artiste non confirmé") })
     }
 
     @Test
@@ -44,19 +57,27 @@ class MetadataMatchingTest {
     @Test
     fun `score artiste et album`() {
         assertEquals(100, MetadataMatching.scoreArtist(cand(ApiSource.FANART, "LISA", null), "Lisa").score)
-        assertEquals(70, MetadataMatching.scoreArtist(cand(ApiSource.SPOTIFY, "LISA", null, image = null), "Lisa").score)
-        assertEquals(0, MetadataMatching.scoreArtist(cand(ApiSource.SPOTIFY, "Lissa Bennett", null), "Lisa").score)
+        assertEquals(70, MetadataMatching.scoreArtist(cand(ApiSource.DEEZER, "LISA", null, image = null), "Lisa").score)
+        assertEquals(0, MetadataMatching.scoreArtist(cand(ApiSource.DEEZER, "Lissa Bennett", null), "Lisa").score)
         assertEquals(100, MetadataMatching.scoreAlbum(cand(ApiSource.ITUNES, "Alter Ego", "LISA"), "Alter Ego", "Lisa", false).score)
     }
 
     @Test
-    fun `consensus — deux sources d'accord sur l'album ou la durée`() {
+    fun `consensus — deux sources d'accord sur l'artiste ET l'album ou la durée`() {
         val a = cand(ApiSource.ITUNES, "X", "Y", "Album A", duration = 200_000)
-        val b = cand(ApiSource.SPOTIFY, "X", "Y", "Album A")
+        val b = cand(ApiSource.DEEZER, "X", "Y", "Album A")
         val c = cand(ApiSource.LASTFM, "X", "Y", "Other", duration = 300_000)
         val set = MetadataMatching.consensusSet(listOf(a, b, c))
         assertTrue(a in set && b in set)
         assertFalse(c in set)
+        // Même titre et même album, mais artistes différents → pas de consensus
+        val d = cand(ApiSource.ITUNES, "X", "Someone", "Album A", duration = 200_000)
+        val e = cand(ApiSource.DEEZER, "X", "Other", "Album A", duration = 200_000)
+        assertTrue(MetadataMatching.consensusSet(listOf(d, e)).isEmpty())
+        // Candidats « album » (sans durée ni album) : accord sur le titre exact + artiste
+        val f = cand(ApiSource.ITUNES, "Alter Ego", "Lisa")
+        val g = cand(ApiSource.DEEZER, "ALTER EGO", "LISA")
+        assertEquals(2, MetadataMatching.consensusSet(listOf(f, g)).size)
     }
 
     @Test
@@ -67,15 +88,16 @@ class MetadataMatchingTest {
     }
 
     @Test
-    fun `ordre de cascade — clés, fiabilité, Google dernier`() {
+    fun `ordre de cascade — clés, fiabilité, YouTube dernier, Spotify et Google retirés`() {
         val all = MetadataMatching.orderSources({ it.trackPriority }, emptyMap()) { true }
-        assertEquals(listOf(ApiSource.ITUNES, ApiSource.SPOTIFY, ApiSource.LASTFM, ApiSource.MUSICBRAINZ, ApiSource.THEAUDIODB, ApiSource.DEEZER, ApiSource.DISCOGS, ApiSource.GOOGLE), all)
-        // iTunes en panne (2 succès / 18 échecs) → recule de 3 places ; sans clé Spotify → absent
-        val degraded = MetadataMatching.orderSources({ it.trackPriority }, mapOf(ApiSource.ITUNES to (2 to 18))) { it != ApiSource.SPOTIFY }
-        assertEquals(ApiSource.LASTFM, degraded.first())
-        assertFalse(ApiSource.SPOTIFY in degraded)
-        assertEquals(ApiSource.GOOGLE, degraded.last())
+        assertEquals(listOf(ApiSource.ITUNES, ApiSource.DEEZER, ApiSource.MUSICBRAINZ, ApiSource.LASTFM, ApiSource.DISCOGS, ApiSource.GENIUS, ApiSource.YOUTUBE), all)
+        assertFalse(ApiSource.SPOTIFY in all); assertFalse(ApiSource.GOOGLE in all)
+        // iTunes en panne (2 succès / 18 échecs) → recule de 3 places ; sans clé Genius → absent
+        val degraded = MetadataMatching.orderSources({ it.trackPriority }, mapOf(ApiSource.ITUNES to (2 to 18))) { it != ApiSource.GENIUS }
+        assertEquals(ApiSource.DEEZER, degraded.first())
+        assertFalse(ApiSource.GENIUS in degraded)
+        assertEquals(ApiSource.YOUTUBE, degraded.last())
         val artists = MetadataMatching.orderSources({ it.artistPriority }, emptyMap()) { true }
-        assertEquals(listOf(ApiSource.FANART, ApiSource.THEAUDIODB, ApiSource.SPOTIFY, ApiSource.LASTFM, ApiSource.DEEZER, ApiSource.GOOGLE), artists)
+        assertEquals(listOf(ApiSource.DEEZER, ApiSource.FANART, ApiSource.WIKIDATA, ApiSource.THEAUDIODB, ApiSource.LASTFM, ApiSource.GENIUS, ApiSource.YOUTUBE), artists)
     }
 }

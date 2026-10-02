@@ -9,7 +9,7 @@ import com.novastats.app.domain.MetadataMatching
 import kotlinx.serialization.json.JsonObject
 
 /**
- * Contrat commun des 9 sources. Chaque méthode renvoie des candidats bruts (jamais d'exception "métier" :
+ * Contrat commun des sources de la cascade (toutes gratuites). Chaque méthode renvoie des candidats bruts (jamais d'exception "métier" :
  * liste vide si rien). Les erreurs réseau/HTTP remontent pour être comptées dans api_reliability.
  */
 interface MusicApi {
@@ -52,7 +52,8 @@ class ITunesApi : MusicApi {
 }
 
 /* ======================================================================= */
-/* 2. Spotify — OAuth client credentials                                    */
+/* 2. Spotify — RETIRÉ de la cascade (0.8.5) : Development Mode réservé aux   */
+/*    comptes Premium depuis le 9 mars 2026 (HTTP 403). Classe conservée.   */
 /* ======================================================================= */
 class SpotifyApi : MusicApi {
     override val source = ApiSource.SPOTIFY
@@ -188,12 +189,14 @@ class MusicBrainzApi : MusicApi {
 }
 
 /* ======================================================================= */
-/* 5. TheAudioDB — clé "2" = test public                                    */
+/* 5. TheAudioDB — clé publique gratuite "123" : 30 req/min, 1 résultat     */
+/*    par recherche. Artistes (photo, bio) et albums seulement : la          */
+/*    recherche de titres gratuite ne renvoie presque jamais de vignette.    */
 /* ======================================================================= */
 class TheAudioDbApi : MusicApi {
     override val source = ApiSource.THEAUDIODB
-    private val limiter = RateLimiter(600)
-    private val base get() = "https://www.theaudiodb.com/api/v1/json/${ApiKeys.theAudioDb.ifBlank { "2" }}"
+    private val limiter = RateLimiter(2_100) // ≈ 28 req/min < quota gratuit 30/min (sinon HTTP 429)
+    private val base get() = "https://www.theaudiodb.com/api/v1/json/${ApiKeys.theAudioDb.ifBlank { "123" }}"
 
     override suspend fun searchTrack(title: String, artist: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("$base/searchtrack.php?s=${enc(artist)}&t=${enc(title)}").arr("track").objs().map {
@@ -244,7 +247,8 @@ class DeezerApi : MusicApi {
 }
 
 /* ======================================================================= */
-/* 7. Discogs — pochettes (fallback collectionneurs)                        */
+/* 7. Discogs — pochettes (fallback collectionneurs). Token OBLIGATOIRE :    */
+/*    sans authentification, /database/search renvoie HTTP 401.             */
 /* ======================================================================= */
 class DiscogsApi : MusicApi {
     override val source = ApiSource.DISCOGS
@@ -285,28 +289,95 @@ class FanartApi(private val musicBrainz: MusicBrainzApi) : MusicApi {
 }
 
 /* ======================================================================= */
-/* 9. Google Custom Search — DERNIER RECOURS, 100 req/jour                  */
+/* 9. Wikidata + Wikimedia Commons — photos d'artistes libres, sans clé     */
+/*    wbsearchentities → entités « musicien / groupe » → P18 (image),        */
+/*    P434 (mbid). URL Commons via Special:FilePath (redirection suivie).   */
 /* ======================================================================= */
-class GoogleImagesApi(private val quotaAvailable: suspend () -> Boolean) : MusicApi {
-    override val source = ApiSource.GOOGLE
+class WikidataApi : MusicApi {
+    override val source = ApiSource.WIKIDATA
     private val limiter = RateLimiter(1_000)
+    private val base = "https://www.wikidata.org/w/api.php"
+    private val musicWords = Regex("(singer|musician|band|group|rapper|songwriter|idol|duo|trio|quartet|producer|\\bdj\\b|composer|vocalist|artist|chanteu|musicien|groupe|rappeu)", RegexOption.IGNORE_CASE)
 
-    private suspend fun image(query: String): String? {
+    override suspend fun searchArtist(name: String): List<MetaCandidate> {
+        val hits = limiter.run {
+            HttpJson.get("$base?action=wbsearchentities&search=${enc(name)}&language=en&uselang=en&type=item&limit=7&format=json").arr("search").objs()
+        }.filter { (it.str("description") ?: "").contains(musicWords) }.take(3)
+        if (hits.isEmpty()) return emptyList()
+        val ids = hits.mapNotNull { it.str("id") }
+        val entities = limiter.run {
+            HttpJson.get("$base?action=wbgetentities&ids=${enc(ids.joinToString("|"))}&props=claims&format=json").obj("entities")
+        } ?: return emptyList()
+        return hits.mapNotNull { hit ->
+            val id = hit.str("id") ?: return@mapNotNull null
+            val claims = entities.obj(id).obj("claims")
+            val file = claims.arr("P18").firstObj().obj("mainsnak").obj("datavalue").str("value") ?: return@mapNotNull null
+            val mbid = claims.arr("P434").firstObj().obj("mainsnak").obj("datavalue").str("value")
+            MetaCandidate(
+                source, hit.str("label") ?: name,
+                imageUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/${enc(file.replace(' ', '_'))}?width=800",
+                bio = hit.str("description"), mbid = mbid
+            )
+        }
+    }
+}
+
+/* ======================================================================= */
+/* 10. Genius — pochettes (song_art) et photos d'artistes, token gratuit    */
+/* ======================================================================= */
+class GeniusApi : MusicApi {
+    override val source = ApiSource.GENIUS
+    private val limiter = RateLimiter(400)
+
+    private suspend fun hits(q: String): List<JsonObject> = limiter.run {
+        HttpJson.get("https://api.genius.com/search?q=${enc(q)}&per_page=10", mapOf("Authorization" to "Bearer ${ApiKeys.genius}"))
+            .obj("response").arr("hits").objs().mapNotNull { it.obj("result") }
+    }
+
+    override suspend fun searchTrack(title: String, artist: String): List<MetaCandidate> = hits("$artist $title").map {
+        MetaCandidate(
+            source, it.str("title") ?: "", it.obj("primary_artist").str("name"), null,
+            it.str("song_art_image_url") ?: it.str("header_image_url"), null, null, it.str("release_date_for_display")
+        )
+    }
+
+    override suspend fun searchArtist(name: String): List<MetaCandidate> = hits(name)
+        .mapNotNull { it.obj("primary_artist") }
+        .distinctBy { it.str("id") }
+        .mapNotNull { a -> a.str("image_url")?.let { MetaCandidate(source, a.str("name") ?: "", imageUrl = it) } }
+}
+
+/* ======================================================================= */
+/* 11. YouTube Data API v3 — DERNIER RECOURS (clé gratuite, 10 000 unités  */
+/*     par jour = ~100 recherches). Titres/albums : vignette du clip         */
+/*     (catégorie Musique) ; artistes : avatar de la chaîne officielle.      */
+/*     Résultat accepté au score forfaitaire 70 → toujours « 🟡 À vérifier ».*/
+/* ======================================================================= */
+class YouTubeApi(private val quotaAvailable: suspend () -> Boolean) : MusicApi {
+    override val source = ApiSource.YOUTUBE
+    private val limiter = RateLimiter(1_000)
+    private val base = "https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=3&safeSearch=moderate&key="
+
+    private suspend fun search(query: String, type: String): JsonObject? {
         if (!quotaAvailable()) return null
         return limiter.run {
-            HttpJson.get(
-                "https://www.googleapis.com/customsearch/v1?key=${ApiKeys.googleApiKey}&cx=${ApiKeys.googleEngineId}&q=${enc(query)}&searchType=image&num=3&imgSize=large&safe=active"
-            ).arr("items").objs().firstNotNullOfOrNull { it.str("link") }
+            val extra = if (type == "video") "&videoCategoryId=10" else ""
+            HttpJson.get("$base${ApiKeys.youtube}&type=$type$extra&q=${enc(query)}").arr("items").firstObj()
         }
     }
 
-    /** Google ne peut rien vérifier : le candidat reprend les valeurs demandées (score forfaitaire côté enricher). */
+    private fun JsonObject?.thumb(): String? {
+        val t = this.obj("snippet").obj("thumbnails")
+        return t.obj("high").str("url") ?: t.obj("medium").str("url") ?: t.obj("default").str("url")
+    }
+
+    /** YouTube ne peut rien vérifier : le candidat reprend les valeurs demandées (score forfaitaire côté enricher). */
     override suspend fun searchTrack(title: String, artist: String) =
-        image("$artist $title cover")?.let { listOf(MetaCandidate(source, title, artist, imageUrl = it)) }.orEmpty()
+        search("$artist $title official", "video")?.thumb()?.let { listOf(MetaCandidate(source, title, artist, imageUrl = it)) }.orEmpty()
 
     override suspend fun searchAlbum(title: String, artist: String) =
-        image("$artist $title album cover")?.let { listOf(MetaCandidate(source, title, artist, imageUrl = it)) }.orEmpty()
+        search("$artist $title album", "video")?.thumb()?.let { listOf(MetaCandidate(source, title, artist, imageUrl = it)) }.orEmpty()
 
     override suspend fun searchArtist(name: String) =
-        image("$name singer")?.let { listOf(MetaCandidate(source, name, imageUrl = it)) }.orEmpty()
+        search("$name official", "channel")?.thumb()?.let { listOf(MetaCandidate(source, name, imageUrl = it)) }.orEmpty()
 }

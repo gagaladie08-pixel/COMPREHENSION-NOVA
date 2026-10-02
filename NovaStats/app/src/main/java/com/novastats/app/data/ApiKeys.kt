@@ -15,6 +15,8 @@ object ApiKeys {
     val googleEngineId: String get() = BuildConfig.GOOGLE_ENGINE_ID
     val discogsToken: String get() = BuildConfig.DISCOGS_TOKEN
     val theAudioDb: String get() = BuildConfig.THEAUDIODB_API_KEY
+    val genius: String get() = BuildConfig.GENIUS_ACCESS_TOKEN
+    val youtube: String get() = BuildConfig.YOUTUBE_API_KEY
 
     fun has(key: String) = key.isNotBlank()
 }
