@@ -66,20 +66,28 @@ private enum class EditorTab(val label: String) { TRACKS("🎵 Titres"), ARTISTS
  * changement d'artiste/album, suppression d'écoute, marquage « correct », historique + Undo.
  */
 @Composable
-fun DataEditorScreen() {
+fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null) {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
     val editor = app.editor
     val scope = rememberCoroutineScope()
     val status by editor.status.collectAsStateWithLifecycle()
     val busy by editor.busy.collectAsStateWithLifecycle()
-    var tab by remember { mutableStateOf(EditorTab.TRACKS) }
+    var tab by remember { mutableStateOf(if (startOnReview) EditorTab.REVIEW else EditorTab.TRACKS) }
+    LaunchedEffect(startOnReview, focusTrackId) { if (startOnReview) { tab = EditorTab.REVIEW; if (focusTrackId == null) ReviewUiState.section = ReviewKind.RED } }
     var query by remember { mutableStateOf("") }
 
     val tracks by app.database.trackDao().allForEditor().collectAsStateWithLifecycle(initialValue = emptyList())
     val artists by app.database.artistDao().allForEditor().collectAsStateWithLifecycle(initialValue = emptyList())
     val albums by app.database.albumDao().allForEditor().collectAsStateWithLifecycle(initialValue = emptyList())
-    val review by app.database.trackDao().needingReview().collectAsStateWithLifecycle(initialValue = emptyList())
+    // ⚠️ À corriger : écoutes à réviser (groupées par titre), titres « APIs épuisées », titres 🟡 flaggés (70-89)
+    val reviewGroups by app.database.scrobbleDao().reviewGroups().collectAsStateWithLifecycle(initialValue = emptyList())
+    val lowConfidence by app.database.trackDao().lowConfidence().collectAsStateWithLifecycle(initialValue = emptyList())
+    val flagged by app.database.trackDao().flaggedForVerification().collectAsStateWithLifecycle(initialValue = emptyList())
+    var proposals by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+    LaunchedEffect(flagged) { proposals = flagged.associate { it.track.trackId to (proposalLabel(app, it.track.trackId) ?: "Pochette incertaine (${it.track.confidenceScore} %)") } }
+    val redItems = remember(reviewGroups, lowConfidence) { buildRedItems(reviewGroups, lowConfidence) }
+    val yellowItems = remember(flagged, proposals) { buildYellowItems(flagged, proposals) }
     val history by app.database.editorDao().history(50).collectAsStateWithLifecycle(initialValue = emptyList())
     val recentPlays by app.database.scrobbleDao().recent(200).collectAsStateWithLifecycle(initialValue = emptyList())
 
@@ -96,7 +104,10 @@ fun DataEditorScreen() {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            EditorTab.entries.forEach { t -> FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) }) }
+            EditorTab.entries.forEach { t ->
+                val label = if (t == EditorTab.REVIEW && redItems.isNotEmpty()) "⚠️ À corriger 🔴 ${redItems.size}" else t.label
+                FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(label) })
+            }
         }
         /* ---------- Doublons détectés (compteur sous le sous-onglet → popup de choix) ---------- */
         val trackDups = remember(tracks, ignored) { trackDupsState(tracks, editor, ignored) }
@@ -142,9 +153,8 @@ fun DataEditorScreen() {
                     }
                 }
                 EditorTab.REVIEW -> {
-                    if (review.isEmpty()) item { Text("✅ Aucun titre à corriger (score de confiance ≥ 70).", color = theme.textSecondary, modifier = Modifier.padding(16.dp)) }
-                    items(review, key = { "r" + it.track.trackId }) { t ->
-                        EditorRow(t.track.title, "${t.artistName} · confiance ${t.track.confidenceScore} % · ${t.periodPlays} ▶", t.track.coverUrl) { action = EditorAction.Track(t) }
+                    item(key = "review") {
+                        ReviewSection(redItems, yellowItems, focusTrackId, artists, albums.map { it.album }, busy = busy, exec = exec)
                     }
                 }
                 EditorTab.HISTORY -> {

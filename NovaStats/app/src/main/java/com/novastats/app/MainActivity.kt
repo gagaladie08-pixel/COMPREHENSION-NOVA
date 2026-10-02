@@ -21,6 +21,12 @@ import com.novastats.app.ui.theme.NovaStatsTheme
 import com.novastats.app.ui.theme.NovaThemes
 
 class MainActivity : ComponentActivity() {
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        com.novastats.app.ui.navigation.PendingNav.handle(intent)
+    }
+
     override fun onResume() {
         super.onResume()
         // L'app est visible : on peut toujours (re)lancer le service premier plan et réveiller le listener si besoin
@@ -32,6 +38,7 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        com.novastats.app.ui.navigation.PendingNav.handle(intent)
         val app = application as NovaStatsApp
         setContent {
             val themeId by app.settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)

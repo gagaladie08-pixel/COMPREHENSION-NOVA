@@ -270,6 +270,8 @@ interface EditorDao {
     @Upsert suspend fun upsertCorrection(row: UserCorrectionEntity)
     @Query("SELECT * FROM user_corrections WHERE original_value = :original AND correction_type = :type") suspend fun correction(original: String, type: String): UserCorrectionEntity?
     @Query("UPDATE user_corrections SET times_applied = times_applied + 1 WHERE id = :id") suspend fun bumpCorrection(id: Long)
+    @Query("SELECT * FROM user_corrections") suspend fun allCorrections(): List<UserCorrectionEntity>
+    @Query("SELECT COUNT(*) FROM user_corrections") fun correctionCountFlow(): Flow<Int>
 }
 
 @Dao

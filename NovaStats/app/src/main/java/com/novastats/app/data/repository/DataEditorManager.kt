@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Historique (max 50) dans `edit_history`, Undo = dernière action (une fusion ne restaure que le nom).
  * Après chaque action structurelle : recalcul complet des statistiques (Billboard, certifs, records…).
  */
-class DataEditorManager(private val db: NovaDatabase, private val rebuilder: StatsRebuilder) {
+class DataEditorManager(private val db: NovaDatabase, private val rebuilder: StatsRebuilder, private val library: LibraryRepository? = null) {
 
     private val _status = MutableStateFlow<String?>(null)
     val status: StateFlow<String?> = _status
@@ -28,6 +28,7 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     object Type {
         const val RENAME = "RENAME"; const val MERGE = "MERGE"; const val COVER_CHANGE = "COVER_CHANGE"
         const val ALBUM_CHANGE = "ALBUM_CHANGE"; const val ARTIST_CHANGE = "ARTIST_CHANGE"; const val DELETE_PLAY = "DELETE_PLAY"; const val REVIEWED = "REVIEWED"
+        const val REVIEW_FIX = "REVIEW_FIX"; const val REVIEW_IGNORE = "REVIEW_IGNORE"
     }
 
     private suspend fun log(type: String, entityType: String, entityId: Long, before: String?, after: String?, extra: String? = null) {
@@ -230,6 +231,91 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         setTrackArtist(trackId, id)
     }
 
+    /* ---------------- ⚠️ À corriger (révision par écoute) ---------------- */
+
+    /** Mémorise une règle « avant → après » (ou une valeur confirmée si avant == après). Idempotent. */
+    private suspend fun saveCorrection(original: String, corrected: String, type: String) {
+        val o = original.trim(); val c = corrected.trim()
+        if (o.isEmpty() || c.isEmpty()) return
+        val existing = db.editorDao().correction(o, type)
+        db.editorDao().upsertCorrection(UserCorrectionEntity(id = existing?.id ?: 0, originalValue = o, correctedValue = c, correctionType = type, timesApplied = existing?.timesApplied ?: 0))
+        library?.invalidateCorrections()
+    }
+
+    data class ReviewFix(
+        val trackId: Long, val scrobbleIds: List<Long>, val allChecked: Boolean,
+        val title: String, val artists: String, val album: String?, val coverUrl: String?,
+        /** Valeurs brutes d'origine (pour la règle « avant → après »). */
+        val rawTitle: String?, val rawArtist: String?, val rawAlbum: String?
+    )
+
+    /**
+     * Valider : les écoutes **cochées** prennent les nouvelles valeurs (titre / artiste(s) / album / pochette), passent à 100 %
+     * et sortent de la liste ; les autres restent. Une seule entrée d'historique (un seul Undo).
+     * La règle « avant → après » n'est enregistrée que si toutes les écoutes étaient cochées.
+     */
+    suspend fun applyReviewFix(fix: ReviewFix) = perform("Correction appliquée (${fix.scrobbleIds.size} écoute${if (fix.scrobbleIds.size > 1) "s" else ""})", rebuild = true) {
+        require(fix.scrobbleIds.isNotEmpty()) { "Aucune écoute cochée" }
+        val title = fix.title.trim(); require(title.isNotEmpty()) { "Titre vide" }
+        val artists = fix.artists.trim().ifEmpty { "Artiste inconnu" }
+        val lib = library ?: error("Bibliothèque indisponible")
+        val old = db.trackDao().getById(fix.trackId) ?: error("Titre introuvable")
+        val oldArtistName = db.artistDao().getById(old.artistId)?.name ?: ""
+        val oldAlbumTitle = old.albumId?.let { db.albumDao().getById(it)?.title }
+        db.withTransaction {
+            val target = lib.resolve(title, artists, fix.album?.takeIf { it.isNotBlank() }, old.durationMs, old.genre, applyCorrections = false)
+            val mode: String
+            if (target.trackId == old.trackId) {
+                // Même identité (titre normalisé + artiste principal) : mise à jour sur place (affichage du titre, album)
+                mode = "INPLACE"
+                db.trackDao().setTitleAndAlbum(old.trackId, title, target.albumId)
+                db.scrobbleDao().moveScrobbles(fix.scrobbleIds, old.trackId, target.primaryArtistId, target.albumId)
+            } else {
+                mode = "MOVE"
+                db.scrobbleDao().moveScrobbles(fix.scrobbleIds, target.trackId, target.primaryArtistId, target.albumId)
+            }
+            if (!fix.coverUrl.isNullOrBlank()) db.trackDao().setCover(target.trackId, fix.coverUrl)
+            db.scrobbleDao().clearReview(fix.scrobbleIds)
+            if (fix.allChecked) {
+                db.trackDao().markReviewed(target.trackId)
+                fix.rawTitle?.takeIf { it.trim() != title }?.let { saveCorrection(it, title, "TITLE") }
+                fix.rawArtist?.takeIf { it.isNotBlank() && it.trim() != artists }?.let { saveCorrection(it, artists, "ARTIST") }
+                val album = fix.album?.trim().orEmpty()
+                fix.rawAlbum?.takeIf { it.isNotBlank() && album.isNotEmpty() && it.trim() != album }?.let { saveCorrection(it, album, "ALBUM") }
+            }
+            log(
+                Type.REVIEW_FIX, "TRACK", old.trackId,
+                before = "${old.title} — $oldArtistName${oldAlbumTitle?.let { " · $it" } ?: ""}",
+                after = "$title — $artists${fix.album?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}",
+                extra = "mode=$mode;ids=${fix.scrobbleIds.joinToString(",")};artist=${old.artistId};album=${old.albumId ?: ""};title=${old.title}"
+            )
+        }
+        lib.clearCaches()
+    }
+
+    /** C'est correct (🟡) / confirmation : le titre et ses écoutes sortent de la liste sans rien changer. */
+    suspend fun confirmReview(trackId: Long) = perform("Marqué comme correct", rebuild = false) {
+        db.trackDao().markReviewed(trackId)
+        db.scrobbleDao().clearReviewOfTrack(trackId)
+        log(Type.REVIEWED, "TRACK", trackId, null, null)
+    }
+
+    /** Ignorer : données inchangées, sortie de la liste, valeurs brutes mémorisées comme confirmées (définitif). */
+    suspend fun ignoreReview(trackId: Long, rawTitle: String?, rawArtist: String?) = perform("Ignoré — valeur confirmée", rebuild = false) {
+        db.trackDao().markReviewed(trackId)
+        db.scrobbleDao().clearReviewOfTrack(trackId)
+        rawTitle?.let { saveCorrection(it, it, "TITLE") }
+        rawArtist?.let { saveCorrection(it, it, "ARTIST") }
+        log(Type.REVIEW_IGNORE, "TRACK", trackId, rawTitle, rawArtist)
+    }
+
+    /** Supprime plusieurs écoutes (irréversible) — une seule entrée d'historique. */
+    suspend fun deleteScrobbles(ids: List<Long>) = perform("${ids.size} écoute${if (ids.size > 1) "s" else ""} supprimée${if (ids.size > 1) "s" else ""}", rebuild = true) {
+        require(ids.isNotEmpty()) { "Aucune écoute cochée" }
+        db.scrobbleDao().deleteMany(ids)
+        log(Type.DELETE_PLAY, "SCROBBLE", ids.first(), ids.joinToString(","), null)
+    }
+
     /* ---------------- Écoutes / à corriger ---------------- */
 
     suspend fun deleteScrobble(id: Long) = perform("Écoute supprimée", rebuild = true) {
@@ -269,7 +355,25 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
             }
             Type.ARTIST_CHANGE -> { last.before?.toLongOrNull()?.let { setTrackArtist(last.entityId, it) }; "↩️ Artiste restauré" }
             Type.ALBUM_CHANGE -> { setTrackAlbum(last.entityId, last.before?.toLongOrNull()); "↩️ Album restauré" }
-            Type.REVIEWED -> "ℹ️ Marquage « correct » conservé"
+            Type.REVIEWED, Type.REVIEW_IGNORE -> "ℹ️ Marquage « correct / ignoré » conservé"
+            Type.REVIEW_FIX -> {
+                val kv = (last.extraData ?: "").split(";").mapNotNull { it.split("=", limit = 2).takeIf { p -> p.size == 2 }?.let { p -> p[0] to p[1] } }.toMap()
+                val ids = kv["ids"]?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
+                val oldArtist = kv["artist"]?.toLongOrNull()
+                val oldAlbum = kv["album"]?.toLongOrNull()
+                val oldTrack = db.trackDao().getById(last.entityId)
+                if (ids.isEmpty() || oldTrack == null || oldArtist == null) "⚠️ Correction non annulable (titre d'origine disparu)"
+                else {
+                    db.withTransaction {
+                        if (kv["mode"] == "INPLACE") db.trackDao().setTitleAndAlbum(oldTrack.trackId, kv["title"] ?: oldTrack.title, oldAlbum)
+                        db.scrobbleDao().moveScrobbles(ids, oldTrack.trackId, oldArtist, oldAlbum)
+                        db.scrobbleDao().reflag(ids, "Correction annulée")
+                    }
+                    library?.clearCaches()
+                    rebuilder.rebuildAll(fullBillboard = true)
+                    "↩️ Correction annulée — ${ids.size} écoute(s) de retour dans ⚠️ À corriger"
+                }
+            }
             else -> "⚠️ La suppression d'une écoute est irréversible"
         }
         db.editorDao().deleteEdit(last.id)

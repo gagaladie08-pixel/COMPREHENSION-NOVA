@@ -63,7 +63,7 @@ import com.novastats.app.data.db.entity.*
         // Import/Export
         MigrationLogEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -113,11 +113,25 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 : file « À corriger » — révision par écoute (needs_review, motif, valeurs brutes du lecteur). */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE scrobbles ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE scrobbles ADD COLUMN review_reason TEXT")
+                db.execSQL("ALTER TABLE scrobbles ADD COLUMN raw_title TEXT")
+                db.execSQL("ALTER TABLE scrobbles ADD COLUMN raw_artist TEXT")
+                db.execSQL("ALTER TABLE scrobbles ADD COLUMN raw_album TEXT")
+                // Reprise de l'existant : écoutes sans artiste identifié ou à score < 70
+                db.execSQL("UPDATE scrobbles SET needs_review = 1, review_reason = 'Artiste manquant' WHERE artist_id IN (SELECT artist_id FROM artists WHERE name = 'Artiste inconnu')")
+                db.execSQL("UPDATE scrobbles SET needs_review = 1, review_reason = 'Score de confiance ' || confidence_score || ' %' WHERE needs_review = 0 AND confidence_score < 70")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

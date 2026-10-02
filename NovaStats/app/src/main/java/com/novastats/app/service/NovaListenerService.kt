@@ -16,6 +16,7 @@ import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.entity.NowPlayingEntity
 import com.novastats.app.data.db.entity.ScrobbleEntity
 import com.novastats.app.data.db.entity.ScrobbleStatus
+import com.novastats.app.domain.ReviewRules
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -384,12 +385,18 @@ class NovaListenerService : NotificationListenerService() {
         val resolved = app.library.resolve(s.key.title, artistRaw, s.key.album, s.key.durationMs, albumArtist = s.key.albumArtist)
         val now = System.currentTimeMillis()
         val listened = s.listenedMs(now)
+        // ⚠️ À corriger — score par source : MediaSession 100 · Notification complète 70 · incomplète 50 ;
+        // titre / artiste « Unknown » → 50 max. Score < 70 → needs_review (sauf valeur déjà confirmée par l'utilisateur).
+        val review = ReviewRules.evaluate(s.key.title, s.key.artist, s.detectionSource)
+        val confirmed = review.reason != null && app.library.isConfirmed("TITLE", s.key.title) && (s.key.artist.isNullOrBlank() || app.library.isConfirmed("ARTIST", s.key.artist))
         val entity = ScrobbleEntity(
             trackId = resolved.trackId, artistId = resolved.primaryArtistId, albumId = resolved.albumId,
             startedAt = s.startedAt, validatedAt = s.validatedAt, endedAt = if (ended) now else null,
             durationListenedMs = listened, sourceApp = s.key.sourceApp, detectionSource = s.detectionSource,
-            confidenceScore = if (s.detectionSource == "MEDIA_SESSION") 100 else 70,
-            status = ScrobbleStatus.CONFIRMED
+            confidenceScore = if (confirmed) 100 else review.score,
+            status = ScrobbleStatus.CONFIRMED,
+            needsReview = review.score < 70 && !confirmed, reviewReason = if (confirmed) null else review.reason,
+            rawTitle = s.key.title, rawArtist = s.key.artist, rawAlbum = s.key.album
         )
         val id = app.database.scrobbleDao().insert(entity)
         if (id == -1L) {

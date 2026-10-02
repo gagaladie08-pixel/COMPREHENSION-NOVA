@@ -16,6 +16,7 @@ import com.novastats.app.domain.Dates
 import com.novastats.app.domain.MetaCandidate
 import com.novastats.app.domain.MetadataMatching
 import com.novastats.app.domain.ScoredCandidate
+import com.novastats.app.domain.TitleNormalizer
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +57,9 @@ object EnrichmentState {
  */
 class MetadataEnricher(private val db: NovaDatabase, private val settings: SettingsRepository) {
 
+    /** 🟡 Correspondance acceptée avec flag (70-89) → notification discrète (branché par NovaStatsApp). */
+    var onTrackFlagged: ((trackId: Long, title: String, artist: String, proposal: String, score: Int) -> Unit)? = null
+
     private val musicBrainz = MusicBrainzApi()
     private val apis: Map<ApiSource, MusicApi> = listOf(
         ITunesApi(), SpotifyApi(), LastFmApi(), musicBrainz, TheAudioDbApi(), DeezerApi(), DiscogsApi(),
@@ -69,6 +73,24 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         ApiSource.GOOGLE -> ApiKeys.has(ApiKeys.googleApiKey) && ApiKeys.has(ApiKeys.googleEngineId)
         ApiSource.THEAUDIODB -> true // clé de test "2" par défaut
         else -> true
+    }
+
+    /**
+     * ⚠️ À corriger — propositions pour le popup de correction : jusqu'à 3 candidats (source + score) issus des
+     * sources sans clé ou configurées (hors Google), interrogées en parallèle. Un appui remplit tous les champs.
+     */
+    suspend fun proposeTrack(title: String, artist: String, album: String?, durationMs: Long?): List<ScoredCandidate> {
+        if (title.isBlank()) return emptyList()
+        val sources = ApiSource.entries.filter { !it.isLastResort && hasKey(it) && apis.containsKey(it) }.sortedBy { it.trackPriority }.take(6)
+        val results: List<MetaCandidate> = coroutineScope {
+            sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchTrack(title, artist.ifBlank { "" }) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
+        }.flatten()
+        val consensus = MetadataMatching.consensusSet(results)
+        return results.map { c -> MetadataMatching.scoreTrack(c, title, artist, album, durationMs, c in consensus) }
+            .filter { it.score >= 50 }
+            .sortedByDescending { it.score }
+            .distinctBy { TitleNormalizer.normalizeKey(it.candidate.name) + "|" + TitleNormalizer.normalizeKey(it.candidate.artist ?: "") }
+            .take(3)
     }
 
     /** Sources configurées (pour l'écran Réglages). */
@@ -185,6 +207,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         }
         positiveCache(EntityType.TRACK, t.trackId, DataType.COVER, best)
         EnrichmentState.log("✅ ${t.title} → pochette ${c.source.label} (${best.score})")
+        if (best.score < MetadataMatching.TRUSTED) runCatching { onTrackFlagged?.invoke(t.trackId, t.title, artistName, "${c.name}${c.artist?.let { " — $it" } ?: ""} · ${c.source.label}", best.score) }
         return true
     }
 

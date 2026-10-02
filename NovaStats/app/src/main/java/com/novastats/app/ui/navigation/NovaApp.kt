@@ -89,6 +89,14 @@ fun NovaApp() {
     val backStack by navController.currentBackStackEntryAsState()
     val currentDestination = backStack?.destination
     val theme = Nova.theme
+    // Navigation différée (notification « 🟡 À vérifier ») → onglet Réglages (SettingsScreen ouvre l'Éditeur)
+    val pending by PendingNav.target.collectAsStateWithLifecycle()
+    LaunchedEffect(pending) {
+        if (pending != null) navController.navigate(NovaTab.SETTINGS.route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true; restoreState = true
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

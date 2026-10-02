@@ -27,14 +27,49 @@ class LibraryRepository(private val db: NovaDatabase) {
     private val albumCache = HashMap<String, Long>()
     private val trackCache = HashMap<String, Resolved>()
 
+    /* ---------- Apprentissage éditeur : corrections mémorisées (user_corrections) ---------- */
+
+    private var corrections: Map<String, Map<String, com.novastats.app.data.db.entity.UserCorrectionEntity>> = emptyMap()
+    private var correctionsLoadedAt = 0L
+
+    private suspend fun corrections(): Map<String, Map<String, com.novastats.app.data.db.entity.UserCorrectionEntity>> {
+        val now = System.currentTimeMillis()
+        if (now - correctionsLoadedAt > 30_000L) {
+            corrections = db.editorDao().allCorrections().groupBy { it.correctionType }
+                .mapValues { (_, rows) -> rows.associateBy { TitleNormalizer.normalizeKey(it.originalValue) } }
+            correctionsLoadedAt = now
+        }
+        return corrections
+    }
+
+    /** Applique une correction connue « avant → après » (juste après le cache, sans appel API). */
+    private suspend fun corrected(type: String, raw: String?): String? {
+        if (raw.isNullOrBlank()) return raw
+        val c = corrections()[type]?.get(TitleNormalizer.normalizeKey(raw)) ?: return raw
+        if (c.correctedValue != c.originalValue) runCatching { db.editorDao().bumpCorrection(c.id) }
+        return c.correctedValue
+    }
+
+    /** Valeur « confirmée » par l'utilisateur (Ignorer / C'est correct) : ne rentre plus dans ⚠️ À corriger. */
+    suspend fun isConfirmed(type: String, raw: String?): Boolean {
+        if (raw.isNullOrBlank()) return false
+        return corrections()[type]?.containsKey(TitleNormalizer.normalizeKey(raw)) == true
+    }
+
+    fun invalidateCorrections() { correctionsLoadedAt = 0L }
+
     suspend fun resolve(
-        rawTitle: String,
-        rawArtists: String,
-        rawAlbum: String?,
+        rawTitleIn: String,
+        rawArtistsIn: String,
+        rawAlbumIn: String?,
         durationMs: Long? = null,
         genre: String? = null,
-        albumArtist: String? = null
+        albumArtist: String? = null,
+        applyCorrections: Boolean = true
     ): Resolved {
+        val rawTitle = if (applyCorrections) corrected("TITLE", rawTitleIn) ?: rawTitleIn else rawTitleIn
+        val rawArtists = if (applyCorrections) corrected("ARTIST", rawArtistsIn) ?: rawArtistsIn else rawArtistsIn
+        val rawAlbum = if (applyCorrections) corrected("ALBUM", rawAlbumIn) else rawAlbumIn
         val normalized = TitleNormalizer.normalizeTitle(rawTitle)
         // Cascade artistes : 1) feat. dans le titre  2) champ artiste du player (lui-même "A & B, C")
         val playerArtists = TitleNormalizer.splitArtists(rawArtists)
@@ -115,5 +150,5 @@ class LibraryRepository(private val db: NovaDatabase) {
         return trackCache[TitleNormalizer.normalizeKey(normalized.title) + "|" + TitleNormalizer.normalizeKey(primary)]?.trackId
     }
 
-    fun clearCaches() { artistCache.clear(); albumCache.clear(); trackCache.clear() }
+    fun clearCaches() { artistCache.clear(); albumCache.clear(); trackCache.clear(); correctionsLoadedAt = 0L }
 }

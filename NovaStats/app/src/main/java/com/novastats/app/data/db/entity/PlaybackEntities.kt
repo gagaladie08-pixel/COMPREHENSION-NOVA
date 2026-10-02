@@ -35,7 +35,15 @@ data class ScrobbleEntity(
     val status: String = ScrobbleStatus.PENDING,
     @ColumnInfo(name = "volume_level") val volumeLevel: Int? = null,
     @ColumnInfo(name = "is_skip") val isSkip: Boolean = false,
-    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    /** ⚠️ À corriger : écoute acceptée et comptée, mais à vérifier par l'utilisateur (score < 70, titre/artiste inconnu…). */
+    @ColumnInfo(name = "needs_review", defaultValue = "0") val needsReview: Boolean = false,
+    /** Problème détecté ("Artiste manquant", "Titre inconnu", "Score de confiance 50 %"…). */
+    @ColumnInfo(name = "review_reason") val reviewReason: String? = null,
+    /** Valeurs brutes envoyées par le lecteur (bandeau d'info du popup de correction). */
+    @ColumnInfo(name = "raw_title") val rawTitle: String? = null,
+    @ColumnInfo(name = "raw_artist") val rawArtist: String? = null,
+    @ColumnInfo(name = "raw_album") val rawAlbum: String? = null
 )
 
 object ScrobbleStatus {

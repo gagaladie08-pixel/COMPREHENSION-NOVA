@@ -89,9 +89,9 @@ object LegacyBackupImporter {
         db.withTransaction {
             backup.songs.forEachIndexed { i, song ->
                 trackBySongId[song.id] = library.resolve(
-                    rawTitle = song.title,
-                    rawArtists = song.artistNames,
-                    rawAlbum = song.albumName,
+                    rawTitleIn = song.title,
+                    rawArtistsIn = song.artistNames,
+                    rawAlbumIn = song.albumName,
                     durationMs = song.duration,
                     genre = song.genre
                 )

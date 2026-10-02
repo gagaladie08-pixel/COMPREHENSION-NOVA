@@ -42,8 +42,75 @@ data class PeriodSummary(
     @androidx.room.ColumnInfo(name = "active_days") val activeDays: Int
 )
 
+/** ⚠️ À corriger — un groupe = un titre dont au moins une écoute est à réviser. */
+data class ReviewGroup(
+    @androidx.room.ColumnInfo(name = "track_id") val trackId: Long,
+    val title: String,
+    @androidx.room.ColumnInfo(name = "artist_name") val artistName: String,
+    @androidx.room.ColumnInfo(name = "album_title") val albumTitle: String?,
+    @androidx.room.ColumnInfo(name = "cover_url") val coverUrl: String?,
+    val count: Int,
+    @androidx.room.ColumnInfo(name = "last_at") val lastAt: Long,
+    @androidx.room.ColumnInfo(name = "min_score") val minScore: Int,
+    val reason: String?,
+    @androidx.room.ColumnInfo(name = "detection_source") val detectionSource: String?,
+    @androidx.room.ColumnInfo(name = "source_app") val sourceApp: String?,
+    @androidx.room.ColumnInfo(name = "raw_title") val rawTitle: String?,
+    @androidx.room.ColumnInfo(name = "raw_artist") val rawArtist: String?,
+    @androidx.room.ColumnInfo(name = "raw_album") val rawAlbum: String?
+)
+
 @Dao
 interface ScrobbleDao {
+    /* ---------- ⚠️ À corriger (révision par écoute) ---------- */
+
+    @Query(
+        """
+        SELECT s.track_id, t.title, a.name AS artist_name, al.title AS album_title, t.cover_url,
+               COUNT(*) AS count, MAX(s.started_at) AS last_at, MIN(s.confidence_score) AS min_score,
+               MAX(s.review_reason) AS reason, MAX(s.detection_source) AS detection_source, MAX(s.source_app) AS source_app,
+               MAX(s.raw_title) AS raw_title, MAX(s.raw_artist) AS raw_artist, MAX(s.raw_album) AS raw_album
+        FROM scrobbles s
+        JOIN tracks t ON t.track_id = s.track_id
+        JOIN artists a ON a.artist_id = t.artist_id
+        LEFT JOIN albums al ON al.album_id = t.album_id
+        WHERE s.needs_review = 1 AND s.status = 'CONFIRMED'
+        GROUP BY s.track_id
+        ORDER BY last_at DESC
+        """
+    )
+    fun reviewGroups(): Flow<List<ReviewGroup>>
+
+    @Query("SELECT COUNT(DISTINCT track_id) FROM scrobbles WHERE needs_review = 1 AND status = 'CONFIRMED'")
+    fun reviewCountFlow(): Flow<Int>
+
+    @Query("SELECT * FROM scrobbles WHERE track_id = :trackId AND needs_review = 1 AND status = 'CONFIRMED' ORDER BY started_at DESC")
+    suspend fun reviewOfTrack(trackId: Long): List<ScrobbleEntity>
+
+    @Query("SELECT * FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED' ORDER BY started_at DESC")
+    suspend fun allOfTrack(trackId: Long): List<ScrobbleEntity>
+
+    @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")
+    suspend fun countOfTrack(trackId: Long): Int
+
+    @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId WHERE scrobble_id IN (:ids)")
+    suspend fun moveScrobbles(ids: List<Long>, trackId: Long, artistId: Long, albumId: Long?)
+
+    @Query("UPDATE scrobbles SET needs_review = 0, confidence_score = 100, review_reason = NULL WHERE scrobble_id IN (:ids)")
+    suspend fun clearReview(ids: List<Long>)
+
+    @Query("UPDATE scrobbles SET needs_review = 0, confidence_score = 100, review_reason = NULL WHERE track_id = :trackId")
+    suspend fun clearReviewOfTrack(trackId: Long)
+
+    @Query("UPDATE scrobbles SET needs_review = 1, review_reason = :reason WHERE scrobble_id IN (:ids)")
+    suspend fun reflag(ids: List<Long>, reason: String)
+
+    @Query("DELETE FROM scrobbles WHERE scrobble_id IN (:ids)")
+    suspend fun deleteMany(ids: List<Long>)
+
+    @Query("SELECT * FROM scrobbles WHERE scrobble_id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<ScrobbleEntity>
+
     /** IGNORE : les doublons (même titre + même timestamp) sont ignorés à l'import. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(scrobble: ScrobbleEntity): Long

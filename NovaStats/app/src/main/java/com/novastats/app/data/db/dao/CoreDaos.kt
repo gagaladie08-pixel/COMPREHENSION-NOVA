@@ -227,6 +227,14 @@ interface TrackDao {
     @Query("UPDATE tracks SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
     @Query("UPDATE tracks SET album_id = :into WHERE album_id = :from") suspend fun moveAlbum(from: Long, into: Long)
     @Query("UPDATE tracks SET needs_review = 0, confidence_score = 100 WHERE track_id = :id") suspend fun markReviewed(id: Long)
+    /** 🟡 À vérifier : correspondance API acceptée avec flag (score 70-89). */
+    @Query("SELECT t.*, (SELECT name FROM artists WHERE artist_id = t.artist_id) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t WHERE t.needs_review = 1 AND t.confidence_score BETWEEN 70 AND 89 ORDER BY t.play_count DESC")
+    fun flaggedForVerification(): Flow<List<RankedTrack>>
+    /** 🔴 Titres dont les APIs sont épuisées avec un score < 70 (placeholder). */
+    @Query("SELECT t.*, (SELECT name FROM artists WHERE artist_id = t.artist_id) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t WHERE t.confidence_score < 70 ORDER BY t.play_count DESC")
+    fun lowConfidence(): Flow<List<RankedTrack>>
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = 'USER' WHERE track_id = :id") suspend fun setCover(id: Long, url: String?)
+    @Query("UPDATE tracks SET title = :title, album_id = :albumId WHERE track_id = :id") suspend fun setTitleAndAlbum(id: Long, title: String, albumId: Long?)
     @Query("DELETE FROM tracks WHERE track_id = :id") suspend fun delete(id: Long)
 
     /** Recalcule les agrégats des titres à partir des scrobbles confirmés (après import / édition). */

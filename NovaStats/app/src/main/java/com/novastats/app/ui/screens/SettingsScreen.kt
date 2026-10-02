@@ -34,6 +34,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,17 +92,26 @@ enum class SettingsPage(val emoji: String, val title: String, val subtitle: Stri
 @Composable
 fun SettingsScreen() {
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
-    BackHandler(enabled = page != null) { page = null }
+    var editorReview by rememberSaveable { mutableStateOf(false) }
+    var editorFocus by rememberSaveable { mutableStateOf<Long?>(null) }
+    // Navigation différée (notification 🟡 À vérifier / raccourci) → Éditeur, section ⚠️ À corriger
+    val pending by com.novastats.app.ui.navigation.PendingNav.target.collectAsStateWithLifecycle()
+    LaunchedEffect(pending) {
+        val t = pending ?: return@LaunchedEffect
+        if (t.name == com.novastats.app.ui.navigation.PendingNav.TARGET_REVIEW) { editorReview = true; editorFocus = t.trackId; page = SettingsPage.EDITOR }
+        com.novastats.app.ui.navigation.PendingNav.consume()
+    }
+    BackHandler(enabled = page != null) { page = null; editorReview = false; editorFocus = null }
     val current = page
     if (current == null) SettingsHome { page = it }
     else Column(Modifier.fillMaxSize()) {
         SubPageHeader(current) { page = null }
         when (current) {
-            SettingsPage.DETECTION -> DetectionPage()
+            SettingsPage.DETECTION -> DetectionPage(onOpenReview = { editorReview = true; editorFocus = null; page = SettingsPage.EDITOR })
             SettingsPage.APPEARANCE -> AppearancePage()
             SettingsPage.NOTIFICATIONS -> NotificationsPage()
             SettingsPage.DATA -> DataPage()
-            SettingsPage.EDITOR -> DataEditorScreen()
+            SettingsPage.EDITOR -> DataEditorScreen(startOnReview = editorReview, focusTrackId = editorFocus)
             SettingsPage.SERVICE -> ServicePage()
             SettingsPage.GUIDE -> com.novastats.app.ui.onboarding.GuideStepScreen(com.novastats.app.ui.onboarding.rememberObAudio(), Nova.theme, embedded = true)
             SettingsPage.APIS -> ApisPage()
@@ -213,7 +223,7 @@ private val KNOWN_PLAYERS = linkedMapOf(
 )
 
 @Composable
-private fun DetectionPage() {
+private fun DetectionPage(onOpenReview: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as NovaStatsApp
     val settings = app.settings
@@ -227,8 +237,22 @@ private fun DetectionPage() {
     val blKeywords by settings.blacklistKeywords.collectAsStateWithLifecycle(initialValue = emptySet())
     val sources by app.database.scrobbleDao().distinctSources().collectAsStateWithLifecycle(initialValue = emptyList())
     val detection by DetectionState.state.collectAsStateWithLifecycle()
+    val reviewCount by app.database.scrobbleDao().reviewCountFlow().collectAsStateWithLifecycle(initialValue = 0)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        SectionTitle("⚠️ Section à corriger")
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(12.dp))
+                .background((if (reviewCount > 0) com.novastats.app.ui.screens.ReviewRed else theme.textSecondary).copy(alpha = 0.12f))
+                .clickable(onClick = onOpenReview).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(if (reviewCount > 0) "🔴 $reviewCount titre${if (reviewCount > 1) "s" else ""} à corriger" else "✅ Rien à corriger", color = theme.text, fontWeight = FontWeight.SemiBold)
+                Text("Écoutes douteuses ou incomplètes (score < 70, artiste manquant…) — comptées, mais à vérifier.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+            Text("Ouvrir ▸", color = theme.primary, fontWeight = FontWeight.Bold)
+        }
         SectionTitle("⏱️ Seuil de scrobble")
         NovaCard {
             Column(Modifier.padding(16.dp)) {

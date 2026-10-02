@@ -91,5 +91,13 @@ Service / Import ──► scrobbles (CONFIRMED)
   L'album n'est crédité qu'à l'artiste principal (`albums.artist_id`) ; les compilations ne créditent jamais d'album ;
   les éditions Deluxe / Japan / UK / Platinum… sont fusionnées ; un remix n'est un titre distinct (`is_remix`,
   `original_track_id`) que s'il porte un artiste featuring identifié.
+- **Révision (v4, `MIGRATION_3_4`)** : `scrobbles.needs_review` / `review_reason` (ex. "Artiste manquant", "Titre
+  inconnu", "Notification incomplète") et `raw_title` / `raw_artist` / `raw_album` (valeur brute du player). Le score
+  `confidence_score` suit la source : MediaSession 100 · Mixte 80 · Notification complète 70 · Incomplet 50 ; titre ou
+  artiste "Unknown/Inconnu" → 🔴 À corriger (score < 70). L'onglet ⚠️ À corriger de l'Éditeur regroupe ces écoutes par
+  titre (🔴) et les titres acceptés avec réserve 70-89 (`tracks.needs_review`, 🟡). Valider déplace les écoutes cochées
+  (score 100), journalise une entrée `edit_history` (type `REVIEW_FIX`, un seul Undo) et, si toutes les écoutes sont
+  cochées, mémorise la règle dans `user_corrections` (appliquée dès la prochaine détection, avant tout appel API).
+  "Ignorer" mémorise la valeur brute comme confirmée (`REVIEW_IGNORE`).
 - Les index d'unicité (`scrobbles(track_id, started_at)`, `artists(name)`, `albums(title, artist_id)`) portent la
   règle "doublons ignorés à l'import" et la fusion des entités.

@@ -156,6 +156,12 @@
                 android:value="Maintien en vie du service de détection musicale (NotificationListener) pour les statistiques d'écoute" />
         </service>
 
+        <!-- Action « ✅ C'est correct » de la notification 🟡 À vérifier -->
+        <receiver
+            android:name=".service.ReviewNotifier$ReviewActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- Relance auto au redémarrage du téléphone -->
         <receiver
             android:name=".service.BootReceiver"
