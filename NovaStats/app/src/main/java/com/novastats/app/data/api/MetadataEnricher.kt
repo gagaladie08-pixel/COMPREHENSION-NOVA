@@ -185,20 +185,49 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
      * Popup artiste → « 🖼️ Autres photos » : toutes les sources photo interrogées en parallèle, notées et vérifiées
      * avec les titres de ta bibliothèque ; une par image, les 6 meilleures. Le choix est sauvegardé en 👤 USER.
      */
-    suspend fun proposeArtist(artistId: Long, name: String): List<ScoredCandidate> {
+    suspend fun proposeArtist(artistId: Long, name: String, keywords: String = ""): List<ScoredCandidate> {
         if (name.isBlank()) return emptyList()
         val known = knownTitlesOf(artistId, name)
         val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.artistPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.artistPriority }.take(7)
+        val queries = listOf(name) + (if (keywords.isBlank()) emptyList() else listOf("$name $keywords"))
         val results: List<MetaCandidate> = coroutineScope {
-            sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchArtist(name) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
+            sources.flatMap { s -> queries.map { q -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchArtist(q) }.getOrDefault(emptyList()) } ?: emptyList() } } }.map { it.await() }
         }.flatten().filter { !it.imageUrl.isNullOrBlank() }
-        val top = results.map { c -> MetadataMatching.scoreArtist(c, name) }
+        val top = results.map { c -> keywordBoost(MetadataMatching.scoreArtist(c, name), keywords) }
             .filter { it.score >= 50 }
             .sortedByDescending { it.score }
             .distinctBy { it.candidate.imageUrl }
             .take(6)
         return top.map { sc -> MetadataMatching.libraryCheck(sc, artistTitlesOf(sc.candidate), null, known, minKnown = 2, minList = 3, penalty = 40) }
             .sortedByDescending { it.score }
+    }
+
+    /** Popup album → « 🖼️ Autres pochettes » : mêmes règles que l'album (liste de pistes croisée avec tes titres de l'album). */
+    suspend fun proposeAlbum(albumId: Long, title: String, artist: String, keywords: String = ""): List<ScoredCandidate> {
+        if (title.isBlank()) return emptyList()
+        val known = keysOf(db.trackDao().titlesOfAlbum(albumId))
+        val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.albumPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.albumPriority }.take(7)
+        val queries = listOf(title) + (if (keywords.isBlank()) emptyList() else listOf("$title $keywords"))
+        val results: List<MetaCandidate> = coroutineScope {
+            sources.flatMap { s -> queries.map { q -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchAlbum(q, artist) }.getOrDefault(emptyList()) } ?: emptyList() } } }.map { it.await() }
+        }.flatten().filter { !it.imageUrl.isNullOrBlank() }
+        val consensus = MetadataMatching.consensusSet(results)
+        val top = results.map { c -> keywordBoost(MetadataMatching.scoreAlbum(c, title, artist, c in consensus), keywords) }
+            .filter { it.score >= 50 }
+            .sortedByDescending { it.score }
+            .distinctBy { it.candidate.imageUrl }
+            .take(6)
+        return top.map { sc -> MetadataMatching.libraryCheck(sc, tracklistOf(sc.candidate), null, known, minKnown = 2, minList = 2, penalty = 30) }
+            .sortedByDescending { it.score }
+    }
+
+    /** Mots-clés de l'utilisateur présents dans le nom / l'album / l'artiste du candidat → +10 (orientation des propositions). */
+    private fun keywordBoost(sc: ScoredCandidate, keywords: String): ScoredCandidate {
+        val words = keywords.split(' ').map { TitleNormalizer.normalizeKey(it) }.filter { it.length >= 3 }
+        if (words.isEmpty() || sc.score <= 0) return sc
+        val hay = TitleNormalizer.normalizeKey(listOfNotNull(sc.candidate.name, sc.candidate.album, sc.candidate.artist).joinToString(" "))
+        val hits = words.count { hay.contains(it) }
+        return if (hits > 0) sc.copy(score = (sc.score + 10).coerceAtMost(100), reasons = sc.reasons + "mot-clé ×$hits +10") else sc
     }
 
     suspend fun proposeTrack(title: String, artist: String, album: String?, durationMs: Long?, trackId: Long? = null): List<ScoredCandidate> {

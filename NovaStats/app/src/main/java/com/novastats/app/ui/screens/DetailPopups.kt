@@ -1,5 +1,8 @@
 package com.novastats.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,7 +20,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,6 +52,7 @@ import com.novastats.app.data.db.dao.PeriodEntityStats
 import com.novastats.app.data.db.dao.RankedTrack
 import com.novastats.app.data.db.entity.AlbumEntity
 import com.novastats.app.data.db.entity.ArtistEntity
+import com.novastats.app.data.repository.UserImages
 import com.novastats.app.data.db.entity.CertificationEntity
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.HallOfFameEntity
@@ -277,7 +284,8 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     var history by remember { mutableStateOf<List<PantheonHistoryEntity>>(emptyList()) }
     var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
 
-    LaunchedEffect(artistId, period) {
+    val imgVersion by UserImages.version.collectAsStateWithLifecycle()
+    LaunchedEffect(artistId, period, imgVersion) {
         artist = db.artistDao().getById(artistId)
         history = db.pantheonDao().history(artistId)
         hof = db.hallOfFameDao().ofEntity(artistId, EntityType.ARTIST)
@@ -321,7 +329,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
             StatPill("${a.distinctAlbums}", "albums", accent = theme.glowSecondary)
         }
         // 🖼️ Autres photos : propositions de toutes les sources, vérifiées avec ta bibliothèque ; un appui = photo 👤 USER
-        ArtistPhotoPicker(a, theme.glowSecondary) { artist = db.artistDao().getById(artistId) }
+        ImagePickerBar(EntityType.ARTIST, a.artistId, a.name, null, a.photoUrl, a.photoSource, theme.glowSecondary, circle = true) { artist = db.artistDao().getById(artistId) }
         PopupSection("👑 Statut Panthéon", theme.glowSecondary)
         PopupInfoRow("Statut actuel", status?.let { "${it.emoji} ${it.label}" } ?: "Aucun (Star à 425 écoutes)", valueColor = statusColor)
         history.forEach { h ->
@@ -352,50 +360,133 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * Barre image d'un popup artiste / album :
+ *  🖼️ galerie · 🌐 web (recherche d'images dans le navigateur, image téléchargée appliquée au retour) ·
+ *  💡 Autres photos (propositions des APIs, vérifiées avec ta bibliothèque) · 🔑 mots-clés (orientent web + APIs).
+ */
 @Composable
-private fun ArtistPhotoPicker(a: ArtistEntity, color: Color, onChanged: suspend () -> Unit) {
-    val app = LocalContext.current.applicationContext as NovaStatsApp
+private fun ImagePickerBar(
+    type: String, id: Long, name: String, artistName: String?, currentUrl: String?, currentSource: String?,
+    color: Color, circle: Boolean, onChanged: suspend () -> Unit
+) {
+    val ctx = LocalContext.current
+    val app = ctx.applicationContext as NovaStatsApp
     val theme = Nova.theme
     val scope = rememberCoroutineScope()
-    var open by remember(a.artistId) { mutableStateOf(false) }
-    var props by remember(a.artistId) { mutableStateOf<List<ScoredCandidate>?>(null) }
+    var open by remember(type, id) { mutableStateOf(false) }
+    var props by remember(type, id) { mutableStateOf<List<ScoredCandidate>?>(null) }
     var busy by remember { mutableStateOf(false) }
-    LaunchedEffect(open) {
-        if (open && props == null) props = runCatching { app.enricher.proposeArtist(a.artistId, a.name) }.getOrDefault(emptyList())
+    var keywords by remember(type, id) { mutableStateOf(UserImages.keywords(ctx, type, id)) }
+    var editKeywords by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val what = if (type == EntityType.ARTIST) "photos" else "pochettes"
+
+    fun applyUrl(url: String) {
+        busy = true
+        scope.launch {
+            val ok = UserImages.apply(app, type, id, url)
+            message = if (ok) "✅ Image enregistrée (👤 toi)" else "⚠️ Échec de l'enregistrement"
+            onChanged(); busy = false
+        }
     }
-    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+    // 🖼️ Galerie (sélecteur de photos système, sans permission)
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            busy = true
+            val url = UserImages.importUri(ctx, uri, "${type.lowercase()}_$id")
+            if (url == null) { message = "⚠️ Image illisible"; busy = false } else applyUrl(url)
+        }
+    }
+    // 🌐 Web : permission photos (pour détecter le téléchargement au retour), puis navigateur
+    fun launchWeb() {
+        val q = UserImages.webQuery(type, name, artistName, keywords)
+        if (!UserImages.openWebSearch(ctx, type, id, name, q)) message = "⚠️ Aucun navigateur disponible"
+        else message = "🌐 Télécharge l'image choisie puis reviens : elle sera appliquée. Sinon « Partager l'image » → NovaStats."
+    }
+    val askPhotos = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { launchWeb() }
+
+    LaunchedEffect(open, keywords) {
+        if (open) {
+            props = null
+            props = runCatching {
+                if (type == EntityType.ARTIST) app.enricher.proposeArtist(id, name, keywords)
+                else app.enricher.proposeAlbum(id, name, artistName ?: "", keywords)
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    @Composable
+    fun Chip(label: String, filled: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
         Text(
-            if (open) "🖼️ Autres photos ▴" else "🖼️ Autres photos ▾", color = color, fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(12.dp)).clickable { open = !open }.padding(horizontal = 12.dp, vertical = 5.dp)
+            label, color = if (filled) Color.White else color, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                .background(if (filled) color else Color.Transparent)
+                .border(1.dp, color.copy(alpha = if (enabled) 0.6f else 0.25f), RoundedCornerShape(12.dp))
+                .clickable(enabled = enabled && !busy) { onClick() }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            maxLines = 1
         )
-        a.photoSource?.let { Spacer(Modifier.width(8.dp)); Text("source : ${if (it == "USER") "👤 toi" else it}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
     }
+
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+        Chip("🖼️") { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        Chip("🌐") { if (UserImages.canReadImages(ctx)) launchWeb() else askPhotos.launch(UserImages.readImagesPermission) }
+        Chip(if (open) "💡 Autres $what ▴" else "💡 Autres $what ▾", filled = open) { open = !open }
+        Chip(if (keywords.isBlank()) "🔑" else "🔑 •") { editKeywords = true }
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Center) {
+        Text(
+            buildString {
+                append("source : "); append(when (currentSource) { null -> "—"; "USER" -> "👤 toi"; else -> currentSource })
+                if (keywords.isNotBlank()) append("  ·  🔑 $keywords")
+            },
+            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+    }
+    message?.let { Text(it, color = if (it.startsWith("⚠️")) Color(0xFFE67E22) else theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
+
+    if (editKeywords) {
+        var draft by remember { mutableStateOf(keywords) }
+        AlertDialog(
+            onDismissRequest = { editKeywords = false },
+            containerColor = theme.surface, titleContentColor = theme.text, textContentColor = theme.textSecondary,
+            title = { Text("🔑 Mots-clés pour $name") },
+            text = {
+                Column {
+                    Text("Ajoutés à la recherche web et aux requêtes des APIs (ex. « 2024 live », « deluxe », « kpop »). Un candidat qui contient un mot-clé gagne +10.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = draft, onValueChange = { draft = it }, singleLine = true, placeholder = { Text("mots-clés…") }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = { TextButton(onClick = { UserImages.setKeywords(ctx, type, id, draft); keywords = draft.trim(); editKeywords = false }) { Text("Enregistrer", color = color) } },
+            dismissButton = { TextButton(onClick = { editKeywords = false }) { Text("Annuler", color = theme.textSecondary) } }
+        )
+    }
+
     if (!open) return
     val list = props
     when {
         list == null -> Text("Recherche en cours…", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().padding(6.dp), textAlign = TextAlign.Center)
-        list.isEmpty() -> Text("Aucune autre photo trouvée.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().padding(6.dp), textAlign = TextAlign.Center)
+        list.isEmpty() -> Text("Aucune autre image trouvée — essaie 🔑 des mots-clés, 🌐 le web ou 🖼️ la galerie.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().padding(6.dp), textAlign = TextAlign.Center)
         else -> Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             list.forEach { p ->
                 val c = p.candidate
-                val current = c.imageUrl == a.photoUrl
+                val current = c.imageUrl == currentUrl
                 val note = p.reasons.lastOrNull { it.contains("bibliothèque") || it.contains("non vérifiable") }
                 val good = note?.contains("en commun") == true
                 Column(
                     Modifier.width(96.dp).clip(RoundedCornerShape(12.dp))
                         .background(if (current) color.copy(alpha = 0.18f) else theme.surface)
                         .border(1.dp, if (current) color else Color.Transparent, RoundedCornerShape(12.dp))
-                        .clickable(enabled = !busy && !current) {
-                            busy = true
-                            scope.launch { runCatching { app.editor.setArtistPhoto(a.artistId, c.imageUrl) }; onChanged(); busy = false }
-                        }
+                        .clickable(enabled = !busy && !current) { c.imageUrl?.let { applyUrl(it) } }
                         .padding(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    CoverArt(c.imageUrl, c.name, size = 72, circle = true)
+                    CoverArt(c.imageUrl, c.name, size = 72, circle = circle)
                     Spacer(Modifier.height(4.dp))
                     Text("${c.source.emoji} ${c.source.label}", color = theme.text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (type == EntityType.ALBUM) Text(c.name, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${p.score} %", color = if (p.score >= 90) Color(0xFF2ECC71) else if (p.score >= 70) Color(0xFFF1C40F) else theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
                     if (note != null) Text(
                         if (good) "✅ " + note.substringBefore(" titre").trim() + " en commun" else if (note.contains("pas assez")) "❔ pas assez de titres" else if (note.contains("non vérifiable")) "❔ non vérifiable" else "⚠️ aucun en commun",
@@ -424,7 +515,8 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
     val cert by remember { db.certificationDao().observe(albumId, EntityType.ALBUM) }.collectAsStateWithLifecycle(initialValue = null)
 
-    LaunchedEffect(albumId, period) {
+    val imgVersion by UserImages.version.collectAsStateWithLifecycle()
+    LaunchedEffect(albumId, period, imgVersion) {
         val al = db.albumDao().getById(albumId) ?: return@LaunchedEffect
         album = al
         artistName = db.artistDao().getById(al.artistId)?.name ?: ""
@@ -451,6 +543,8 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
         Text(al.title, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp)
         Text(artistName, color = theme.secondary, fontWeight = FontWeight.SemiBold)
         PeriodChip(period, theme.secondary)
+        // 🖼️ 🌐 💡 🔑 : pochette choisie à la main / web / propositions des APIs / mots-clés
+        ImagePickerBar(EntityType.ALBUM, al.albumId, al.title, artistName, al.coverUrl, al.coverSource, theme.secondary, circle = false) { album = db.albumDao().getById(albumId) }
         Spacer(Modifier.height(8.dp))
         if (scoped) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {

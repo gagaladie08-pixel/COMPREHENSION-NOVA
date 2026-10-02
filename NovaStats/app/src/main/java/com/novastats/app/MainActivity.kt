@@ -1,6 +1,10 @@
 package com.novastats.app
 
 import android.os.Bundle
+import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import com.novastats.app.data.repository.UserImages
+import kotlinx.coroutines.launch
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,12 +29,25 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         com.novastats.app.ui.navigation.PendingNav.handle(intent)
+        handleSharedImage(intent)
+    }
+
+    /** Image partagée vers NovaStats → appliquée à l'artiste / l'album en attente (bouton 🌐). */
+    private fun handleSharedImage(intent: android.content.Intent?) {
+        if (intent?.action != android.content.Intent.ACTION_SEND) return
+        val app = application as NovaStatsApp
+        lifecycleScope.launch { UserImages.handleShare(app, intent)?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() } }
     }
 
     override fun onResume() {
         super.onResume()
         // L'app est visible : on peut toujours (re)lancer le service premier plan et réveiller le listener si besoin
         runCatching { com.novastats.app.service.Watchdog.check(this, "ouverture de l'app", fromForeground = true) }
+        // Retour du navigateur après 🌐 : la dernière image téléchargée devient la photo / pochette en attente
+        if (UserImages.pending(this) != null) {
+            val app = application as NovaStatsApp
+            lifecycleScope.launch { runCatching { UserImages.checkDownloaded(app) }.getOrNull()?.let { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() } }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,6 +56,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         com.novastats.app.ui.navigation.PendingNav.handle(intent)
+        handleSharedImage(intent)
         val app = application as NovaStatsApp
         setContent {
             val themeId by app.settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)
