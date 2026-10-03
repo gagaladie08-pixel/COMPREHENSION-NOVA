@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -79,6 +80,9 @@ fun RecordsScreen() {
     var page by remember { mutableStateOf<RecordDef?>(null) }
     var entry by remember { mutableStateOf<RecordEntryRef?>(null) }
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
+    // État de la page record (période / section / sous-filtre / scroll) conservé ici : la page quitte la composition
+    // quand on ouvre une fiche d'entrée, sinon ses filtres repartaient à « Semaine / Titres » et en haut de liste.
+    val pageState = remember(page) { page?.let { RecordPageState(it) } }
 
     BackHandler(enabled = entry != null || page != null || searching) {
         when {
@@ -90,7 +94,7 @@ fun RecordsScreen() {
 
     when {
         entry != null -> RecordEntryPage(entry!!, onBack = { entry = null }, onEntity = { detail = it })
-        page != null -> RecordPage(page!!, onBack = { page = null }, onEntry = { entry = it })
+        page != null -> RecordPage(page!!, pageState!!, onBack = { page = null }, onEntry = { entry = it })
         else -> LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -270,16 +274,24 @@ private fun PageHeader(back: String, title: String, color: Color, onBack: () -> 
     }
 }
 
+/** Filtres + position de scroll d'une page record, hoistés dans RecordsScreen pour survivre à l'ouverture d'une fiche. */
+private class RecordPageState(def: RecordDef) {
+    var period by mutableStateOf(def.periods.firstOrNull { it == Period.WEEKLY } ?: def.periods.firstOrNull())
+    var category by mutableStateOf(def.categories.first())
+    var sub by mutableStateOf(def.subs[category]?.firstOrNull())
+    val list = LazyListState()
+}
+
 @Composable
-private fun RecordPage(def: RecordDef, onBack: () -> Unit, onEntry: (RecordEntryRef) -> Unit) {
+private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, onEntry: (RecordEntryRef) -> Unit) {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
     val dao = remember { app.database.recordDao() }
     val color = groupColor(RecordCatalog.groupOf[def.id] ?: RecordGroup.DURATION)
 
-    var period by remember(def) { mutableStateOf(def.periods.firstOrNull { it == Period.WEEKLY } ?: def.periods.firstOrNull()) }
-    var category by remember(def) { mutableStateOf(def.categories.first()) }
-    var sub by remember(def) { mutableStateOf(def.subs[category]?.firstOrNull()) }
+    var period by st::period
+    var category by st::category
+    var sub by st::sub
     fun selectCategory(c: RecordCategory) { category = c; sub = def.subs[c]?.firstOrNull() }
 
     val rows by remember(def, period, category, sub) {
@@ -287,7 +299,7 @@ private fun RecordPage(def: RecordDef, onBack: () -> Unit, onEntry: (RecordEntry
     }.collectAsStateWithLifecycle(initialValue = emptyList())
     val maxValue = remember(rows) { rows.maxOfOrNull { it.r.value } ?: 0.0 }
 
-    LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
+    LazyColumn(Modifier.fillMaxSize().background(theme.background), state = st.list) {
         item { PageHeader("Records", "${def.emoji} ${def.title}", color, onBack, def.description) }
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {

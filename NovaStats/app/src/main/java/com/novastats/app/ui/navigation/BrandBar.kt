@@ -1,6 +1,26 @@
 package com.novastats.app.ui.navigation
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.Transgender
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.unit.Dp
+import com.novastats.app.ui.theme.NovaColors
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +43,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Diamond
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Flare
 import androidx.compose.material.icons.filled.Icecream
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -92,7 +111,7 @@ fun brandIcon(theme: NovaTheme): ImageVector = when (theme.id) {
     "cloud_nine" -> Icons.Filled.Cloud
     "solara" -> Icons.Filled.WbSunny
     "chaos_born" -> Icons.Filled.AutoAwesome
-    "survivor" -> Icons.Filled.Favorite
+    "survivor" -> Icons.Filled.Transgender
     "rainbow_pop" -> Icons.Filled.Palette
     "pop_revolution" -> Icons.Filled.Mic
     "african_confessions" -> Icons.Filled.Public
@@ -104,8 +123,9 @@ private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM"
 private val timeFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.FRANCE)
 
 /**
- * Barre de marque fixe (ne se replie pas au scroll) : icône du thème + NOVASTATS (police titre du thème, dégradé
- * primary → accent), date et heure à côté, 🔍 recherche globale au fond à droite.
+ * Barre de marque fixe (ne se replie pas au scroll) : halo + anneau tournant autour de l'icône du thème,
+ * NOVASTATS en grand (police titre du thème, dégradé primary → accent avec reflet qui traverse + glow),
+ * date · heure repoussées à droite, 🔍 recherche globale.
  */
 @Composable
 fun BrandBar(onSearch: () -> Unit) {
@@ -113,31 +133,82 @@ fun BrandBar(onSearch: () -> Unit) {
     val fonts = LocalNovaFonts.current
     var now by remember { mutableStateOf(LocalDateTime.now()) }
     LaunchedEffect(Unit) { while (true) { now = LocalDateTime.now(); delay(15_000) } }
-    Row(
-        Modifier.fillMaxWidth().background(theme.surface).statusBarsPadding().padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
+    val anim = rememberInfiniteTransition(label = "brand")
+    val shimmer by anim.animateFloat(0f, 1f, infiniteRepeatable(tween(3200, easing = LinearEasing), RepeatMode.Restart), label = "shimmer")
+    val spin by anim.animateFloat(0f, 360f, infiniteRepeatable(tween(6000, easing = LinearEasing), RepeatMode.Restart), label = "spin")
+    val pulse by anim.animateFloat(0.85f, 1.15f, infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
+    val pride = theme.id == "survivor"
+
+    Column(
+        Modifier.fillMaxWidth()
+            .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.16f), theme.surface, theme.accent.copy(alpha = 0.10f))))
+            .statusBarsPadding()
     ) {
-        ThemedTabIcon(brandIcon(theme), contentDescription = theme.name, selected = true)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "NOVASTATS",
-            style = TextStyle(
-                fontFamily = fonts.title, fontWeight = FontWeight.Black, fontSize = 22.sp, letterSpacing = 2.sp,
-                brush = Brush.horizontalGradient(listOf(theme.primary, theme.accent))
-            ),
-            maxLines = 1
-        )
-        Spacer(Modifier.width(12.dp))
-        // Date et heure, à l'horizontale à côté du nom
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Text(now.format(dateFmt).replace(".", "").replaceFirstChar { it.uppercase() }, color = theme.textSecondary, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp, top = 6.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // ── Icône du thème : halo pulsant + anneau conique tournant + étincelles
+            Box(
+                Modifier.size(48.dp).drawBehind {
+                    val c = center; val r = size.minDimension / 2
+                    drawCircle(Brush.radialGradient(listOf(theme.primary.copy(alpha = 0.55f * pulse), theme.accent.copy(alpha = 0.18f), Color.Transparent), c, r * 1.1f), r * 1.1f, c)
+                    val ringColors = if (pride) NovaColors.PrideCycle + NovaColors.PrideCycle.first() else listOf(Color.Transparent, theme.accent, theme.primary, Color.White, theme.primary, Color.Transparent)
+                    rotate(spin, c) { drawCircle(Brush.sweepGradient(ringColors, c), r - 1.5.dp.toPx(), c, style = Stroke(2.dp.toPx())) }
+                    // Trois étincelles qui tournent en sens inverse
+                    rotate(-spin * 1.4f, c) {
+                        listOf(0f, 120f, 240f).forEachIndexed { i, a ->
+                            val rad = Math.toRadians(a.toDouble()); val p = Offset(c.x + cos(rad).toFloat() * r * 1.02f, c.y + sin(rad).toFloat() * r * 1.02f)
+                            val sz = (1.5f + i * 0.7f).dp.toPx() * pulse
+                            drawLine(Color.White.copy(alpha = 0.9f), Offset(p.x - sz, p.y), Offset(p.x + sz, p.y), 1.2.dp.toPx())
+                            drawLine(Color.White.copy(alpha = 0.9f), Offset(p.x, p.y - sz), Offset(p.x, p.y + sz), 1.2.dp.toPx())
+                        }
+                    }
+                },
+                contentAlignment = Alignment.Center
+            ) {
+                ThemedTabIcon(brandIcon(theme), contentDescription = theme.name, selected = true, modifier = Modifier.scale(1.15f))
+            }
             Spacer(Modifier.width(8.dp))
-            Text(now.format(timeFmt), color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            // ── NOVASTATS : grand, police titre du thème, dégradé + reflet traversant + glow
+            val titleColors = if (pride) NovaColors.PrideCycle else listOf(theme.primary, theme.accent, Color.White, theme.accent, theme.primary)
+            val w = 900f
+            Text(
+                "NOVASTATS",
+                style = TextStyle(
+                    fontFamily = fonts.title, fontWeight = FontWeight.Black, fontSize = 27.sp, letterSpacing = 2.5.sp,
+                    brush = Brush.linearGradient(titleColors, start = Offset(shimmer * w * 2 - w, 0f), end = Offset(shimmer * w * 2, 0f), tileMode = TileMode.Mirror),
+                    shadow = Shadow(theme.primary.copy(alpha = 0.75f), Offset(0f, 0f), blurRadius = 18f)
+                ),
+                maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
+                modifier = Modifier.weight(1f)
+            )
+            // ── Date · heure, repoussées à droite, compactes
+            Column(horizontalAlignment = Alignment.End) {
+                Text(now.format(timeFmt), color = theme.text, fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = 1.sp, maxLines = 1, lineHeight = 16.sp)
+                Text(now.format(dateFmt).replace(".", "").replaceFirstChar { it.uppercase() }, color = theme.textSecondary, fontSize = 10.sp, maxLines = 1, lineHeight = 11.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            // ── Recherche globale : pastille en dégradé avec glow
+            Box(
+                Modifier.size(38.dp).drawBehind { drawCircle(theme.primary.copy(alpha = 0.35f), size.minDimension / 2 * 1.15f) }
+                    .clip(CircleShape).background(Brush.linearGradient(listOf(theme.primary, theme.accent)))
+                    .border(1.dp, Color.White.copy(alpha = 0.55f), CircleShape).clickable(onClick = onSearch),
+                contentAlignment = Alignment.Center
+            ) { Icon(Icons.Default.Search, contentDescription = "Rechercher dans l'app", tint = Color.White, modifier = Modifier.size(22.dp)) }
         }
-        Box(
-            Modifier.size(36.dp).clip(CircleShape).background(theme.primary.copy(alpha = 0.12f)).border(1.dp, theme.primary.copy(alpha = 0.45f), CircleShape).clickable(onClick = onSearch),
-            contentAlignment = Alignment.Center
-        ) { Icon(Icons.Default.Search, contentDescription = "Rechercher dans l'app", tint = theme.primary) }
+        // ── Liseré : fin trait lumineux primary → accent (ou ruban des 7 drapeaux pour Survivor)
+        if (pride) PrideRibbon() else Box(Modifier.fillMaxWidth().height(1.5.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, theme.primary, theme.accent, Color.Transparent))))
+    }
+}
+
+/** Ruban des drapeaux de la communauté : arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire. */
+@Composable
+fun PrideRibbon(height: Dp = 4.dp) {
+    Row(Modifier.fillMaxWidth().height(height)) {
+        NovaColors.PrideFlags.forEach { flag ->
+            Row(Modifier.weight(1f).fillMaxHeight()) { flag.forEach { c -> Box(Modifier.weight(1f).fillMaxHeight().background(c)) } }
+        }
     }
 }
 

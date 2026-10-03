@@ -116,8 +116,8 @@ fun rememberRainbowBrush(): Brush {
 }
 
 /** Palette arc-en-ciel décalée de [shift] ∈ [0,1[ (interpolation circulaire). */
-fun rainbowColors(shift: Float, steps: Int = 7): List<Color> {
-    val base = NovaColors.Rainbow
+fun rainbowColors(shift: Float, steps: Int = 12): List<Color> {
+    val base = NovaColors.PrideCycle
     val n = base.size
     return List(steps) { i ->
         val pos = ((i.toFloat() / (steps - 1)) + shift) * n

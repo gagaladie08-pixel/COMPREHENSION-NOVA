@@ -285,13 +285,13 @@ fun ThemeSignatureOverlay(theme: NovaTheme, modifier: Modifier = Modifier) {
             val clock by rememberClock()
             var startAt by remember { mutableStateOf(-10f) }
             LaunchedEffect(unlock) { if (unlock > 0) startAt = clock }
-            val pieces = remember(unlock) { List(90) { floatArrayOf(Random.nextFloat(), -Random.nextFloat() * 0.3f, 0.25f + Random.nextFloat() * 0.35f, Random.nextFloat() * 360f, (Random.nextFloat() - 0.5f) * 0.1f, Random.nextInt(6).toFloat()) } }
+            val pieces = remember(unlock) { List(90) { floatArrayOf(Random.nextFloat(), -Random.nextFloat() * 0.3f, 0.25f + Random.nextFloat() * 0.35f, Random.nextFloat() * 360f, (Random.nextFloat() - 0.5f) * 0.1f, Random.nextInt(NovaColors.PrideConfetti.size).toFloat()) } }
             val t = clock - startAt
             if (t in 0f..2.2f) Canvas(modifier) {
                 pieces.forEach { c ->
                     val x = (c[0] + sin(t * 3f + c[3]) * 0.02f + c[4] * t) * size.width
                     val y = (c[1] + c[2] * t * (1f + t * 0.4f)) * size.height
-                    val col = NovaColors.Rainbow[c[5].toInt()].copy(alpha = (1f - (t / 2.2f)).coerceIn(0f, 1f))
+                    val col = NovaColors.PrideConfetti[c[5].toInt()].copy(alpha = (1f - (t / 2.2f)).coerceIn(0f, 1f))
                     rotate(c[3] + t * 240f, pivot = Offset(x, y)) { drawRect(col, Offset(x - 4.dp.toPx(), y - 2.5.dp.toPx()), Size(8.dp.toPx(), 5.dp.toPx())) }
                 }
             }

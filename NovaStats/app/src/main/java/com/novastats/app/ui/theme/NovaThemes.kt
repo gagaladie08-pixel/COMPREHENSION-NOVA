@@ -256,10 +256,12 @@ object NovaThemes {
 
     // 11. 🌈 Survivor — communauté LGBTQ+ / Ballroom
     val SURVIVOR = NovaTheme(
-        "survivor", "🌈", "Survivor",
-        hex("#FF69B4"), hex("#8B00FF"), hex("#FF8C00"), hex("#080808"), hex("#111111"), hex("#FFFFFF"), hex("#FF8CC8"), hex("#00C800"),
-        effects = "Burst de confettis au déblocage d'un palier", inspiration = "Communauté LGBTQ+ / Ballroom — fierté",
-        titleFont = "Righteous", bodyFont = "Nunito", iconsDescription = "Trophées / podiums stylisés, dégradé arc-en-ciel", icons = IconStyle.PRIDE,
+        "survivor", "🏳️‍🌈", "Survivor",
+        // Rose trans en primaire, bleu trans en secondaire, lavande bi en glow, menthe du drapeau gay en accent
+        hex("#F77FB4"), hex("#5BCEFA"), hex("#9B4F96"), hex("#080808"), hex("#121018"), hex("#FFFFFF"), hex("#FFB7D5"), hex("#26CEAA"),
+        effects = "Confettis aux couleurs de tous les drapeaux au déblocage d'un palier, bandeau de drapeaux (arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire)",
+        inspiration = "Communauté LGBTQ+ / Ballroom — fierté, drapeaux arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire, Progress",
+        titleFont = "Righteous", bodyFont = "Nunito", iconsDescription = "Icônes cerclées des drapeaux (arc-en-ciel, trans, bi, gay…) avec chevron Progress", icons = IconStyle.PRIDE,
         transitionMs = 300, easing = MotionEasing.EASE_OUT, signature = Signature.CONFETTI, cornerDp = 16,
         chart = ChartStyle(stroke = null, glowDp = 6f, fillTop = ColorKey.PRIMARY, fillBottom = ColorKey.SECONDARY, rainbow = true),
         rainbowTextSecondary = true
@@ -327,4 +329,24 @@ object NovaColors {
     val DirectDebut = Color(0xFF7B2FBE)
     /** Arc-en-ciel pride (Survivor / Rainbow Pop). */
     val Rainbow = listOf(Color(0xFFE40303), Color(0xFFFF8C00), Color(0xFFFFED00), Color(0xFF008026), Color(0xFF004DFF), Color(0xFF750787))
+    /** Drapeau trans (bleu ciel, rose, blanc). */
+    val Trans = listOf(Color(0xFF5BCEFA), Color(0xFFF5A9B8), Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA))
+    /** Drapeau bi (magenta, lavande, bleu). */
+    val Bi = listOf(Color(0xFFD60270), Color(0xFF9B4F96), Color(0xFF0038A8))
+    /** Drapeau gay (hommes) — verts, blanc, bleus, indigo. */
+    val Gay = listOf(Color(0xFF078D70), Color(0xFF26CEAA), Color(0xFF98E8C1), Color(0xFFFFFFFF), Color(0xFF7BADE2), Color(0xFF5049CC), Color(0xFF3D1A78))
+    /** Drapeau lesbien (oranges, blanc, roses). */
+    val Lesbian = listOf(Color(0xFFD52D00), Color(0xFFFF9A56), Color(0xFFFFFFFF), Color(0xFFD362A4), Color(0xFFA30262))
+    /** Drapeau pan. */
+    val Pan = listOf(Color(0xFFFF218C), Color(0xFFFFD800), Color(0xFF21B1FF))
+    /** Drapeau non-binaire. */
+    val NonBinary = listOf(Color(0xFFFCF434), Color(0xFFFFFFFF), Color(0xFF9C59D1), Color(0xFF2C2C2C))
+    /** Chevron du drapeau Progress (blanc, rose, bleu, marron, noir). */
+    val Progress = listOf(Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA), Color(0xFF613915), Color(0xFF000000))
+    /** Tous les drapeaux du thème Survivor, dans l'ordre d'affichage. */
+    val PrideFlags: List<List<Color>> = listOf(Rainbow, Trans, Bi, Gay, Lesbian, Pan, NonBinary)
+    /** Palette qui tourne (texte secondaire / courbes Survivor) : arc-en-ciel → trans → bi → gay. */
+    val PrideCycle: List<Color> = Rainbow + listOf(Color(0xFF5BCEFA), Color(0xFFF5A9B8), Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA)) + Bi + listOf(Color(0xFF078D70), Color(0xFF26CEAA), Color(0xFF7BADE2), Color(0xFF5049CC))
+    /** Confettis Survivor : toutes les couleurs de tous les drapeaux. */
+    val PrideConfetti: List<Color> = PrideFlags.flatten().distinct()
 }
