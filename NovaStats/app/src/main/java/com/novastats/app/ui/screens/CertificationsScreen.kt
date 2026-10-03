@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +44,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.novastats.app.ui.theme.prideFlagFor
+import com.novastats.app.ui.theme.isPride
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -150,7 +151,7 @@ fun CertificationsScreen() {
             }
             TabRow(
                 selectedTabIndex = tab, containerColor = theme.background, contentColor = theme.primary,
-                indicator = { pos -> TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(pos[tab]), color = theme.primary) }
+                indicator = { pos -> if (Nova.isPride) Box(Modifier.tabIndicatorOffset(pos[tab]).height(5.dp).background(Brush.horizontalGradient(prideFlagFor(tab + 1)))) else TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(pos[tab]), color = theme.primary) }
             ) {
                 listOf("🎵 Chansons", "💿 Albums").forEachIndexed { i, l ->
                     Tab(selected = tab == i, onClick = { tab = i; levelFilter = null }, text = { Text(l, color = if (tab == i) theme.primary else theme.textSecondary, fontWeight = FontWeight.SemiBold) })
@@ -164,12 +165,12 @@ fun CertificationsScreen() {
             )
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = levelFilter == null, onClick = { levelFilter = null }, label = { Text("Tous (${certified.size})") },
+                NovaFilterChip(flagKey = "all", selected = levelFilter == null, onClick = { levelFilter = null }, label = { Text("Tous (${certified.size})") },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text))
                 CertLevel.entries.forEach { l ->
                     val c = certColor(l)
-                    FilterChip(
-                        selected = levelFilter == l.dbName, onClick = { levelFilter = if (levelFilter == l.dbName) null else l.dbName },
+                    NovaFilterChip(
+                        flagKey = l, selected = levelFilter == l.dbName, onClick = { levelFilter = if (levelFilter == l.dbName) null else l.dbName },
                         label = { Text("${l.emoji} ${l.label} (${counts[l.dbName] ?: 0})") },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = c.copy(alpha = 0.3f), selectedLabelColor = theme.text),
                         border = FilterChipDefaults.filterChipBorder(enabled = true, selected = levelFilter == l.dbName, borderColor = c.copy(alpha = 0.5f), selectedBorderColor = c)

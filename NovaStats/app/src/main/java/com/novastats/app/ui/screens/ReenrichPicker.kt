@@ -17,7 +17,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -103,8 +102,8 @@ fun ReenrichPicker(onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PickSection.entries.forEach { s ->
                 val n = countFor(s)
-                FilterChip(
-                    selected = section == s, onClick = { section = s }, modifier = Modifier.weight(1f),
+                NovaFilterChip(
+                    flagKey = s, selected = section == s, onClick = { section = s }, modifier = Modifier.weight(1f),
                     label = { Text("${s.emoji} ${s.label}${if (n > 0) " ($n)" else ""}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth()) }
                 )
             }

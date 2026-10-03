@@ -261,7 +261,7 @@ private fun DetectionPage(onOpenReview: () -> Unit = {}) {
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ScrobbleRules.ALLOWED_THRESHOLDS_SEC.forEach { s ->
-                        FilterChip(selected = threshold == s, onClick = { scope.launch { settings.setThreshold(s) } }, label = { Text("${s}s") })
+                        NovaFilterChip(flagKey = s, selected = threshold == s, onClick = { scope.launch { settings.setThreshold(s) } }, label = { Text("${s}s") })
                     }
                 }
                 Spacer(Modifier.height(8.dp))

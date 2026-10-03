@@ -35,6 +35,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.novastats.app.ui.theme.prideFlagFor
+import com.novastats.app.ui.theme.isPride
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.LocalContext
@@ -142,7 +146,7 @@ fun StatsScreen() {
                         containerColor = theme.background,
                         contentColor = theme.primary,
                         indicator = { positions ->
-                            Box(Modifier.tabIndicatorOffset(positions[tab]).padding(horizontal = 28.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
+                            Box(Modifier.tabIndicatorOffset(positions[tab]).padding(horizontal = 28.dp).height(if (Nova.isPride) 5.dp else 3.dp).clip(RoundedCornerShape(2.dp)).background(if (Nova.isPride) Brush.horizontalGradient(prideFlagFor(tab + 1)) else SolidColor(theme.primary)))
                         },
                         divider = {}
                     ) {

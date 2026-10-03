@@ -25,6 +25,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.novastats.app.ui.theme.prideOnFlag
+import com.novastats.app.ui.theme.prideFlagForKey
+import com.novastats.app.ui.theme.prideChip
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.SelectableChipColors
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.clip
@@ -273,6 +283,35 @@ fun PeriodSegment(selected: Period, modifier: Modifier = Modifier, periods: List
             }
         }
     }
+}
+
+/**
+ * Puce de filtre de l'app : Material FilterChip partout, sauf en Survivor où la puce active affiche son
+ * drapeau en plein et les autres le montrent en lavis ([flagKey] choisit le drapeau : passe l'élément filtré).
+ */
+@Composable
+fun NovaFilterChip(
+    selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit, modifier: Modifier = Modifier,
+    enabled: Boolean = true, flagKey: Any? = null, colors: SelectableChipColors? = null, border: BorderStroke? = null
+) {
+    if (Nova.isPride) {
+        val flag = prideFlagForKey(flagKey)
+        val shape = RoundedCornerShape(10.dp)
+        Box(
+            modifier.height(32.dp).clip(shape).prideChip(selected, flag, Nova.theme.surface)
+                .border(1.dp, if (selected) Color.White.copy(alpha = 0.7f) else flag.first().copy(alpha = 0.5f), shape)
+                .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CompositionLocalProvider(
+                LocalContentColor provides (if (selected) prideOnFlag(flag) else Nova.theme.text),
+                LocalTextStyle provides MaterialTheme.typography.labelLarge.copy(fontWeight = if (selected) FontWeight.Black else FontWeight.Medium)
+            ) { label() }
+        }
+    } else FilterChip(
+        selected = selected, onClick = onClick, label = label, modifier = modifier, enabled = enabled,
+        colors = colors ?: FilterChipDefaults.filterChipColors(), border = border ?: FilterChipDefaults.filterChipBorder(enabled = enabled, selected = selected)
+    )
 }
 
 /** Cellule du bandeau résumé : valeur (primary par défaut) + libellé. */

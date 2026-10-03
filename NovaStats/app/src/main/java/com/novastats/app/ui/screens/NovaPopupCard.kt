@@ -57,7 +57,9 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.PridePopupBackground
 import com.novastats.app.ui.theme.PrideRibbon
+import com.novastats.app.ui.theme.PrideSymbolsRow
 import com.novastats.app.ui.theme.drawHeart
 import com.novastats.app.ui.theme.isPride
 import com.novastats.app.ui.theme.rememberPrideSweep
@@ -129,12 +131,15 @@ fun NovaPopupCard(
                         .border(if (pride) 2.dp else 1.5.dp, borderBrush, shape)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                 ) {
-                    if (backdropUrl != null) PopupBackdrop(backdropUrl, Modifier.matchParentSize())
+                    // Survivor : le fond du popup est un décor de drapeaux (remplace la pochette floutée)
+                    if (pride) PridePopupBackground(Modifier.matchParentSize(), theme.background)
+                    else if (backdropUrl != null) PopupBackdrop(backdropUrl, Modifier.matchParentSize())
                     if (holographic) HoloParticles(Modifier.matchParentSize())
                     if (pride) PrideParticles(Modifier.matchParentSize())
                     Column(Modifier.fillMaxWidth()) {
                         if (pride) PrideRibbon(height = 5.dp)
                         banner()
+                        if (pride) PrideSymbolsRow(Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
                         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) { content() }
                         if (pride) PrideRibbon(height = 3.dp) else HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
                         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {

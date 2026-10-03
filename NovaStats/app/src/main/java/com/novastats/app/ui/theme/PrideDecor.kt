@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -76,6 +77,55 @@ fun Modifier.prideStripe(flag: List<Color>, width: Dp = 4.dp, alpha: Float = 0.9
 fun Modifier.prideWash(flag: List<Color>, alpha: Float = 0.10f): Modifier = drawBehind {
     val h = size.height / flag.size
     flag.forEachIndexed { i, c -> drawRect(c, Offset(0f, i * h), Size(size.width, h + 0.5f), alpha = alpha) }
+}
+
+/** Drapeau choisi à partir d'une clé quelconque (libellé, enum, index…). */
+fun prideFlagForKey(key: Any?): List<Color> = NovaColors.PrideFlags[((key?.hashCode() ?: 0).let { if (it < 0) -it else it }) % NovaColors.PrideFlags.size]
+
+/**
+ * Puce / onglet Survivor : la puce ACTIVE affiche son drapeau en plein (bandes horizontales), les autres
+ * le montrent en lavis sur la surface. À appliquer après `clip(shape)`.
+ */
+fun Modifier.prideChip(selected: Boolean, flag: List<Color>, surface: Color): Modifier =
+    if (selected) drawBehind {
+        val h = size.height / flag.size
+        flag.forEachIndexed { i, c -> drawRect(c, Offset(0f, i * h), Size(size.width, h + 0.5f)) }
+    } else background(surface).prideWash(flag, alpha = 0.16f)
+
+/** Couleur de texte lisible sur un drapeau plein (la plupart sont clairs → noir ; bi / non-binaire sombre → blanc). */
+fun prideOnFlag(flag: List<Color>): Color = if (flag.sumOf { it.luminance().toDouble() } / flag.size > 0.45) Color.Black else Color.White
+
+/**
+ * Fond de popup Survivor : bandes diagonales de tous les drapeaux (douces) + halo central sombre pour
+ * garder le contenu lisible. Remplace la pochette floutée.
+ */
+@Composable
+fun PridePopupBackground(modifier: Modifier = Modifier, background: Color) {
+    val t by rememberInfiniteTransition(label = "ppb").animateFloat(0f, 1f, infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Restart), label = "ppba")
+    val bands = NovaColors.PrideFlags.flatten()
+    Canvas(modifier) {
+        drawRect(background)
+        val bh = size.height / 14f
+        rotate(-22f) {
+            val total = bands.size
+            for (i in -10 until total + 10) {
+                val c = bands[((i % total) + total) % total]
+                drawRect(c, Offset(-size.width, i * bh + t * bh * total), Size(size.width * 3, bh), alpha = 0.22f)
+            }
+        }
+        // Halo sombre au centre pour la lisibilité
+        drawRect(Brush.radialGradient(listOf(background.copy(alpha = 0.88f), background.copy(alpha = 0.55f), background.copy(alpha = 0.15f)), center = Offset(size.width / 2, size.height * 0.45f), radius = size.maxDimension * 0.75f))
+    }
+}
+
+/** Ligne de symboles de la communauté (affichée dans les popups Survivor). */
+@Composable
+fun PrideSymbolsRow(modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly) {
+        listOf("🏳️‍🌈", "🏳️‍⚧️", "⚧", "♀♀", "♂♂", "💜💙💗", "💛🤍💜🖤").forEachIndexed { i, sym ->
+            androidx.compose.material3.Text(sym, style = androidx.compose.ui.text.TextStyle(brush = Brush.horizontalGradient(NovaColors.PrideFlags[i % NovaColors.PrideFlags.size]), fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)), maxLines = 1)
+        }
+    }
 }
 
 /** Ruban des 7 drapeaux côte à côte (arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire). */

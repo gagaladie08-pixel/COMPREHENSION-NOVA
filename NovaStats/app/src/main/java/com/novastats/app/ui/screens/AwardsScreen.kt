@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -129,8 +128,8 @@ fun AwardsScreen() {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 years.forEach { y ->
                     val live = y == today.year
-                    FilterChip(
-                        selected = year == y, onClick = { year = y },
+                    NovaFilterChip(
+                        flagKey = y, selected = year == y, onClick = { year = y },
                         label = { Text("$y  ${if (live) "● LIVE" else "FINAL"}", fontWeight = FontWeight.SemiBold) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = (if (live) Color(0xFFE74C3C) else Color(0xFFFFD700)).copy(alpha = 0.25f), selectedLabelColor = theme.text)
                     )

@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +58,10 @@ import com.novastats.app.domain.RecordDef
 import com.novastats.app.domain.RecordGroup
 import com.novastats.app.domain.RecordUnit
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.prideOnFlag
+import com.novastats.app.ui.theme.prideFlagFor
+import com.novastats.app.ui.theme.prideChip
+import com.novastats.app.ui.theme.isPride
 import com.novastats.app.ui.theme.NovaColors
 
 /**
@@ -132,14 +135,14 @@ fun RecordsScreen() {
                 item {
                     // Familles : puces horizontales façon niveaux de certification, avec le nombre de records
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = group == null, onClick = { group = null }, label = { Text("Tous (${RecordCatalog.ALL.size})") },
+                        NovaFilterChip(
+                            flagKey = "all", selected = group == null, onClick = { group = null }, label = { Text("Tous (${RecordCatalog.ALL.size})") },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text)
                         )
                         RecordGroup.entries.forEach { g ->
                             val c = groupColor(g)
-                            FilterChip(
-                                selected = group == g, onClick = { group = if (group == g) null else g },
+                            NovaFilterChip(
+                                flagKey = g, selected = group == g, onClick = { group = if (group == g) null else g },
                                 label = { Text("${g.emoji} ${g.label} (${RecordCatalog.inGroup(g).size})") },
                                 colors = FilterChipDefaults.filterChipColors(selectedContainerColor = c.copy(alpha = 0.3f), selectedLabelColor = theme.text),
                                 border = FilterChipDefaults.filterChipBorder(enabled = true, selected = group == g, borderColor = c.copy(alpha = 0.5f), selectedBorderColor = c)
@@ -282,6 +285,8 @@ private class RecordPageState(def: RecordDef) {
     var category by mutableStateOf(def.categories.first())
     var sub by mutableStateOf(def.subs[category]?.firstOrNull())
     val list = LazyListState()
+    /** Dernières lignes chargées : réutilisées immédiatement au retour d'une fiche (sinon la liste repart vide → scroll perdu). */
+    var rows by mutableStateOf<List<RecordRow>>(emptyList())
 }
 
 @Composable
@@ -296,9 +301,10 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
     var sub by st::sub
     fun selectCategory(c: RecordCategory) { category = c; sub = def.subs[c]?.firstOrNull() }
 
-    val rows by remember(def, period, category, sub) {
-        dao.top10(def.id, period?.dbName, category.dbName, sub?.dbName, def.ascending)
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    LaunchedEffect(def, period, category, sub) {
+        dao.top10(def.id, period?.dbName, category.dbName, sub?.dbName, def.ascending).collect { st.rows = it }
+    }
+    val rows = st.rows
     val maxValue = remember(rows) { rows.maxOfOrNull { it.r.value } ?: 0.0 }
 
     LazyColumn(Modifier.fillMaxSize().background(theme.background), state = st.list) {
@@ -307,12 +313,13 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
             Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
                 // Sections Titres / Artistes / Albums
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.8f)).padding(3.dp)) {
-                    def.categories.forEach { c ->
+                    def.categories.forEachIndexed { ci, c ->
                         val on = c == category
+                        val pride = Nova.isPride
                         Text(
-                            "${c.emoji} ${sectionLabel(c)}", color = if (on) theme.background else theme.text, textAlign = TextAlign.Center,
+                            "${c.emoji} ${sectionLabel(c)}", color = if (on) (if (pride) prideOnFlag(prideFlagFor(ci + 1)) else theme.background) else theme.text, textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) color else Color.Transparent).clickable { selectCategory(c) }.padding(vertical = 8.dp)
+                            modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).then(if (pride) Modifier.prideChip(on, prideFlagFor(ci + 1), Color.Transparent) else Modifier.background(if (on) color else Color.Transparent)).clickable { selectCategory(c) }.padding(vertical = 8.dp)
                         )
                     }
                 }
@@ -352,14 +359,15 @@ private fun sectionLabel(c: RecordCategory) = when (c) { RecordCategory.TRACK ->
 @Composable
 private fun ChipRow(labels: List<String>, selected: Int, color: Color, onSelect: (Int) -> Unit) {
     val theme = Nova.theme
+    val pride = Nova.isPride
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         labels.forEachIndexed { i, l ->
             val on = i == selected
             Text(
-                l, color = if (on) theme.background else theme.text, style = MaterialTheme.typography.labelMedium, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                l, color = if (on) (if (pride) prideOnFlag(prideFlagFor(i + 1)) else theme.background) else theme.text, style = MaterialTheme.typography.labelMedium, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
                 modifier = Modifier.clip(RoundedCornerShape(20.dp))
-                    .background(if (on) color else theme.background.copy(alpha = 0.7f))
-                    .border(1.dp, if (on) color else theme.textSecondary.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+                    .then(if (pride) Modifier.prideChip(on, prideFlagFor(i + 1), theme.surface) else Modifier.background(if (on) color else theme.background.copy(alpha = 0.7f)))
+                    .border(1.dp, if (on) (if (pride) Color.White.copy(alpha = 0.7f) else color) else theme.textSecondary.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
                     .clickable { onSelect(i) }.padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }

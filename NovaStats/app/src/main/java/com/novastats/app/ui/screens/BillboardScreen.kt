@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -159,7 +160,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                         containerColor = theme.background,
                         contentColor = theme.primary,
                         indicator = { positions ->
-                            Box(Modifier.tabIndicatorOffset(positions[chartIndex]).padding(horizontal = 24.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.primary))
+                            Box(Modifier.tabIndicatorOffset(positions[chartIndex]).padding(horizontal = 24.dp).height(if (Nova.isPride) 5.dp else 3.dp).clip(RoundedCornerShape(2.dp)).background(if (Nova.isPride) Brush.horizontalGradient(prideFlagFor(chartIndex + 1)) else SolidColor(theme.primary)))
                         },
                         divider = {}
                     ) {

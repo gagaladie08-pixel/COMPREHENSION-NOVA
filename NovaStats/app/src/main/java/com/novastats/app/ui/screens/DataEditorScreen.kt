@@ -22,7 +22,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -106,7 +105,7 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             EditorTab.entries.forEach { t ->
                 val label = if (t == EditorTab.REVIEW && redItems.isNotEmpty()) "⚠️ À corriger 🔴 ${redItems.size}" else t.label
-                FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(label) })
+                NovaFilterChip(flagKey = t, selected = tab == t, onClick = { tab = t }, label = { Text(label) })
             }
         }
         /* ---------- Doublons détectés (compteur sous le sous-onglet → popup de choix) ---------- */

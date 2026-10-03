@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -124,14 +123,14 @@ fun HallOfFameScreen() {
             }
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(Period.WEEKLY, Period.MONTHLY, Period.GLOBAL).forEach { p ->
-                    FilterChip(selected = period == p.dbName, onClick = { period = p.dbName }, label = { Text(p.label) },
+                    NovaFilterChip(flagKey = p, selected = period == p.dbName, onClick = { period = p.dbName }, label = { Text(p.label) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text))
                 }
             }
             Spacer(Modifier.height(6.dp))
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(EntityType.TRACK to "🎵 Chansons", EntityType.ARTIST to "🎤 Artistes", EntityType.ALBUM to "💿 Albums").forEach { (t, l) ->
-                    FilterChip(selected = category == t, onClick = { category = t }, label = { Text(l) })
+                    NovaFilterChip(flagKey = t, selected = category == t, onClick = { category = t }, label = { Text(l) })
                 }
             }
             Spacer(Modifier.height(8.dp))

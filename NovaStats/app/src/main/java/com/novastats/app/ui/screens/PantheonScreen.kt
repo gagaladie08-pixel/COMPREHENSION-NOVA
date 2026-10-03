@@ -11,7 +11,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -152,15 +151,15 @@ fun PantheonScreen() {
             Spacer(Modifier.height(8.dp))
             // Chips de filtre par statut (scrollables) avec compteur — Mythique en tête
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(
-                    selected = statusFilter == null, onClick = { statusFilter = null }, label = { Text("Tous (${rows.size})") },
+                NovaFilterChip(
+                    flagKey = "all", selected = statusFilter == null, onClick = { statusFilter = null }, label = { Text("Tous (${rows.size})") },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text)
                 )
                 PantheonStatus.entries.reversed().forEach { st ->
                     val c = pantheonColor(st)
                     val on = statusFilter == st.dbName
-                    FilterChip(
-                        selected = on, onClick = { statusFilter = if (on) null else st.dbName },
+                    NovaFilterChip(
+                        flagKey = st, selected = on, onClick = { statusFilter = if (on) null else st.dbName },
                         label = { Text("${st.emoji} ${st.label} (${counts[st.dbName] ?: 0})") },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = c.copy(alpha = 0.3f), selectedLabelColor = theme.text),
                         border = FilterChipDefaults.filterChipBorder(enabled = true, selected = on, borderColor = c.copy(alpha = 0.5f), selectedBorderColor = c)
