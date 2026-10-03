@@ -3,6 +3,8 @@ package com.novastats.app.ui.onboarding
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.fadeOut
@@ -47,8 +49,8 @@ fun OnboardingFlow(onFinished: () -> Unit) {
             // « Shared axis » : le contenu avance en profondeur (léger zoom + fondu), une seule courbe
             transitionSpec = {
                 val forward = targetState > initialState
-                (fadeIn(tween(700, delayMillis = 150, easing = ObEasing)) + scaleIn(tween(900, easing = ObEasing), initialScale = if (forward) 0.94f else 1.06f)) togetherWith
-                    (fadeOut(tween(350, easing = ObEasing)) + scaleOut(tween(600, easing = ObEasing), targetScale = if (forward) 1.06f else 0.94f))
+                (fadeIn(tween(380, delayMillis = 80, easing = ObEasing)) + slideInVertically(tween(450, delayMillis = 80, easing = ObEasing)) { if (forward) it / 14 else -it / 14 }) togetherWith
+                    (fadeOut(tween(220, easing = ObEasing)) + slideOutVertically(tween(260, easing = ObEasing)) { if (forward) -it / 20 else it / 20 })
             }, label = "onboarding"
         ) { p ->
             when (p) {

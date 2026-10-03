@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
                 else -> 2
             }
             // Fin d'onboarding : le voile noir se dissout sur le vrai écran d'accueil (fondu 1,4 s)
-            androidx.compose.animation.Crossfade(targetState = mode, animationSpec = androidx.compose.animation.core.tween(1400), label = "root") { m ->
+            androidx.compose.animation.Crossfade(targetState = mode, animationSpec = androidx.compose.animation.core.tween(700), label = "root") { m ->
                 when (m) {
                     0 -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { Box(Modifier.fillMaxSize().background(Nova.theme.background)) }
                     1 -> OnboardingFlow { onboardingJustFinished = true }

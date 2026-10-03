@@ -866,6 +866,9 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.9.9" to listOf(
+        "🎤 Onboarding refait façon keynote : appareil 3D, carrousel de thèmes, polices Inter embarquées, rythme rapide"
+    ),
     "0.9.8" to listOf(
         "🖼️ 15 icônes d'app uniques, une par univers — Survivor aux couleurs de la fierté (arc-en-ciel, Progress, trans)"
     ),

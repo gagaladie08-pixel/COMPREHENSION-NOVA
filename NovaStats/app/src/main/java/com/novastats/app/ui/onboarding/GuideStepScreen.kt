@@ -48,6 +48,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.Icons
 import androidx.compose.animation.expandVertically
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -150,8 +154,9 @@ object BrandGuides {
 }
 
 /**
- * Étape 3/4 — Guide constructeur en checklist : silhouette de téléphone monochrome, une étape visible à la fois,
- * ligne verticale qui s'illumine. [embedded] = version Réglages (sans en-tête d'étape ni bouton).
+ * Étape 3/4 — Guide constructeur : liste « Réglages » des étapes propres à la marque (détectée, ou choisie),
+ * coche verte dès qu'une étape est validée (vérification automatique au retour quand c'est possible).
+ * [embedded] = version Réglages (sans en-tête d'étape ni boutons).
  */
 @Composable
 fun GuideStepScreen(audio: ObAudio, theme: NovaTheme, embedded: Boolean = false, onBack: () -> Unit = {}, onNext: (completed: Boolean) -> Unit = {}) {
@@ -161,10 +166,9 @@ fun GuideStepScreen(audio: ObAudio, theme: NovaTheme, embedded: Boolean = false,
     val guide = manual?.let { k -> BrandGuides.ALL.firstOrNull { it.key == k } ?: BrandGuides.GENERIC } ?: detected ?: BrandGuides.GENERIC
     var done by rememberSaveable(guide.key) { mutableStateOf(setOf<Int>()) }
     var pending by rememberSaveable { mutableStateOf<Int?>(null) }
-    var leaving by remember { mutableStateOf(false) }
     var celebrated by remember { mutableStateOf(false) }
-    var intro by remember { mutableStateOf(embedded) }
-    LaunchedEffect(Unit) { if (!embedded) { delay(500); intro = true; audio.whoosh(0.12f) } }
+    val beats = if (embedded) 4 else rememberBeats(4, startMs = 150, stepMs = 140)
+    val accent = theme.primary
 
     LifecycleResumeEffect(guide.key) {
         val auto = guide.steps.indices.filter { guide.steps[it].autoCheck?.invoke(ctx) == true }.toSet()
@@ -175,72 +179,72 @@ fun GuideStepScreen(audio: ObAudio, theme: NovaTheme, embedded: Boolean = false,
         onPauseOrDispose { }
     }
     val complete = done.size >= guide.steps.size
-    LaunchedEffect(complete) { if (complete && !celebrated) { celebrated = true; if (!embedded || done.isNotEmpty()) { audio.tick(); audio.success() } } }
-    val fill by animateFloatAsState(if (leaving) 1f else 0f, tween(700, easing = ObEasing), label = "fill")
-    LaunchedEffect(leaving) { if (leaving) { delay(750); onNext(complete) } }
-    val accent = theme.primary
+    LaunchedEffect(complete) { if (complete && !celebrated) { celebrated = true; if (!embedded) { audio.tick(); audio.success() } } }
 
-    Box(Modifier.fillMaxSize().background(theme.background)) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+    val body: @Composable ColumnScope.() -> Unit = {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
             if (!embedded) {
-                StepIndicator(3, accent, theme.text)
-                Spacer(Modifier.height(30.dp))
-                Text("TON TÉLÉPHONE", color = theme.textSecondary, fontFamily = ObFonts.body, fontSize = 11.sp, letterSpacing = 5.sp)
-                Spacer(Modifier.height(8.dp))
-                CinzelTitle(guide.name.substringBefore(" /"), theme.text, size = 26, letterSpacing = 1, modifier = Modifier.padding(horizontal = 28.dp))
-            } else Spacer(Modifier.height(10.dp))
-
-            RiseIn(visible = intro) { PhoneSilhouette(theme, done.size, guide.steps.size, Modifier.size(120.dp, 150.dp).padding(top = 14.dp)) }
-            if (detected == null || manual != null) Row(Modifier.padding(top = 10.dp, start = 16.dp, end = 16.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                (BrandGuides.ALL + BrandGuides.GENERIC).forEach { g ->
-                    val on = guide.key == g.key
-                    Text(
-                        if (g.key == "generic") "AUTRE" else g.name.substringBefore(" /").uppercase(), color = if (on) theme.background else theme.text, fontFamily = ObFonts.body, fontSize = 10.sp, letterSpacing = 2.sp,
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) accent else theme.surface).clickable { manual = g.key }.padding(horizontal = 12.dp, vertical = 7.dp)
-                    )
+                Appear(beats >= 1) { ObEyebrow("Ton téléphone", accent) }
+                Spacer(Modifier.height(6.dp))
+                Appear(beats >= 1) { ObHeadline(guide.name.substringBefore(" /")) }
+                Spacer(Modifier.height(12.dp))
+            }
+            Appear(beats >= 2) { ObSub(guide.intro, size = 15) }
+            guide.warning?.let { Spacer(Modifier.height(10.dp)); Appear(beats >= 2) { Text(it, color = ObColors.Orange, fontFamily = ObFonts.inter, fontSize = 13.sp, lineHeight = 18.sp) } }
+            if (guide.stock) { Spacer(Modifier.height(10.dp)); Appear(beats >= 2) { Text("Android stock respecte les applications en arrière-plan : NovaStats sera stable sur ton appareil.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 13.sp, lineHeight = 18.sp) } }
+            if (detected == null || manual != null || embedded) {
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (BrandGuides.ALL + BrandGuides.GENERIC).forEach { g ->
+                        val on = guide.key == g.key
+                        Text(
+                            if (g.key == "generic") "Autre" else g.name.substringBefore(" /"), color = if (on) ObColors.Black else ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                            modifier = Modifier.clip(CircleShape).background(if (on) ObColors.Text else ObColors.Surface2).clickable { manual = g.key }.padding(horizontal = 14.dp, vertical = 8.dp)
+                        )
+                    }
                 }
             }
-            RiseIn(visible = intro, delayMs = 200) { PoeticText(guide.intro, theme.textSecondary, 14, Modifier.padding(horizontal = 36.dp, vertical = 10.dp)) }
-            guide.warning?.let { Text(it, color = ObColors.Red, fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 6.dp)) }
-            if (guide.stock) Text("Android stock respecte les applications en arrière-plan : NovaStats sera stable sur ton appareil.", color = theme.textSecondary, fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 6.dp))
-
-            Spacer(Modifier.height(18.dp))
-            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                guide.steps.forEachIndexed { i, step ->
-                    val isDone = i in done
-                    val active = !isDone && done.size == i
-                    ChecklistItem(
-                        theme = theme, index = i, last = i == guide.steps.lastIndex, active = active || (!isDone && pending == i), done = isDone, required = true,
-                        title = step.title, body = step.instruction, help = if (pending == i) "En attente de ton retour des paramètres…" else null,
-                        buttonLabel = "Ouvrir les paramètres", onAction = { pending = i; audio.tap(); step.open(ctx) }
-                    )
+            Spacer(Modifier.height(22.dp))
+            Appear(beats >= 3) {
+                ObCard {
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Étapes", color = ObColors.Gray, fontFamily = ObFonts.inter, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        ObTag("${done.size} / ${guide.steps.size}", if (complete) ObColors.Green else accent)
+                    }
+                    guide.steps.forEachIndexed { i, step ->
+                        val isDone = i in done
+                        Column {
+                            ObRow(Icons.Rounded.Tune, if (isDone) ObColors.Green.copy(alpha = 0.9f) else accent, step.title, step.instruction, trailing = {
+                                if (isDone) ObCheck(true) else ObMiniButton("Ouvrir", ObColors.Text) { pending = i; audio.tap(); step.open(ctx) }
+                            })
+                            if (pending == i && !isDone) Text("En attente de ton retour…", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, modifier = Modifier.padding(start = 68.dp, bottom = 10.dp))
+                            if (i != guide.steps.lastIndex) ObDivider()
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
                 }
             }
-            AnimatedVisibility(visible = complete, enter = fadeIn(tween(700)) + expandVertically(tween(700, easing = ObEasing))) {
-                PoeticText(guide.success, accent, 15, Modifier.padding(horizontal = 36.dp, vertical = 18.dp))
+            AnimatedVisibility(visible = complete, enter = fadeIn(tween(400)) + expandVertically(tween(450, easing = ObEasing))) {
+                Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ObCheck(true, 22.dp); Spacer(Modifier.width(10.dp))
+                    Text(guide.success, color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp)
+                }
             }
-            Spacer(Modifier.height(16.dp))
-            if (!embedded) {
-                ObButton(if (complete) "Continuer" else "Je le ferai plus tard", listOf(accent), enabled = !leaving, ghost = !complete) { leaving = true; audio.whoosh(); audio.tap() }
-                if (!complete) Text("Tu pourras finir dans Réglages → Guide constructeur", color = theme.textSecondary.copy(alpha = 0.7f), fontFamily = ObFonts.body, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
-                TextButton(onClick = onBack, modifier = Modifier.padding(top = 6.dp, bottom = 32.dp)) { Text("Retour", color = theme.textSecondary, fontFamily = ObFonts.body, letterSpacing = 2.sp, fontSize = 12.sp) }
-            } else Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
         }
-        if (fill > 0f) Box(Modifier.fillMaxSize().alpha(fill).background(Color.Black))
     }
-}
 
-/** Silhouette de téléphone monochrome ; l'écran s'éclaire avec la proportion d'étapes validées. */
-@Composable
-private fun PhoneSilhouette(theme: NovaTheme, done: Int, total: Int, modifier: Modifier) {
-    val ratio by animateFloatAsState(if (total == 0) 1f else done.toFloat() / total, tween(900, easing = ObEasing), label = "ratio")
-    Box(modifier.breathingGlow(theme.primary, 0.05f + 0.15f * ratio, 0.12f + 0.25f * ratio, 3600, 40.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val w = size.width; val h = size.height
-            drawRoundRect(theme.text.copy(alpha = 0.55f), Offset(w * 0.1f, h * 0.05f), Size(w * 0.8f, h * 0.9f), CornerRadius(w * 0.1f), style = Stroke(1.5.dp.toPx()))
-            drawRoundRect(theme.primary.copy(alpha = 0.08f + 0.5f * ratio), Offset(w * 0.17f, h * 0.12f), Size(w * 0.66f, h * 0.72f), CornerRadius(w * 0.04f))
-            drawCircle(theme.text.copy(alpha = 0.5f), 2.5f, Offset(w / 2, h * 0.915f))
-        }
-        Text(if (ratio >= 0.999f) "✓" else "${(ratio * 100).toInt()} %", color = theme.text, fontFamily = ObFonts.display, fontSize = if (ratio >= 0.999f) 28.sp else 14.sp, letterSpacing = 1.sp)
+    if (embedded) {
+        Box(Modifier.fillMaxSize().background(theme.background)) { Column(Modifier.fillMaxSize().padding(top = 8.dp)) { body() } }
+    } else ObStage(base = theme.background, accent = accent) {
+        ObLayout(step = 3, accent = accent, bottom = {
+            Appear(beats >= 4) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ObPrimaryButton(if (complete) "Continuer" else "Continuer sans finir", fill = if (complete) accent else ObColors.Text) { audio.tap(); audio.whoosh(); onNext(complete) }
+                    Text(if (complete) "Ton téléphone laissera NovaStats tranquille." else "Tu pourras finir dans Réglages → Guide constructeur.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                    ObLinkButton("Retour", ObColors.Gray) { onBack() }
+                }
+            }
+        }, content = body)
     }
 }

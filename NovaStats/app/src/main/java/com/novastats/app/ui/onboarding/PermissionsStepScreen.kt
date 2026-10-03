@@ -42,6 +42,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.Icons
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -95,9 +103,9 @@ object PermissionChecks {
 }
 
 /**
- * Étape 2/4 — Checklist verticale BLOQUANTE : l'accès aux notifications et l'exclusion de l'optimisation
- * batterie sont obligatoires (aucun « Passer », bouton actif seulement quand les deux sont accordés, vérification
- * réelle à chaque retour dans l'app). Le redémarrage automatique est recommandé mais optionnel.
+ * Étape 2/4 — Liste « Réglages » bloquante : notifications + optimisation batterie obligatoires (pas de « Passer »,
+ * bouton inactif tant que les deux ne sont pas réellement accordés, vérification à chaque retour dans l'app).
+ * Redémarrage automatique recommandé. Chemins manuels HiOS / Phone Master si le réglage n'a pas pris.
  */
 @Composable
 fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, onNext: (Permissions) -> Unit) {
@@ -106,10 +114,9 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
     var waitingFor by rememberSaveable { mutableStateOf<String?>(null) }
     var listenerTries by rememberSaveable { mutableIntStateOf(0) }
     var batteryTries by rememberSaveable { mutableIntStateOf(0) }
-    // Garde-fou : aucun écran système d'exclusion batterie sur cet appareil → on l'indique et on accepte après ouverture manuelle
     var batteryUnavailable by rememberSaveable { mutableStateOf(false) }
     var batteryManualOpened by rememberSaveable { mutableStateOf(false) }
-    var leaving by remember { mutableStateOf(false) }
+    val beats = rememberBeats(4, startMs = 150, stepMs = 140)
     val accent = theme.primary
 
     LifecycleResumeEffect(Unit) {
@@ -126,101 +133,87 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
 
     val batteryOk = perms.battery || (batteryUnavailable && batteryManualOpened)
     val required = perms.listener && batteryOk
-    val missing = listOfNotNull(if (!perms.listener) "l'accès aux notifications" else null, if (!batteryOk) "l'optimisation batterie" else null)
-    val fill by animateFloatAsState(if (leaving) 1f else 0f, tween(700, easing = ObEasing), label = "fill")
-    LaunchedEffect(leaving) { if (leaving) { delay(750); onNext(perms) } }
-    // Étape « active » = la première non faite
-    val activeIndex = when { !perms.listener -> 0; !batteryOk -> 1; !perms.boot -> 2; else -> 3 }
+    val missing = listOfNotNull(if (!perms.listener) "notifications" else null, if (!batteryOk) "batterie" else null)
 
-    Box(Modifier.fillMaxSize().background(theme.background)) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-            StepIndicator(2, accent, theme.text)
-            Spacer(Modifier.height(34.dp))
-            Text("CONNEXION", color = theme.textSecondary, fontFamily = ObFonts.body, fontSize = 11.sp, letterSpacing = 5.sp)
-            Spacer(Modifier.height(8.dp))
-            CinzelTitle("Laisse NovaStats t'écouter", theme.text, size = 26, letterSpacing = 1, modifier = Modifier.padding(horizontal = 28.dp))
-            Spacer(Modifier.height(10.dp))
-            PoeticText("Deux réglages sont indispensables pour que ton histoire s'écrive sans interruption. Ils ne lisent rien d'autre que le titre en cours.", theme.textSecondary, 14, Modifier.padding(horizontal = 36.dp))
-            Spacer(Modifier.height(30.dp))
-
-            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                ChecklistItem(
-                    theme = theme, index = 0, last = false, active = activeIndex == 0, done = perms.listener, required = true,
-                    title = "Accès aux notifications",
-                    body = "C'est ainsi que NovaStats voit le titre qui joue dans Spotify, YouTube Music, Deezer… Aucune notification n'est lue ni stockée.",
-                    help = if (listenerTries >= 1 && !perms.listener) "Le réglage n'a pas été activé. Chemin manuel : ${PermissionChecks.manualListenerPath()}" else null,
-                    buttonLabel = if (listenerTries >= 1) "Ouvrir les paramètres" else "Autoriser",
-                    onAction = { waitingFor = "listener"; audio.tap(); PermissionChecks.openListenerSettings(ctx) }
-                )
-                ChecklistItem(
-                    theme = theme, index = 1, last = false, active = activeIndex == 1, done = batteryOk, required = true,
-                    title = "Optimisation batterie désactivée",
-                    body = "Empêche Android (et Phone Master sur Tecno) de couper NovaStats en arrière-plan. Sans ça, des écoutes seraient perdues.",
-                    help = when {
-                        batteryUnavailable && !batteryManualOpened -> "Ton téléphone ne propose pas l'écran direct. Ouvre la liste des applications et retire la restriction pour NovaStats : ${PermissionChecks.manualBatteryPath()}"
-                        batteryTries >= 1 && !perms.battery -> "Toujours optimisé. Chemin manuel : ${PermissionChecks.manualBatteryPath()}"
-                        else -> null
-                    },
-                    buttonLabel = if (batteryUnavailable) "Ouvrir les applications" else if (batteryTries >= 1) "Réessayer" else "Désactiver",
-                    onAction = {
-                        audio.tap()
-                        if (batteryUnavailable) {
-                            waitingFor = "battery_manual"
-                            runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        } else {
-                            waitingFor = "battery"
-                            if (!PermissionChecks.requestBattery(ctx)) { batteryUnavailable = true; waitingFor = null }
-                        }
-                    }
-                )
-                ChecklistItem(
-                    theme = theme, index = 2, last = true, active = activeIndex == 2, done = perms.boot, required = false,
-                    title = "Relance au redémarrage",
-                    body = "NovaStats se remet à l'écoute tout seul quand le téléphone redémarre.",
-                    help = null, buttonLabel = "Activer",
-                    onAction = { PermissionChecks.setBoot(ctx, true); perms = perms.copy(boot = true); audio.tick(); audio.success() }
-                )
-            }
-
-            Spacer(Modifier.height(30.dp))
-            // Bouton principal : affiche en permanence ce qui manque
-            val label = if (required) "Continuer" else "Il reste : ${missing.joinToString(" et ")}"
-            ObButton(label, listOf(accent), enabled = required && !leaving) { leaving = true; audio.whoosh(); audio.tap() }
-            if (!required) Text("Ces deux réglages sont obligatoires pour continuer.", color = theme.textSecondary.copy(alpha = 0.7f), fontFamily = ObFonts.body, fontSize = 11.sp, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 12.dp, start = 32.dp, end = 32.dp))
-            TextButton(onClick = onBack, modifier = Modifier.padding(top = 8.dp, bottom = 32.dp)) { Text("Retour", color = theme.textSecondary, fontFamily = ObFonts.body, letterSpacing = 2.sp, fontSize = 12.sp) }
-        }
-        if (fill > 0f) Box(Modifier.fillMaxSize().alpha(fill).background(Color.Black))
-    }
-}
-
-/** Élément de checklist : anneau d'état + ligne verticale qui s'illumine ; seule l'étape active est dépliée. */
-@Composable
-fun ChecklistItem(
-    theme: NovaTheme, index: Int, last: Boolean, active: Boolean, done: Boolean, required: Boolean,
-    title: String, body: String, help: String?, buttonLabel: String, onAction: () -> Unit
-) {
-    val accent = theme.primary
-    var expanded by remember(active, done) { mutableStateOf(active && !done) }
-    val lineAlpha by animateFloatAsState(if (done) 1f else 0.18f, tween(900, easing = ObEasing), label = "line")
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clickable { if (!done) expanded = !expanded }) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(30.dp).fillMaxHeight()) {
-            StatusRing(done = done, active = active, accent = accent, dim = theme.textSecondary)
-            if (!last) Box(Modifier.width(1.dp).weight(1f).padding(vertical = 4.dp).background(accent.copy(alpha = lineAlpha)))
-        }
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f).padding(bottom = if (last) 0.dp else 26.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, color = if (done) theme.text.copy(alpha = 0.7f) else theme.text, fontFamily = ObFonts.body, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                Text(if (done) "ACTIVÉ" else if (required) "REQUIS" else "CONSEILLÉ", color = if (done) accent else if (required) theme.text.copy(alpha = 0.7f) else theme.textSecondary, fontFamily = ObFonts.body, fontSize = 9.sp, letterSpacing = 2.sp)
-            }
-            AnimatedVisibility(visible = expanded && !done, enter = fadeIn(tween(500)) + expandVertically(tween(500, easing = ObEasing)), exit = fadeOut(tween(250)) + shrinkVertically(tween(350, easing = ObEasing))) {
-                Column {
-                    PoeticText(body, theme.textSecondary, 13, Modifier.padding(top = 6.dp), align = androidx.compose.ui.text.style.TextAlign.Start)
-                    if (help != null) Text(help, color = theme.text.copy(alpha = 0.85f), fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 10.dp))
-                    Spacer(Modifier.height(14.dp))
-                    ObButton(buttonLabel, listOf(accent), onClick = onAction)
+    ObStage(base = theme.background, accent = accent) {
+        ObLayout(step = 2, accent = accent, bottom = {
+            Appear(beats >= 4) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ObPrimaryButton(if (required) "Continuer" else "Il manque : ${missing.joinToString(" + ")}", enabled = required, fill = if (required) accent else ObColors.Text) { audio.tap(); audio.whoosh(); onNext(perms) }
+                    Text(if (required) "Tout est en place." else "Les deux premiers réglages sont obligatoires.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                    ObLinkButton("Retour", ObColors.Gray) { onBack() }
                 }
             }
+        }) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
+                Appear(beats >= 1) { ObEyebrow("Connexion", accent) }
+                Spacer(Modifier.height(6.dp))
+                Appear(beats >= 1) { ObHeadline("Deux réglages.\nRien de plus.") }
+                Spacer(Modifier.height(12.dp))
+                Appear(beats >= 2) { ObSub("NovaStats lit uniquement le titre en cours de lecture. Ces réglages lui permettent de ne jamais être coupé.") }
+                Spacer(Modifier.height(26.dp))
+                Appear(beats >= 3) {
+                    ObCard {
+                        PermRow(
+                            icon = Icons.Rounded.Notifications, color = Color(0xFFFF3B30), title = "Accès aux notifications", required = true, done = perms.listener,
+                            subtitle = "Voir le titre qui joue dans Spotify, YouTube Music, Deezer…",
+                            help = if (listenerTries >= 1 && !perms.listener) PermissionChecks.manualListenerPath() else null,
+                            buttonLabel = if (listenerTries >= 1) "Ouvrir" else "Autoriser"
+                        ) { waitingFor = "listener"; audio.tap(); PermissionChecks.openListenerSettings(ctx) }
+                        ObDivider()
+                        PermRow(
+                            icon = Icons.Rounded.BatteryChargingFull, color = Color(0xFF34C759), title = "Batterie sans restriction", required = true, done = batteryOk,
+                            subtitle = "Empêche Android et Phone Master de couper NovaStats en arrière-plan.",
+                            help = when {
+                                batteryUnavailable && !batteryManualOpened -> "Pas d'écran direct sur cet appareil. " + PermissionChecks.manualBatteryPath()
+                                batteryTries >= 1 && !perms.battery -> PermissionChecks.manualBatteryPath()
+                                else -> null
+                            },
+                            buttonLabel = if (batteryUnavailable) "Ouvrir" else if (batteryTries >= 1) "Réessayer" else "Désactiver"
+                        ) {
+                            audio.tap()
+                            if (batteryUnavailable) {
+                                waitingFor = "battery_manual"
+                                runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            } else {
+                                waitingFor = "battery"
+                                if (!PermissionChecks.requestBattery(ctx)) { batteryUnavailable = true; waitingFor = null }
+                            }
+                        }
+                        ObDivider()
+                        PermRow(
+                            icon = Icons.Rounded.RestartAlt, color = Color(0xFF0A84FF), title = "Relance au redémarrage", required = false, done = perms.boot,
+                            subtitle = "NovaStats se remet à l'écoute après un redémarrage.", help = null, buttonLabel = "Activer"
+                        ) { PermissionChecks.setBoot(ctx, true); perms = perms.copy(boot = true); audio.tick(); audio.success() }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Appear(beats >= 4) {
+                    Text("Aucune notification n'est lue ni stockée. Tout reste sur ton téléphone.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp))
+                }
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
 }
+
+/** Ligne de réglage : icône colorée, titre + état, action à droite ; aide manuelle dépliée si besoin. */
+@Composable
+fun PermRow(icon: ImageVector, color: Color, title: String, required: Boolean, done: Boolean, subtitle: String, help: String?, buttonLabel: String, onAction: () -> Unit) {
+    Column {
+        ObRow(icon, color, title, subtitle, trailing = { if (done) ObCheck(true) else ObMiniButton(buttonLabel, ObColors.Text, onAction) })
+        Row(Modifier.padding(start = 68.dp, end = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            ObTag(if (done) "Activé" else if (required) "Requis" else "Conseillé", if (done) ObColors.Green else if (required) ObColors.Orange else ObColors.Gray)
+        }
+        AnimatedVisibility(visible = help != null && !done, enter = fadeIn(tween(300)) + expandVertically(tween(350, easing = ObEasing)), exit = fadeOut(tween(150)) + shrinkVertically(tween(250))) {
+            Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(ObColors.Surface2).padding(12.dp)) {
+                Text("Chemin manuel : " + (help ?: ""), color = ObColors.Text, fontFamily = ObFonts.inter, fontSize = 13.sp, lineHeight = 19.sp)
+            }
+        }
+    }
+}
+
+// compat (ancienne checklist)
+@Composable
+fun ChecklistItem(theme: NovaTheme, index: Int, last: Boolean, active: Boolean, done: Boolean, required: Boolean, title: String, body: String, help: String?, buttonLabel: String, onAction: () -> Unit) =
+    PermRow(Icons.Rounded.Check, theme.primary, title, required, done, body, help, buttonLabel, onAction)

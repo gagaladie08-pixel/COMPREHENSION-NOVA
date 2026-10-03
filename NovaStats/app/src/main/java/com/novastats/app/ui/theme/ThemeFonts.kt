@@ -78,7 +78,11 @@ object NovaFonts {
     }
 
     /** Famille Google Fonts [name] avec repli système ; [online] = false force directement le repli. */
+    /** Polices embarquées dans l'APK (variables) : jamais de téléchargement, jamais de repli système. */
+    private val local: Map<String, Int> = mapOf("Inter" to R.font.inter, "Cinzel" to R.font.cinzel)
+
     fun family(name: String, online: Boolean = true): FontFamily {
+        local[name]?.let { res -> return cache.getOrPut(name) { FontFamily(listOf(300, 400, 500, 600, 700, 800, 900).map { w -> Font(res, FontWeight(w)) }) } }
         val spec = specs[name] ?: Spec(listOf(400, 700), false, SANS)
         if (!online) return deviceFamily(spec.fallback)
         return cache.getOrPut(name) {
