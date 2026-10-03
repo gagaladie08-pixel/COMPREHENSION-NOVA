@@ -19,7 +19,6 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 /** Paramètres utilisateur (onglet ⚙️). Hot-reload : le service observe ces flows. */
 class SettingsRepository(private val context: Context) {
-    companion object { const val FONT_MIN = 80; const val FONT_MAX = 140; const val FONT_STEP = 10 }
 
     private object Keys {
         val THEME = stringPreferencesKey("theme_id")
@@ -145,5 +144,6 @@ class SettingsRepository(private val context: Context) {
         return allowed
     }
 
-    companion object { const val GOOGLE_DAILY_CAP = 80 }
+    companion object {
+        const val FONT_MIN = 80; const val FONT_MAX = 140; const val FONT_STEP = 10 const val GOOGLE_DAILY_CAP = 80 }
 }
