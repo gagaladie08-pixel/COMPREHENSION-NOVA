@@ -133,7 +133,9 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                     }
                 }
 
-                // 3. Bandeau résumé (style Stats)
+                // 3. Cases de mouvement (↑ ↓ ✨ 🔁) : un appui filtre la liste, un second le retire
+                if (state.items.isNotEmpty()) MovementFilterBoxes(state, vm::toggleMovementFilter)
+                // 4. Bandeau résumé (style Stats)
                 if (state.hasAnyData) SummaryBanner(state)
                 // 4. Carte « #1 de la période » : la pochette du #1 en fond, titre, artiste, écoutes, règne
                 state.summary.numberOne?.let { one -> if (state.items.isNotEmpty()) NumberOneCard(one, state) { vm.openHistory(one) } }
@@ -370,6 +372,33 @@ private fun Top10Divider() {
     }
 }
 
+/** Quatre cases ↑ ↓ ✨ 🔁 avec compteur ; la case active est surlignée en couleur primaire du thème. */
+@Composable
+private fun MovementFilterBoxes(state: BillboardUiState, onToggle: (MovementFilter) -> Unit) {
+    val theme = Nova.theme
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        MovementFilter.entries.forEach { f ->
+            val selected = state.movementFilter == f
+            val tint = when (f) {
+                MovementFilter.UP -> NovaColors.Up
+                MovementFilter.DOWN -> NovaColors.Down
+                MovementFilter.NEW -> NovaColors.Gold
+                MovementFilter.REENTRY -> theme.secondary
+            }
+            Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                    .background(if (selected) theme.primary.copy(alpha = 0.22f) else theme.surface)
+                    .border(if (selected) 1.5.dp else 1.dp, if (selected) theme.primary else tint.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                    .clickable { onToggle(f) }.padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("${f.emoji} ${state.count(f)}", color = if (selected) theme.primary else tint, fontWeight = FontWeight.Black, fontSize = 15.sp, maxLines = 1)
+                Text(f.label, color = if (selected) theme.text else theme.textSecondary, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
 @Composable
 private fun Badge(text: String, color: Color) {
     Text(
@@ -433,11 +462,14 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
             )
         }
         Column(horizontalAlignment = Alignment.End) {
+            val m = item.movement
+            // PEAK = nouveau record de POSITION (meilleure place jamais atteinte, pour la 1re fois) ; NP = nouveau record d'ÉCOUTES
+            val positionPeak = m !is Movement.New && item.position == item.peakPosition && item.timesAtPeak <= 1
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.isPlaysPeak) { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
+                if (positionPeak) { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
                 Text("${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
             }
-            val m = item.movement
+            if (item.isPlaysPeak) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             if (m !is Movement.New && m !is Movement.Reentry) {
                 val v = item.variationPlays
                 val (txt, col) = when {

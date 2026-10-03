@@ -98,6 +98,9 @@ fun NovaApp() {
         }
     }
 
+    var globalSearch by remember { mutableStateOf(false) }
+    if (globalSearch) GlobalSearchDialog { globalSearch = false }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -108,8 +111,11 @@ fun NovaApp() {
             LaunchedEffect(selectedIndex) {
                 if (selectedIndex >= 0) scroll.animateScrollTo(((selectedIndex - 2) * itemPx).toInt().coerceAtLeast(0))
             }
+            Column(Modifier.fillMaxWidth().background(theme.surface)) {
+            // Barre de marque fixe : icône du thème + NOVASTATS + date/heure + 🔍 (ne se replie jamais)
+            BrandBar(onSearch = { globalSearch = true })
             Row(
-                Modifier.fillMaxWidth().background(theme.surface).statusBarsPadding().horizontalScroll(scroll).padding(horizontal = 4.dp, vertical = 4.dp)
+                Modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
                 topTabs.forEach { tab ->
                     val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
@@ -131,6 +137,7 @@ fun NovaApp() {
                         Text(tab.label, maxLines = 1, style = MaterialTheme.typography.labelSmall, color = if (selected) theme.primary else theme.textSecondary)
                     }
                 }
+            }
             }
         }
     ) { padding ->

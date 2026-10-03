@@ -171,6 +171,18 @@ interface TrackDao {
     )
     suspend fun ofAlbum(albumId: Long): List<RankedTrack>
 
+    /** 🔍 Recherche globale : titres dont le titre ou l'artiste contient [q]. */
+    @Query(
+        """
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name,
+               (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title,
+               t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms
+        FROM tracks t WHERE t.play_count > 0 AND (LOWER(t.title) LIKE '%' || LOWER(:q) || '%' OR t.artist_id IN (SELECT artist_id FROM artists WHERE LOWER(name) LIKE '%' || LOWER(:q) || '%'))
+        ORDER BY t.play_count DESC LIMIT :limit
+        """
+    )
+    suspend fun search(q: String, limit: Int = 25): List<RankedTrack>
+
     /** Agrégats d'un titre sur une période. */
     @Query(
         """
@@ -271,6 +283,9 @@ interface TrackDao {
 
 @Dao
 interface ArtistDao {
+    /** 🔍 Recherche globale. */
+    @Query("SELECT * FROM artists WHERE is_merged = 0 AND LOWER(name) LIKE '%' || LOWER(:q) || '%' ORDER BY play_count DESC LIMIT :limit")
+    suspend fun search(q: String, limit: Int = 15): List<ArtistEntity>
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(artist: ArtistEntity): Long
 
@@ -395,6 +410,9 @@ interface ArtistDao {
 
 @Dao
 interface AlbumDao {
+    /** 🔍 Recherche globale. */
+    @Query("SELECT * FROM albums WHERE LOWER(title) LIKE '%' || LOWER(:q) || '%' ORDER BY play_count DESC LIMIT :limit")
+    suspend fun search(q: String, limit: Int = 15): List<AlbumEntity>
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(album: AlbumEntity): Long
 

@@ -63,11 +63,24 @@ data class ChartSummary(
     val prevDurationMs: Long = 0
 )
 
+/** Filtre de mouvement (cases au-dessus du bandeau). */
+enum class MovementFilter(val emoji: String, val label: String) {
+    UP("↑", "Progressions"), DOWN("↓", "Régressions"), NEW("✨", "Nouveautés"), REENTRY("🔁", "Retours");
+
+    fun matches(m: Movement): Boolean = when (this) {
+        UP -> m is Movement.Up
+        DOWN -> m is Movement.Down
+        NEW -> m is Movement.New
+        REENTRY -> m is Movement.Reentry
+    }
+}
+
 data class BillboardUiState(
     val chart: Chart = Chart.HOT_100,
     val period: Period = Period.WEEKLY,
     val anchor: LocalDate = BillboardDates.latest(Period.WEEKLY, Dates.today()),
     val query: String = "",
+    val movementFilter: MovementFilter? = null,
     val isCurrent: Boolean = true,
     val hasAnyData: Boolean = false,
     val items: List<ChartItem> = emptyList(),
@@ -75,9 +88,13 @@ data class BillboardUiState(
 ) {
     val limit: Int get() = chart.limit(period)
     val filtered: List<ChartItem>
-        get() = if (query.isBlank()) items else items.filter {
-            it.name.contains(query, ignoreCase = true) || (it.secondary?.contains(query, ignoreCase = true) == true)
+        get() = items.filter { item ->
+            (query.isBlank() || item.name.contains(query, ignoreCase = true) || (item.secondary?.contains(query, ignoreCase = true) == true)) &&
+                (movementFilter == null || movementFilter.matches(item.movement))
         }
+
+    /** Compteur par type de mouvement (sur la liste complète, hors recherche). */
+    fun count(filter: MovementFilter): Int = items.count { filter.matches(it.movement) }
 }
 
 /** Fiche historique (appui long). */
@@ -101,6 +118,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val period = MutableStateFlow(Period.WEEKLY)
     private val anchor = MutableStateFlow(BillboardDates.latest(Period.WEEKLY, Dates.today()))
     private val query = MutableStateFlow("")
+    private val movementFilter = MutableStateFlow<MovementFilter?>(null)
+    private val textAndFilter = combine(query, movementFilter) { q, f -> q to f }
 
     private val hasAnyData: Flow<Boolean> = db.scrobbleDao().countConfirmedFlow().map { it > 0 }
 
@@ -138,9 +157,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    val state: StateFlow<BillboardUiState> = combine(selection, query, hasAnyData, items, summary) { s, q, any, list, sum ->
+    val state: StateFlow<BillboardUiState> = combine(selection, textAndFilter, hasAnyData, items, summary) { s, (q, f), any, list, sum ->
         BillboardUiState(
-            chart = s.chart, period = s.period, anchor = s.anchor, query = q,
+            chart = s.chart, period = s.period, anchor = s.anchor, query = q, movementFilter = f,
             isCurrent = BillboardDates.isCurrent(s.period, s.anchor),
             hasAnyData = any, items = list, summary = sum
         )
@@ -175,6 +194,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun search(q: String) { query.value = q }
+
+    /** Appui sur une case : active le filtre, ré-appui : le retire. */
+    fun toggleMovementFilter(f: MovementFilter) { movementFilter.value = if (movementFilter.value == f) null else f }
 
     fun openHistory(item: ChartItem) {
         val c = chart.value; val p = period.value
