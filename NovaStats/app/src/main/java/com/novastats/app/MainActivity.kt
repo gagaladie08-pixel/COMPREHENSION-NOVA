@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
             ) {
             val firstLaunchDone by app.settings.firstLaunchDone.collectAsStateWithLifecycle<Boolean?>(initialValue = null)
             var onboardingJustFinished by remember { mutableStateOf(false) }
+            // « Revoir l'introduction » : quand le drapeau repasse à vrai puis à faux, on ré-arme l'onboarding
+            androidx.compose.runtime.LaunchedEffect(firstLaunchDone) { if (firstLaunchDone == true) onboardingJustFinished = false }
             val mode = when {
                 firstLaunchDone == null -> 0
                 firstLaunchDone == false && !onboardingJustFinished -> 1

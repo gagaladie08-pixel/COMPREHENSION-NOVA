@@ -3,16 +3,9 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- N stylisé — dégradé #FFD700 → #FF1493 → #FFA500 (Slay Queen) -->
-    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76">
-                <item android:offset="0" android:color="#FFD700" />
-                <item android:offset="0.5" android:color="#FF1493" />
-                <item android:offset="1" android:color="#FFA500" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <!-- Onde sonore intégrée — accent à 70 % -->
-    <path android:pathData="M30,51 V57 M38,47 V61 M46,42 V66 M54,38 V70 M62,42 V66 M70,47 V61 M78,51 V57" android:strokeColor="#B76E79" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+    <!-- Premier plan unique — Slay Queen -->
+    <path android:pathData="M33,34 L41,25 L48,31 L54,22 L60,31 L67,25 L75,34 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="33" android:startY="22" android:endX="75" android:endY="34"><item android:offset="0" android:color="#FF1493" /><item android:offset="1" android:color="#FFA500" /></gradient></aapt:attr></path>
+    <path android:pathData="M39,24 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 ZM51.6,21 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 ZM65,24 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 Z" android:fillColor="#FFA500" />
+    <path android:pathData="M31,80 L31,37 L40,37 L68,69 L68,37 L77,37 L77,80 L68,80 L40,49 L40,80 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#FFD700" /><item android:offset="0.5" android:color="#FF1493" /><item android:offset="1" android:color="#FFA500" /></gradient></aapt:attr></path>
+    <path android:pathData="M46,84 V86 M50,83 V87 M54,81.5 V88.5 M58,83 V87 M62,84 V86" android:fillColor="#00000000" android:strokeColor="#FF1493" android:strokeWidth="2" android:strokeAlpha="0.9" android:strokeLineCap="round" />
 </vector>

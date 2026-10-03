@@ -100,6 +100,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setTrackWhenMuted(v: Boolean) = context.dataStore.edit { it[Keys.TRACK_MUTED] = v }
     suspend fun setWatchdog(v: Boolean) = context.dataStore.edit { it[Keys.WATCHDOG] = v }
     suspend fun setFirstLaunchDone() = context.dataStore.edit { it[Keys.FIRST_LAUNCH_DONE] = true }
+    /** Rejoue l'introduction (Réglages → Apparence / À propos). */
+    suspend fun replayOnboarding() = context.dataStore.edit { it[Keys.FIRST_LAUNCH_DONE] = false }
 
     /* ---- Nova Awards ---- */
     /** Années dont la cérémonie de révélation (cartes une par une) a déjà été jouée. */

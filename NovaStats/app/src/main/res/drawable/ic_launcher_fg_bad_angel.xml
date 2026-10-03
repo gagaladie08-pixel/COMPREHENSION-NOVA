@@ -3,16 +3,16 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- N stylisé — dégradé #CC0033 → #FFFFFF → #FF3366 (Bad Angel) -->
-    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76">
-                <item android:offset="0" android:color="#CC0033" />
-                <item android:offset="0.5" android:color="#FFFFFF" />
-                <item android:offset="1" android:color="#FF3366" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <!-- Onde sonore intégrée — accent à 70 % -->
-    <path android:pathData="M30,51 V57 M38,47 V61 M46,42 V66 M54,38 V70 M62,42 V66 M70,47 V61 M78,51 V57" android:strokeColor="#FF0044" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+    <!-- Premier plan unique — Bad Angel -->
+    <path android:pathData="M34,25 a20,5 0 1,0 40,0 a20,5 0 1,0 -40,0 Z" android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeAlpha="0.95" />
+    <group>
+        <clip-path android:pathData="M0,0 H54 V108 H0 Z" />
+        <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z" android:fillColor="#12101A" />
+    </group>
+    <group>
+        <clip-path android:pathData="M54,0 H108 V108 H54 Z" />
+        <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="54" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#FFFFFF" /><item android:offset="1" android:color="#CC0033" /></gradient></aapt:attr></path>
+    </group>
+    <path android:pathData="M34,80 Q54,90 74,80" android:fillColor="#00000000" android:strokeColor="#FF0044" android:strokeWidth="2" android:strokeAlpha="0.85" android:strokeLineCap="round" />
+    <path android:pathData="M40,85 Q54,92 68,85" android:fillColor="#00000000" android:strokeColor="#FF0044" android:strokeWidth="1.4" android:strokeAlpha="0.55" android:strokeLineCap="round" />
 </vector>

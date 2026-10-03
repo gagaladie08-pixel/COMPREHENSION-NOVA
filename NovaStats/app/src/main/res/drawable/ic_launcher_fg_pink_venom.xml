@@ -3,16 +3,8 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- N stylisé — dégradé #FF0080 → #FF0030 → #FF69B4 (Pink Venom) -->
-    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76">
-                <item android:offset="0" android:color="#FF0080" />
-                <item android:offset="0.5" android:color="#FF0030" />
-                <item android:offset="1" android:color="#FF69B4" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <!-- Onde sonore intégrée — accent à 70 % -->
-    <path android:pathData="M30,51 V57 M38,47 V61 M46,42 V66 M54,38 V70 M62,42 V66 M70,47 V61 M78,51 V57" android:strokeColor="#FF007F" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+    <!-- Premier plan unique — Pink Venom -->
+    <path android:pathData="M31,76 L31,32 L40,32 L68,60 L68,32 L77,32 L77,76 L70,76 L40,46 L40,76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#FF0080" /><item android:offset="0.5" android:color="#FF0030" /><item android:offset="1" android:color="#FF69B4" /></gradient></aapt:attr></path>
+    <path android:pathData="M68,66 C68,70 72,72 72,76 C72,79 69,80 67,78 C65,76 68,70 68,66 Z" android:fillColor="#FF0080" />
+    <path android:pathData="M26,82 L40,82 L37,86 L50,79 L46,87 L58,83 L80,83" android:fillColor="#00000000" android:strokeColor="#FF007F" android:strokeWidth="2" android:strokeAlpha="0.95" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>

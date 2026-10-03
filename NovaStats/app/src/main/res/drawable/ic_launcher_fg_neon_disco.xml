@@ -3,16 +3,11 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- N stylisé — dégradé #9B00FF → #FFD700 → #FF69B4 (Neon Disco) -->
-    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76">
-                <item android:offset="0" android:color="#9B00FF" />
-                <item android:offset="0.5" android:color="#FFD700" />
-                <item android:offset="1" android:color="#FF69B4" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <!-- Onde sonore intégrée — accent à 70 % -->
-    <path android:pathData="M30,51 V57 M38,47 V61 M46,42 V66 M54,38 V70 M62,42 V66 M70,47 V61 M78,51 V57" android:strokeColor="#C0C0C0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+    <!-- Premier plan unique — Neon Disco -->
+    <path android:pathData="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 Z" android:fillColor="#00000000" android:strokeColor="#FFD700" android:strokeWidth="1.2" android:strokeAlpha="0.6" />
+    <path android:pathData="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 Z" android:fillColor="#00000000" android:strokeColor="#FF69B4" android:strokeWidth="5" android:strokeAlpha="0.12" />
+    <path android:pathData="M35,73 V35 L73,73 V35" android:fillColor="#00000000" android:strokeColor="#9B00FF" android:strokeWidth="11" android:strokeAlpha="0.35" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M35,73 V35 L73,73 V35" android:fillColor="#00000000" android:strokeColor="#9B00FF" android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M35,73 V35 L73,73 V35" android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeAlpha="0.85" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M44,80.5 V83.5 M49,79 V85 M54,77.5 V86.5 M59,79 V85 M64,80.5 V83.5" android:fillColor="#00000000" android:strokeColor="#FFD700" android:strokeWidth="2.4" android:strokeAlpha="0.9" android:strokeLineCap="round" />
 </vector>

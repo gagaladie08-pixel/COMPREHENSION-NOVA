@@ -3,13 +3,8 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- Fond : dégradé vertical #1A0A00 → #2D1200 (Solara) -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108">
-                <item android:offset="0" android:color="#1A0A00" />
-                <item android:offset="1" android:color="#2D1200" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <!-- Fond unique — Solara -->
+    <path android:pathData="M0,0 H108 V108 H0 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108"><item android:offset="0" android:color="#2D1200" /><item android:offset="1" android:color="#1A0A00" /></gradient></aapt:attr></path>
+    <path android:pathData="M4,60 a50,50 0 1,0 100,0 a50,50 0 1,0 -100,0 Z" android:fillAlpha="0.5"><aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="54" android:centerY="60" android:gradientRadius="50"><item android:offset="0" android:color="#C4622D" /><item android:offset="1" android:color="#00000000" /></gradient></aapt:attr></path>
+    <path android:pathData="M30.8,53.8 L9.6,48.1 M33.2,48.0 L14.2,37.0 M37.0,43.0 L21.5,27.5 M42.0,39.2 L31.0,20.2 M47.8,36.8 L42.1,15.6 M54.0,36.0 L54.0,14.0 M60.2,36.8 L65.9,15.6 M66.0,39.2 L77.0,20.2 M71.0,43.0 L86.5,27.5 M74.8,48.0 L93.8,37.0 M77.2,53.8 L98.4,48.1" android:fillColor="#00000000" android:strokeColor="#C4622D" android:strokeWidth="2.6" android:strokeAlpha="0.55" android:strokeLineCap="round" />
 </vector>

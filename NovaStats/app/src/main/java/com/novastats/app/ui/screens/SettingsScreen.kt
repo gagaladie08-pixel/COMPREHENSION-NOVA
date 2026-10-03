@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -417,6 +418,15 @@ private fun AppearancePage() {
             Column(Modifier.padding(16.dp)) {
                 ToggleRow("Retour haptique", "Vibration légère sur les actions importantes", haptics) { scope.launch { settings.setHaptics(it) } }
                 ToggleRow("Icône dynamique", "L'icône de l'app suit le thème. Le changement se fait quand tu quittes l'app (certains téléphones relancent alors NovaStats au retour).", dynamicIcon) { scope.launch { settings.setDynamicIcon(it) } }
+            }
+        }
+        SectionTitle("🎬 Introduction")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Text("Revoir l'introduction", color = theme.text, fontWeight = FontWeight.SemiBold)
+                Text("Rejoue l'onboarding complet (accueil, thèmes, permissions, guide). Tes données et réglages sont conservés.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = { scope.launch { settings.replayOnboarding() } }, modifier = Modifier.fillMaxWidth()) { Text("Revoir l'introduction", color = theme.primary) }
             }
         }
     }
@@ -856,6 +866,15 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.9.8" to listOf(
+        "🖼️ 15 icônes d'app uniques, une par univers — Survivor aux couleurs de la fierté (arc-en-ciel, Progress, trans)"
+    ),
+    "0.9.7" to listOf(
+        "🎬 Onboarding « Cinéma » : noir + une couleur, thèmes plein écran, parallaxe gyroscopique, 3 sons discrets (sans musique)",
+        "🔒 Permissions bloquantes : notifications + optimisation batterie obligatoires, chemins manuels HiOS / Phone Master",
+        "🖼️ Changer de thème ne ferme plus l'app : l'icône change en arrière-plan (réglage « Icône dynamique »)",
+        "🔁 « Revoir l'introduction » dans Apparence et À propos"
+    ),
     "0.2.0" to listOf(
         "🏅 Onglet Records complet : 24 records, popup 90 % avec périodes / sections / sous-sections",
         "⚙️ Paramètres refaits : sous-pages, notifications (11 interrupteurs), blacklist, apps sources",
@@ -882,6 +901,10 @@ private fun AboutPage() {
                 Text("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", color = theme.textSecondary)
                 Spacer(Modifier.height(8.dp))
                 Text("Tes statistiques d'écoute, façon Billboard. 100 % local : aucune donnée n'est envoyée, hors requêtes d'images vers les APIs publiques.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(12.dp))
+                val aboutScope = rememberCoroutineScope()
+                val aboutSettings = (LocalContext.current.applicationContext as com.novastats.app.NovaStatsApp).settings
+                OutlinedButton(onClick = { aboutScope.launch { aboutSettings.replayOnboarding() } }) { Text("🎬 Revoir l'introduction", color = theme.primary) }
             }
         }
         SectionTitle("🆕 Nouveautés")

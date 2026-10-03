@@ -3,13 +3,9 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- Fond : dégradé vertical #120800 → #1E0E00 (African Confessions) -->
-    <path android:pathData="M0,0 H108 V108 H0 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108">
-                <item android:offset="0" android:color="#120800" />
-                <item android:offset="1" android:color="#1E0E00" />
-            </gradient>
-        </aapt:attr>
-    </path>
+    <!-- Fond unique — African Confessions -->
+    <path android:pathData="M0,0 H108 V108 H0 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108"><item android:offset="0" android:color="#120800" /><item android:offset="1" android:color="#1E0E00" /></gradient></aapt:attr></path>
+    <path android:pathData="M0,0 L8,10 L0,20 L-8,10 Z M16,0 L24,10 L16,20 L8,10 Z M32,0 L40,10 L32,20 L24,10 Z M48,0 L56,10 L48,20 L40,10 Z M64,0 L72,10 L64,20 L56,10 Z M80,0 L88,10 L80,20 L72,10 Z M96,0 L104,10 L96,20 L88,10 Z M112,0 L120,10 L112,20 L104,10 Z M8,88 L16,98 L8,108 L0,98 Z M24,88 L32,98 L24,108 L16,98 Z M40,88 L48,98 L40,108 L32,98 Z M56,88 L64,98 L56,108 L48,98 Z M72,88 L80,98 L72,108 L64,98 Z M88,88 L96,98 L88,108 L80,98 Z M104,88 L112,98 L104,108 L96,98 Z" android:fillColor="#2D5A27" android:fillAlpha="0.35" />
+    <path android:pathData="M0,22 H108 M0,86 H108" android:fillColor="#00000000" android:strokeColor="#FFB347" android:strokeWidth="1" android:strokeAlpha="0.5" />
+    <path android:pathData="M24,52 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 Z" android:fillAlpha="0.45"><aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="54" android:centerY="52" android:gradientRadius="30"><item android:offset="0" android:color="#2D5A27" /><item android:offset="1" android:color="#00000000" /></gradient></aapt:attr></path>
 </vector>
