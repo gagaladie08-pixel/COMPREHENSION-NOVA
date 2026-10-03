@@ -39,6 +39,7 @@ class SettingsRepository(private val context: Context) {
         val LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
         val HAPTICS = booleanPreferencesKey("haptics")
         val FONT_SCALE = intPreferencesKey("font_scale_pct")
+        val DYNAMIC_ICON = booleanPreferencesKey("dynamic_icon")
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
     }
@@ -123,6 +124,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setAutoBackup(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_BACKUP] = v }
     suspend fun setLastBackupAt(v: Long) = context.dataStore.edit { it[Keys.LAST_BACKUP_AT] = v }
     suspend fun setHaptics(v: Boolean) = context.dataStore.edit { it[Keys.HAPTICS] = v }
+    /** Icône du launcher qui suit le thème (bascule d'activity-alias, appliquée quand l'app passe en arrière-plan). */
+    val dynamicIcon: Flow<Boolean> = context.dataStore.data.map { it[Keys.DYNAMIC_ICON] ?: true }
+    suspend fun setDynamicIcon(v: Boolean) = context.dataStore.edit { it[Keys.DYNAMIC_ICON] = v }
 
     /* ---- Enrichissement APIs ---- */
     val autoEnrich: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_ENRICH] ?: true }

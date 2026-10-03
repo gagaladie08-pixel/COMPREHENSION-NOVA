@@ -68,10 +68,18 @@ class MainActivity : ComponentActivity() {
             ) {
             val firstLaunchDone by app.settings.firstLaunchDone.collectAsStateWithLifecycle<Boolean?>(initialValue = null)
             var onboardingJustFinished by remember { mutableStateOf(false) }
-            when {
-                firstLaunchDone == null -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { Box(Modifier.fillMaxSize().background(Nova.theme.background)) }
-                firstLaunchDone == false && !onboardingJustFinished -> OnboardingFlow { onboardingJustFinished = true }
-                else -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { NovaApp() }
+            val mode = when {
+                firstLaunchDone == null -> 0
+                firstLaunchDone == false && !onboardingJustFinished -> 1
+                else -> 2
+            }
+            // Fin d'onboarding : le voile noir se dissout sur le vrai écran d'accueil (fondu 1,4 s)
+            androidx.compose.animation.Crossfade(targetState = mode, animationSpec = androidx.compose.animation.core.tween(1400), label = "root") { m ->
+                when (m) {
+                    0 -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { Box(Modifier.fillMaxSize().background(Nova.theme.background)) }
+                    1 -> OnboardingFlow { onboardingJustFinished = true }
+                    else -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { NovaApp() }
+                }
             }
             }
         }

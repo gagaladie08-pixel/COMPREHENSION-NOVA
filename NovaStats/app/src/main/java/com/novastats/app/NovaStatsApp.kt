@@ -46,7 +46,12 @@ class NovaStatsApp : Application() {
         com.novastats.app.service.DetectionState.bind(this)
         com.novastats.app.service.Watchdog.schedule(this)
         // Icône du launcher = thème actif (15 activity-alias, un seul activé)
-        appScope.launch { settings.themeId.collect { id -> com.novastats.app.ui.theme.IconSwitcher.apply(this@NovaStatsApp, id) } }
+        // La bascule est reportée au passage en arrière-plan (sinon l'app se ferme) et désactivable dans Réglages
+        com.novastats.app.ui.theme.IconSwitcher.install(this)
+        appScope.launch {
+            kotlinx.coroutines.flow.combine(settings.themeId, settings.dynamicIcon) { id, dyn -> if (dyn) id else com.novastats.app.ui.theme.NovaThemes.DEFAULT.id }
+                .collect { id -> com.novastats.app.ui.theme.IconSwitcher.request(id) }
+        }
     }
 
     private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)

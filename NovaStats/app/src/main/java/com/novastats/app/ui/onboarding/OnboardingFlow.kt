@@ -3,6 +3,8 @@ package com.novastats.app.ui.onboarding
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -42,13 +44,15 @@ fun OnboardingFlow(onFinished: () -> Unit) {
     NovaStatsTheme(theme = theme) {
         AnimatedContent(
             targetState = page,
+            // « Shared axis » : le contenu avance en profondeur (léger zoom + fondu), une seule courbe
             transitionSpec = {
-                if (targetState > initialState) (slideInHorizontally(tween(450)) { it } + fadeIn(tween(300))) togetherWith (slideOutHorizontally(tween(350)) { -it / 3 } + fadeOut(tween(250)))
-                else (slideInHorizontally(tween(350)) { -it } + fadeIn(tween(300))) togetherWith (slideOutHorizontally(tween(300)) { it / 3 } + fadeOut(tween(200)))
+                val forward = targetState > initialState
+                (fadeIn(tween(700, delayMillis = 150, easing = ObEasing)) + scaleIn(tween(900, easing = ObEasing), initialScale = if (forward) 0.94f else 1.06f)) togetherWith
+                    (fadeOut(tween(350, easing = ObEasing)) + scaleOut(tween(600, easing = ObEasing), targetScale = if (forward) 1.06f else 0.94f))
             }, label = "onboarding"
         ) { p ->
             when (p) {
-                0 -> WelcomeScreen(audio) { audio.stopAmbient(); page = 1 }
+                0 -> WelcomeScreen(audio) { page = 1 }
                 1 -> ThemeStepScreen(audio, theme, onThemeSelected = { t -> themeId = t.id; scope.launch { app.settings.setTheme(t.id) } }) { t -> themeId = t.id; scope.launch { app.settings.setTheme(t.id) }; page = 2 }
                 2 -> PermissionsStepScreen(audio, theme, onBack = { page = 1 }) { result -> perms = result; page = 3 }
                 3 -> GuideStepScreen(audio, theme, onBack = { page = 2 }) { completed -> guideDone = completed; perms = PermissionChecks.all(app); page = 4 }

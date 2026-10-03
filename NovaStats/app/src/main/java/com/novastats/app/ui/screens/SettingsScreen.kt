@@ -337,6 +337,7 @@ private fun AppearancePage() {
     val theme = Nova.theme
     val themeId by settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)
     val haptics by settings.haptics.collectAsStateWithLifecycle(initialValue = true)
+    val dynamicIcon by settings.dynamicIcon.collectAsStateWithLifecycle(initialValue = true)
 
     val fontPct by settings.fontScalePct.collectAsStateWithLifecycle(initialValue = 100)
 
@@ -415,6 +416,7 @@ private fun AppearancePage() {
         NovaCard {
             Column(Modifier.padding(16.dp)) {
                 ToggleRow("Retour haptique", "Vibration légère sur les actions importantes", haptics) { scope.launch { settings.setHaptics(it) } }
+                ToggleRow("Icône dynamique", "L'icône de l'app suit le thème. Le changement se fait quand tu quittes l'app (certains téléphones relancent alors NovaStats au retour).", dynamicIcon) { scope.launch { settings.setDynamicIcon(it) } }
             }
         }
     }
