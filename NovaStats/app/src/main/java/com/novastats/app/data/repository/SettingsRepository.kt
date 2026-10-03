@@ -145,5 +145,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     companion object {
-        const val FONT_MIN = 80; const val FONT_MAX = 140; const val FONT_STEP = 10 const val GOOGLE_DAILY_CAP = 80 }
+        const val FONT_MIN = 80; const val FONT_MAX = 140; const val FONT_STEP = 10
+        const val GOOGLE_DAILY_CAP = 80
+    }
 }
