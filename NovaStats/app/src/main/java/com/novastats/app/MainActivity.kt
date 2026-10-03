@@ -60,12 +60,19 @@ class MainActivity : ComponentActivity() {
         val app = application as NovaStatsApp
         setContent {
             val themeId by app.settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)
+            val fontPct by app.settings.fontScalePct.collectAsStateWithLifecycle(initialValue = 100)
+            // 🔠 Taille du texte : on multiplie le fontScale système → tous les sp de l'app suivent
+            val base = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(base.density, base.fontScale * fontPct / 100f)
+            ) {
             val firstLaunchDone by app.settings.firstLaunchDone.collectAsStateWithLifecycle<Boolean?>(initialValue = null)
             var onboardingJustFinished by remember { mutableStateOf(false) }
             when {
                 firstLaunchDone == null -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { Box(Modifier.fillMaxSize().background(Nova.theme.background)) }
                 firstLaunchDone == false && !onboardingJustFinished -> OnboardingFlow { onboardingJustFinished = true }
                 else -> NovaStatsTheme(theme = NovaThemes.byId(themeId)) { NovaApp() }
+            }
             }
         }
     }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -76,7 +77,7 @@ import java.util.Locale
 /** Sous-pages de ⚙️ Paramètres. */
 enum class SettingsPage(val emoji: String, val title: String, val subtitle: String) {
     DETECTION("🎵", "Détection", "Seuil, apps sources, blacklist, filtres"),
-    APPEARANCE("🎨", "Apparence", "15 thèmes néon · retour haptique"),
+    APPEARANCE("🎨", "Apparence", "15 thèmes néon · taille du texte · retour haptique"),
     NOTIFICATIONS("🔔", "Notifications", "Certifications, Panthéon, Hall of Fame"),
     DATA("🗄️", "Données", "Export / import JSON, sauvegarde auto, suppression"),
     EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
@@ -337,7 +338,34 @@ private fun AppearancePage() {
     val themeId by settings.themeId.collectAsStateWithLifecycle(initialValue = NovaThemes.DEFAULT.id)
     val haptics by settings.haptics.collectAsStateWithLifecycle(initialValue = true)
 
+    val fontPct by settings.fontScalePct.collectAsStateWithLifecycle(initialValue = 100)
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        // 🔠 Taille du texte : − / + par pas de 10 %, aperçu immédiat (toute l'app suit)
+        SectionTitle("🔠 Taille du texte")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Police de l'app", color = theme.text, fontWeight = FontWeight.SemiBold)
+                        Text(if (fontPct == 100) "Taille normale" else "$fontPct % de la taille normale", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    @Composable
+                    fun Step(label: String, enabled: Boolean, onClick: () -> Unit) {
+                        Text(
+                            label, color = if (enabled) theme.background else theme.textSecondary, fontWeight = FontWeight.Black, fontSize = 20.sp, textAlign = TextAlign.Center,
+                            modifier = Modifier.size(42.dp).clip(CircleShape).background(if (enabled) theme.primary else theme.surface)
+                                .clickable(enabled = enabled, onClick = onClick).wrapContentHeight()
+                        )
+                    }
+                    Step("−", fontPct > SettingsRepository.FONT_MIN) { scope.launch { settings.setFontScalePct(fontPct - SettingsRepository.FONT_STEP) } }
+                    Text("$fontPct %", color = theme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+                    Step("+", fontPct < SettingsRepository.FONT_MAX) { scope.launch { settings.setFontScalePct(fontPct + SettingsRepository.FONT_STEP) } }
+                }
+                Text("Aperçu : Les classements, popups et réglages s'adaptent immédiatement.", color = theme.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 10.dp))
+                if (fontPct != 100) Text("↺ Revenir à 100 %", color = theme.primary, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp).clickable { scope.launch { settings.setFontScalePct(100) } })
+            }
+        }
         SectionTitle("🎨 Thèmes — ${NovaThemes.ALL.size}")
         NovaCard {
             Column(Modifier.padding(16.dp)) {

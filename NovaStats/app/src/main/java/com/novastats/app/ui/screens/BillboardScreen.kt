@@ -3,6 +3,7 @@ package com.novastats.app.ui.screens
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -133,6 +135,8 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 
                 // 3. Bandeau résumé (style Stats)
                 if (state.hasAnyData) SummaryBanner(state)
+                // 4. Carte « #1 de la période » : la pochette du #1 en fond, titre, artiste, écoutes, règne
+                state.summary.numberOne?.let { one -> if (state.items.isNotEmpty()) NumberOneCard(one, state) { vm.openHistory(one) } }
             }
         }
 
@@ -282,6 +286,48 @@ private fun SummaryBanner(state: BillboardUiState) {
         }
     }
     SummaryStrip(cells, content = details)
+}
+
+/**
+ * Carte #1 (maquette utilisateur) : fond = pochette / photo du #1 assombrie, « 🎵 #1 SONG DE LA PÉRIODE »,
+ * titre en accent, artiste, « N× écoutes », « 👑 Day/Week N » (règne en cours), grand « #1 » en filigrane à droite.
+ * Appui → fiche historique de l'élément.
+ */
+@Composable
+private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -> Unit) {
+    val theme = Nova.theme
+    val kind = when (state.chart) { Chart.HOT_100 -> "🎵 #1 SONG"; Chart.ARTIST_50 -> "🎤 #1 ARTIST"; Chart.ALBUMS_75 -> "💿 #1 ALBUM" }
+    val runWord = when (state.period) { Period.DAILY -> "Day"; Period.WEEKLY -> "Week"; Period.MONTHLY -> "Month"; Period.YEARLY -> "Year"; Period.GLOBAL -> "Period" }
+    val run = state.summary.numberOneRun.coerceAtLeast(1)
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(shape)
+            .background(theme.surface).border(1.dp, NovaColors.Gold.copy(alpha = 0.45f), shape)
+            .clickable(onClick = onClick)
+    ) {
+        // Fond : la photo du #1, recadrée et assombrie, dégradé vers la gauche pour la lisibilité
+        if (one.coverUrl != null) {
+            coil.compose.AsyncImage(model = one.coverUrl, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.matchParentSize().alpha(0.55f))
+        }
+        Box(Modifier.matchParentSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.25f)))))
+        // Filigrane « #1 »
+        Text(
+            "#1", color = NovaColors.Gold.copy(alpha = 0.28f), fontWeight = FontWeight.Black, fontSize = 96.sp, letterSpacing = (-4).sp,
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 14.dp)
+        )
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text("$kind DE LA PÉRIODE", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(10.dp))
+            Text(one.name, color = theme.accent, fontWeight = FontWeight.Black, fontSize = 28.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 90.dp))
+            if (one.secondary != null && state.chart != Chart.ARTIST_50) {
+                Text(one.secondary, color = Color.White, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 90.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("${one.plays}× écoutes", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(6.dp))
+            Text("👑 $runWord $run", color = theme.accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+        }
+    }
 }
 
 @Composable

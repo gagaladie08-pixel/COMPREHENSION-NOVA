@@ -19,6 +19,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 /** Paramètres utilisateur (onglet ⚙️). Hot-reload : le service observe ces flows. */
 class SettingsRepository(private val context: Context) {
+    companion object { const val FONT_MIN = 80; const val FONT_MAX = 140; const val FONT_STEP = 10 }
 
     private object Keys {
         val THEME = stringPreferencesKey("theme_id")
@@ -38,6 +39,7 @@ class SettingsRepository(private val context: Context) {
         val AUTO_BACKUP = booleanPreferencesKey("auto_backup")
         val LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
         val HAPTICS = booleanPreferencesKey("haptics")
+        val FONT_SCALE = intPreferencesKey("font_scale_pct")
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
     }
@@ -116,6 +118,9 @@ class SettingsRepository(private val context: Context) {
     val autoBackup: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_BACKUP] ?: false }
     val lastBackupAt: Flow<Long?> = context.dataStore.data.map { it[Keys.LAST_BACKUP_AT] }
     val haptics: Flow<Boolean> = context.dataStore.data.map { it[Keys.HAPTICS] ?: true }
+    /** 🔠 Taille du texte en % (80…140, pas de 10) — appliquée à toute l'app via LocalDensity.fontScale. */
+    val fontScalePct: Flow<Int> = context.dataStore.data.map { it[Keys.FONT_SCALE] ?: 100 }
+    suspend fun setFontScalePct(pct: Int) = context.dataStore.edit { it[Keys.FONT_SCALE] = pct.coerceIn(FONT_MIN, FONT_MAX) }
     suspend fun setAutoBackup(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_BACKUP] = v }
     suspend fun setLastBackupAt(v: Long) = context.dataStore.edit { it[Keys.LAST_BACKUP_AT] = v }
     suspend fun setHaptics(v: Boolean) = context.dataStore.edit { it[Keys.HAPTICS] = v }
