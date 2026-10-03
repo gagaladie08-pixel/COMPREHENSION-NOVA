@@ -201,8 +201,8 @@ fun GuideStepScreen(audio: ObAudio, theme: NovaTheme, embedded: Boolean = false,
                 }
             }
             RiseIn(visible = intro, delayMs = 200) { PoeticText(guide.intro, theme.textSecondary, 14, Modifier.padding(horizontal = 36.dp, vertical = 10.dp)) }
-            guide.warning?.let { Text(it, color = ObColors.Red, fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 36.dp, bottom = 6.dp)) }
-            if (guide.stock) Text("Android stock respecte les applications en arrière-plan : NovaStats sera stable sur ton appareil.", color = theme.textSecondary, fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 36.dp, bottom = 6.dp))
+            guide.warning?.let { Text(it, color = ObColors.Red, fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 6.dp)) }
+            if (guide.stock) Text("Android stock respecte les applications en arrière-plan : NovaStats sera stable sur ton appareil.", color = theme.textSecondary, fontFamily = ObFonts.body, fontSize = 12.sp, lineHeight = 18.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 6.dp))
 
             Spacer(Modifier.height(18.dp))
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
