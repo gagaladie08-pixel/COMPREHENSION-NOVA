@@ -267,9 +267,15 @@ private fun SummaryBanner(state: BillboardUiState) {
         StripCell("${s.exits}", "Sorties", NovaColors.Down),
         StripCell("${s.reentries}", "Retours", theme.secondary)
     )
-    val hasDetails = state.items.isNotEmpty() && (s.numberOne != null || s.biggestClimber != null)
+    val hasDetails = state.items.isNotEmpty() && (s.numberOne != null || s.biggestClimber != null || s.totalPlays > 0)
     val details: (@Composable () -> Unit)? = if (!hasDetails) null else {
         {
+            // ⏱️ Temps d'écoute et ▶ écoutes de la période, variation vs période précédente (maquette utilisateur)
+            if (s.totalPlays > 0 || s.prevPlays > 0) {
+                TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
+                TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
+                Spacer(Modifier.height(4.dp))
+            }
             s.numberOne?.let { one ->
                 val since = if (s.numberOneRun > 1) " · depuis ${s.numberOneRun} ${BillboardDates.unitLabel(state.period, s.numberOneRun)}" else " · nouveau #1"
                 Text(
@@ -281,6 +287,12 @@ private fun SummaryBanner(state: BillboardUiState) {
                 Text(
                     "🚀 Plus forte montée : ${c.name} (${c.movement.label()} → #${c.position})",
                     color = NovaColors.Up, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+            s.biggestFaller?.let { c ->
+                Text(
+                    "📉 Plus forte régression : ${c.name} (${c.movement.label()} → #${c.position})",
+                    color = NovaColors.Down, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -328,6 +340,24 @@ private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -
             Text("👑 $runWord $run", color = theme.accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
         }
     }
+}
+
+/** « ⏱️ 17h 38min ↑ +13 % » + « vs période précédente : 15h 29min ». */
+@Composable
+private fun TrendLine(emoji: String, value: String, cur: Double, prev: Double, prevLabel: String) {
+    val theme = Nova.theme
+    val pct = if (prev <= 0.0) null else ((cur - prev) / prev * 100).toInt()
+    val up = pct == null || pct >= 0
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("$emoji ", style = MaterialTheme.typography.titleMedium)
+        Text(value, color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            when { pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %" },
+            color = if (up) NovaColors.Up else NovaColors.Down, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium
+        )
+    }
+    Text("vs période précédente : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable

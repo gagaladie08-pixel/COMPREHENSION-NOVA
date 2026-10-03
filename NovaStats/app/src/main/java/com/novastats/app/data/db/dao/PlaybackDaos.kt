@@ -230,6 +230,9 @@ interface DailyPlayDao {
     @Query("SELECT IFNULL(SUM(play_count), 0) FROM daily_plays WHERE date BETWEEN :from AND :to")
     suspend fun playsBetween(from: String, to: String): Int
 
+    @Query("SELECT IFNULL(SUM(total_duration_ms), 0) FROM daily_plays WHERE date BETWEEN :from AND :to")
+    suspend fun durationBetween(from: String, to: String): Long
+
     /** Record : le titre le plus écouté en une seule journée. */
     @Query("SELECT d.*, t.title AS title FROM daily_plays d JOIN tracks t ON t.track_id = d.track_id ORDER BY d.play_count DESC, d.total_duration_ms DESC LIMIT 1")
     fun bestTrackDay(): Flow<BestTrackDay?>

@@ -53,7 +53,14 @@ data class ChartSummary(
     val reentries: Int = 0,
     val numberOne: ChartItem? = null,
     val numberOneRun: Int = 0,
-    val biggestClimber: ChartItem? = null
+    val biggestClimber: ChartItem? = null,
+    /** Plus forte régression (chute de places) de la période. */
+    val biggestFaller: ChartItem? = null,
+    /** Totaux de la période (toutes écoutes) et de la période précédente — pour « ⏱️ 17h 38min ↑ +13 % ». */
+    val totalPlays: Int = 0,
+    val prevPlays: Int = 0,
+    val totalDurationMs: Long = 0,
+    val prevDurationMs: Long = 0
 )
 
 data class BillboardUiState(
@@ -113,7 +120,15 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
         val curIds = cur.map { it.entityId }.toSet()
         val top = cur.firstOrNull()
         val run = top?.let { runAt1(s.chart, s.period, it.entityId, s.anchor) } ?: 0
+        val range = BillboardDates.range(s.period, s.anchor)
+        val prevRange = BillboardDates.range(s.period, BillboardDates.previous(s.period, s.anchor))
+        val dp = db.dailyPlayDao()
         ChartSummary(
+            biggestFaller = cur.filter { it.movement is Movement.Down }.maxByOrNull { (it.movement as Movement.Down).places },
+            totalPlays = dp.playsBetween(range.fromIso, range.toIso),
+            prevPlays = dp.playsBetween(prevRange.fromIso, prevRange.toIso),
+            totalDurationMs = dp.durationBetween(range.fromIso, range.toIso),
+            prevDurationMs = dp.durationBetween(prevRange.fromIso, prevRange.toIso),
             newEntries = cur.count { it.movement is Movement.New },
             exits = prev.count { it.entityId !in curIds },
             reentries = cur.count { it.movement is Movement.Reentry },
