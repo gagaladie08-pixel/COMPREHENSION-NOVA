@@ -8,7 +8,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.filled.Transgender
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
@@ -17,8 +16,8 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.unit.Dp
 import com.novastats.app.ui.theme.NovaColors
+import com.novastats.app.ui.theme.PrideRibbon
 import kotlin.math.cos
 import kotlin.math.sin
 import androidx.compose.foundation.border
@@ -199,16 +198,6 @@ fun BrandBar(onSearch: () -> Unit) {
         }
         // ── Liseré : fin trait lumineux primary → accent (ou ruban des 7 drapeaux pour Survivor)
         if (pride) PrideRibbon() else Box(Modifier.fillMaxWidth().height(1.5.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, theme.primary, theme.accent, Color.Transparent))))
-    }
-}
-
-/** Ruban des drapeaux de la communauté : arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire. */
-@Composable
-fun PrideRibbon(height: Dp = 4.dp) {
-    Row(Modifier.fillMaxWidth().height(height)) {
-        NovaColors.PrideFlags.forEach { flag ->
-            Row(Modifier.weight(1f).fillMaxHeight()) { flag.forEach { c -> Box(Modifier.weight(1f).fillMaxHeight().background(c)) } }
-        }
     }
 }
 

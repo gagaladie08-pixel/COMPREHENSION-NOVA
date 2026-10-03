@@ -85,6 +85,8 @@ fun ThemeFxHost(modifier: Modifier = Modifier, content: @Composable () -> Unit) 
             }
     ) {
         content()
+        // Survivor : voile de drapeaux + cœurs flottants par-dessus chaque onglet / page / sous-page
+        if (theme.id == "survivor") PrideVeil(Modifier.fillMaxSize())
         ThemeSignatureOverlay(theme, Modifier.fillMaxSize())
     }
 }

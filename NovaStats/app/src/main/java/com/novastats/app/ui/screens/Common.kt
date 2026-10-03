@@ -25,6 +25,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -45,6 +47,15 @@ import coil.compose.AsyncImage
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.navigation.NovaTab
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.MiniFlag
+import com.novastats.app.ui.theme.PrideRibbon
+import com.novastats.app.ui.theme.isPride
+import com.novastats.app.ui.theme.prideBorder
+import com.novastats.app.ui.theme.prideBrushFor
+import com.novastats.app.ui.theme.prideFlagFor
+import com.novastats.app.ui.theme.prideStripe
+import com.novastats.app.ui.theme.prideWash
+import com.novastats.app.ui.theme.rememberPrideSweep
 import com.novastats.app.ui.theme.goldShimmer
 import com.novastats.app.ui.theme.NovaColors
 import java.util.Locale
@@ -91,12 +102,19 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         },
         modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
+    // Survivor : mini-drapeau sous chaque titre de section (tourne : arc-en-ciel, trans, bi, gay…)
+    if (Nova.isPride) {
+        val idx = remember(text) { text.hashCode().let { if (it < 0) -it else it } % NovaColors.PrideFlags.size }
+        MiniFlag(NovaColors.PrideFlags[idx], width = 36.dp, height = 3.dp, modifier = Modifier.padding(start = 16.dp).offset(y = (-6).dp))
+    }
 }
 
 @Composable
 fun NovaCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    // Survivor : bordure tournante aux couleurs de tous les drapeaux + chevron Progress discret à gauche
+    val prideMod = if (Nova.isPride) Modifier.prideBorder(Nova.cardShape, rememberPrideSweep()) else Modifier
     Card(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).then(prideMod),
         shape = Nova.cardShape,
         colors = CardDefaults.cardColors(containerColor = Nova.theme.surface)
     ) { content() }
@@ -104,8 +122,10 @@ fun NovaCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
 
 @Composable
 fun StatPill(value: String, label: String, modifier: Modifier = Modifier, accent: Color = Nova.theme.primary) {
+    val pride = Nova.rainbowBrush
     Column(modifier = modifier.goldShimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.titleLarge, color = accent, fontWeight = FontWeight.Black)
+        if (pride != null) Text(value, style = MaterialTheme.typography.titleLarge.copy(brush = pride), fontWeight = FontWeight.Black)
+        else Text(value, style = MaterialTheme.typography.titleLarge, color = accent, fontWeight = FontWeight.Black)
         Text(label, style = MaterialTheme.typography.bodySmall, color = Nova.theme.textSecondary, textAlign = TextAlign.Center)
     }
 }
@@ -166,11 +186,19 @@ fun RankRow(
     val theme = Nova.theme
     val posColor = when (position) { 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; 3 -> Color(0xFFCD7F32); else -> theme.textSecondary }
     val gesture = if (onClick != null || onLongClick != null) Modifier.combinedClickable(onClick = { onClick?.invoke() }, onLongClick = onLongClick) else Modifier
+    val pride = Nova.isPride
+    val flag = prideFlagFor(position)
     Row(
-        modifier = Modifier.fillMaxWidth().then(gesture).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().then(gesture)
+            // Survivor : chaque ligne porte le drapeau de sa position (liseré gauche + lavis)
+            .then(if (pride) Modifier.prideWash(flag, alpha = if (position <= 3) 0.14f else 0.07f).prideStripe(flag) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
+        if (pride) Text(
+            positionLabel(position), fontWeight = FontWeight.Black,
+            modifier = Modifier.width(56.dp), style = MaterialTheme.typography.bodyMedium.copy(brush = prideBrushFor(position))
+        ) else Text(
             positionLabel(position), color = posColor, fontWeight = FontWeight.Bold,
             modifier = Modifier.width(56.dp), style = MaterialTheme.typography.bodyMedium
         )
@@ -181,7 +209,8 @@ fun RankRow(
             if (subtitle != null) Text(subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text("${formatCount(plays)} ▶", color = theme.primary, fontWeight = FontWeight.Bold)
+            if (pride) Text("${formatCount(plays)} ▶", fontWeight = FontWeight.Black, style = LocalTextStyle.current.copy(brush = Brush.horizontalGradient(listOf(theme.primary, theme.secondary, theme.accent))))
+            else Text("${formatCount(plays)} ▶", color = theme.primary, fontWeight = FontWeight.Bold)
             Text(formatDuration(durationMs), color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -196,6 +225,7 @@ fun EmptyState(emoji: String, title: String, message: String) {
     ) {
         Text(emoji, fontSize = 56.sp)
         Spacer(Modifier.height(12.dp))
+        if (Nova.isPride) { PrideRibbon(Modifier.fillMaxWidth(0.6f).clip(RoundedCornerShape(3.dp)), height = 5.dp); Spacer(Modifier.height(10.dp)) }
         Text(title, style = MaterialTheme.typography.titleLarge, color = Nova.theme.text, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         Text(message, color = Nova.theme.textSecondary, textAlign = TextAlign.Center)
@@ -217,17 +247,26 @@ fun PlaceholderScreen(tab: NovaTab, subtitle: String) {
 @Composable
 fun PeriodSegment(selected: Period, modifier: Modifier = Modifier, periods: List<Period> = Period.entries, onSelect: (Period) -> Unit) {
     val theme = Nova.theme
+    val pride = Nova.isPride
     Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        periods.forEach { p ->
+        periods.forEachIndexed { i, p ->
             val on = selected == p
             Box(
                 Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp))
-                    .background(if (on) theme.primary else theme.surface)
+                    // Survivor : chaque période a son drapeau ; la période active l'affiche en plein, les autres en liseré bas
+                    .then(
+                        when {
+                            pride && on -> Modifier.background(Brush.verticalGradient(prideFlagFor(i + 1)))
+                            pride -> Modifier.background(theme.surface).prideWash(prideFlagFor(i + 1), alpha = 0.12f)
+                            on -> Modifier.background(theme.primary)
+                            else -> Modifier.background(theme.surface)
+                        }
+                    )
                     .clickable { onSelect(p) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    p.frLabel, color = if (on) MaterialTheme.colorScheme.onPrimary else theme.text,
+                    p.frLabel, color = if (on) (if (pride) Color.Black else MaterialTheme.colorScheme.onPrimary) else theme.text,
                     style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1, softWrap = false, overflow = TextOverflow.Clip
                 )
@@ -243,17 +282,23 @@ data class StripCell(val value: String, val label: String, val color: Color? = n
 @Composable
 fun SummaryStrip(cells: List<StripCell>, modifier: Modifier = Modifier, content: (@Composable () -> Unit)? = null) {
     val theme = Nova.theme
-    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp)).background(theme.surface).padding(vertical = 14.dp)) {
+    val pride = Nova.isPride
+    val prideMod = if (pride) Modifier.prideBorder(RoundedCornerShape(20.dp), rememberPrideSweep()) else Modifier
+    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp)).background(theme.surface).then(prideMod)) {
+        if (pride) PrideRibbon(height = 4.dp)
+        Column(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
             cells.forEachIndexed { i, c ->
-                if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 6.dp).background(theme.textSecondary.copy(alpha = 0.35f)))
+                if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().padding(vertical = 6.dp).background(if (pride) Brush.verticalGradient(prideFlagFor(i)) else Brush.verticalGradient(listOf(theme.textSecondary.copy(alpha = 0.35f), theme.textSecondary.copy(alpha = 0.35f)))))
                 Column(Modifier.weight(1f).goldShimmer(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(c.value, color = c.color ?: theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
+                    if (pride && c.color == null) Text(c.value, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium.copy(brush = prideBrushFor(i + 1)), maxLines = 1, softWrap = false)
+                    else Text(c.value, color = c.color ?: theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
                     Text(c.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                 }
             }
         }
         if (content != null) Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp).padding(top = 6.dp)) { content() }
+        }
     }
 }
 

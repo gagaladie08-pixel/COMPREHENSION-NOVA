@@ -41,6 +41,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -71,6 +72,11 @@ import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Movement
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.isPride
+import com.novastats.app.ui.theme.prideBrushFor
+import com.novastats.app.ui.theme.prideFlagFor
+import com.novastats.app.ui.theme.prideStripe
+import com.novastats.app.ui.theme.prideWash
 import com.novastats.app.ui.theme.NovaColors
 import java.time.Instant
 import java.time.ZoneOffset
@@ -430,18 +436,28 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
     val posColor = when (item.position) { 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; 3 -> Bronze; else -> theme.text }
     val coverSize = if (isOne) 64 else 48
     val mColor = movementColor(item.movement)
+    val pride = Nova.isPride
+    val flag = prideFlagFor(item.position)
 
     Row(
         modifier = Modifier.fillMaxWidth()
-            .then(if (isOne) Modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, NovaColors.Gold.copy(alpha = 0.6f), RoundedCornerShape(14.dp)) else Modifier)
-            .background(bg)
+            .then(
+                when {
+                    // Survivor : le #1 est cerclé du dégradé de tous les drapeaux, chaque ligne porte le drapeau de sa position
+                    isOne && pride -> Modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(14.dp)).border(1.5.dp, Brush.horizontalGradient(NovaColors.PrideCycle), RoundedCornerShape(14.dp))
+                    isOne -> Modifier.padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, NovaColors.Gold.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                    else -> Modifier
+                }
+            )
+            .then(if (pride) Modifier.prideWash(flag, alpha = if (item.position <= 3) 0.14f else 0.07f).prideStripe(flag) else Modifier.background(bg))
             .combinedClickable(onClick = {}, onLongClick = onLongPress)
             .padding(horizontal = 12.dp, vertical = if (isOne) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Position + mouvement
         Column(Modifier.width(52.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("#${item.position}", color = posColor, fontWeight = FontWeight.Black, fontSize = if (isOne) 22.sp else 16.sp)
+            if (pride) Text("#${item.position}", fontWeight = FontWeight.Black, fontSize = if (isOne) 22.sp else 16.sp, style = LocalTextStyle.current.copy(brush = prideBrushFor(item.position)))
+            else Text("#${item.position}", color = posColor, fontWeight = FontWeight.Black, fontSize = if (isOne) 22.sp else 16.sp)
             when (val m = item.movement) {
                 Movement.New -> Badge("NEW", NovaColors.DirectDebut)
                 Movement.Reentry -> Badge("↩ RE", theme.secondary)

@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,6 +57,10 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.PrideRibbon
+import com.novastats.app.ui.theme.drawHeart
+import com.novastats.app.ui.theme.isPride
+import com.novastats.app.ui.theme.rememberPrideSweep
 import com.novastats.app.ui.theme.NovaColors
 import kotlin.math.sin
 import kotlin.random.Random
@@ -94,11 +99,18 @@ fun NovaPopupCard(
     LaunchedEffect(Unit) { visible = true }
     val shape = RoundedCornerShape(16.dp)
     val holoShift by rememberInfiniteTransition(label = "holo").animateFloat(0f, 1f, infiniteRepeatable(tween(3000, easing = LinearEasing), RepeatMode.Restart), label = "hs")
-    val borderBrush: Brush = if (holographic) {
-        val n = HoloColors.size
-        val shifted = List(n) { i -> HoloColors[((i + (holoShift * n).toInt()) % n)] }
-        Brush.linearGradient(shifted)
-    } else Brush.linearGradient(listOf(borderColor, borderColor))
+    val pride = Nova.isPride
+    val prideSweep = rememberPrideSweep()
+    val borderBrush: Brush = when {
+        holographic -> {
+            val n = HoloColors.size
+            val shifted = List(n) { i -> HoloColors[((i + (holoShift * n).toInt()) % n)] }
+            Brush.linearGradient(shifted)
+        }
+        // Survivor : bordure conique tournante aux couleurs de tous les drapeaux
+        pride -> prideSweep
+        else -> Brush.linearGradient(listOf(borderColor, borderColor))
+    }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true)) {
         AnimatedVisibility(visible = visible, enter = fadeIn(tween(220)), exit = fadeOut(tween(160))) {
@@ -114,21 +126,41 @@ fun NovaPopupCard(
                         .clip(shape)
                         // Dégradé vertical : couleur de bordure → fond de l'app
                         .background(Brush.verticalGradient(listOf(borderColor.copy(alpha = 0.28f), theme.background)))
-                        .border(1.5.dp, borderBrush, shape)
+                        .border(if (pride) 2.dp else 1.5.dp, borderBrush, shape)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                 ) {
                     if (backdropUrl != null) PopupBackdrop(backdropUrl, Modifier.matchParentSize())
                     if (holographic) HoloParticles(Modifier.matchParentSize())
+                    if (pride) PrideParticles(Modifier.matchParentSize())
                     Column(Modifier.fillMaxWidth()) {
+                        if (pride) PrideRibbon(height = 5.dp)
                         banner()
                         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) { content() }
-                        HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
+                        if (pride) PrideRibbon(height = 3.dp) else HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
                         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                            Text("FERMER", color = if (holographic) Color.White else borderColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                            if (pride) Text("FERMER", style = LocalTextStyle.current.copy(brush = Brush.horizontalGradient(NovaColors.PrideCycle)), fontWeight = FontWeight.Black, letterSpacing = 3.sp)
+                            else Text("FERMER", color = if (holographic) Color.White else borderColor, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/** Survivor : cœurs et confettis aux couleurs des drapeaux qui montent doucement dans le popup. */
+@Composable
+private fun PrideParticles(modifier: Modifier) {
+    val t by rememberInfiniteTransition(label = "pp").animateFloat(0f, 1f, infiniteRepeatable(tween(11000, easing = LinearEasing), RepeatMode.Restart), label = "ppa")
+    val pts = remember { List(24) { floatArrayOf(Random.nextFloat(), Random.nextFloat(), 2.5f + Random.nextFloat() * 3.5f, Random.nextFloat() * 6.28f, Random.nextInt(NovaColors.PrideConfetti.size).toFloat(), Random.nextInt(2).toFloat()) } }
+    Canvas(modifier) {
+        pts.forEach { p ->
+            val y = ((p[1] - t * 0.7f) % 1f + 1f) % 1f
+            val x = p[0] + sin(t * 6.28f * 2 + p[3]) * 0.025f
+            val a = 0.18f + 0.35f * ((sin(t * 6.28f * 3 + p[3]) + 1f) / 2f)
+            val col = NovaColors.PrideConfetti[p[4].toInt()].copy(alpha = a)
+            val c = Offset(x * size.width, y * size.height)
+            if (p[5] < 1f) drawHeart(c, p[2].dp.toPx(), col) else drawCircle(col, p[2].dp.toPx() * 0.6f, c)
         }
     }
 }

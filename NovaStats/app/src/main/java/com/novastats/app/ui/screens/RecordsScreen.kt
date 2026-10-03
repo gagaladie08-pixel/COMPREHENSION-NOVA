@@ -83,6 +83,8 @@ fun RecordsScreen() {
     // État de la page record (période / section / sous-filtre / scroll) conservé ici : la page quitte la composition
     // quand on ouvre une fiche d'entrée, sinon ses filtres repartaient à « Semaine / Titres » et en haut de liste.
     val pageState = remember(page) { page?.let { RecordPageState(it) } }
+    // Position de la liste principale (familles / records) : conservée quand on ouvre un record puis qu'on revient
+    val mainList = remember { LazyListState() }
 
     BackHandler(enabled = entry != null || page != null || searching) {
         when {
@@ -95,7 +97,7 @@ fun RecordsScreen() {
     when {
         entry != null -> RecordEntryPage(entry!!, onBack = { entry = null }, onEntity = { detail = it })
         page != null -> RecordPage(page!!, pageState!!, onBack = { page = null }, onEntry = { entry = it })
-        else -> LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
+        else -> LazyColumn(Modifier.fillMaxSize().background(theme.background), state = mainList) {
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
