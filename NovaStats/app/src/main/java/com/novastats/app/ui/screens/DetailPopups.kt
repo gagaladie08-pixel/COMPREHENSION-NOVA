@@ -69,7 +69,6 @@ import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
 import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.domain.ChartHistory
-import com.novastats.app.domain.ChartHistory
 import com.novastats.app.domain.ChartHistoryStats
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.HallOfFameRules
@@ -926,7 +925,7 @@ private fun ChartRunSection(type: String, id: Long, color: Color) {
     val r = rows?.takeIf { it.isNotEmpty() } ?: return
     val appearances = r.mapNotNull { row -> runCatching { ChartAppearance(Dates.parse(row.date), row.position, row.playCount) }.getOrNull() }
     if (appearances.isEmpty()) return
-    val stats = ChartHistory.stats(appearances)
+    val stats = com.novastats.app.domain.ChartHistory.stats(appearances)
     val peak = stats.peak ?: return
 
     PopupSection("📈 Parcours ${chartLabel(type)} (hebdo)", color)
@@ -937,7 +936,7 @@ private fun ChartRunSection(type: String, id: Long, color: Color) {
     }
     Spacer(Modifier.height(6.dp))
     Text(
-        "Entrée le ${formatIso(appearances.first().date)} · pic le ${formatIso(peak.date)}",
+        "Entrée le ${formatIso(appearances.first().date.format(Dates.ISO))} · pic le ${formatIso(peak.date.format(Dates.ISO))}",
         color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
     )
     Spacer(Modifier.height(8.dp))
