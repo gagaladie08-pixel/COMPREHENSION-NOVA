@@ -15,6 +15,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -172,11 +173,11 @@ fun RewindScreen(startKey: String? = null, onClose: () -> Unit) {
                     // Zones tactiles : gauche = reculer, droite = avancer
                     Row(Modifier.fillMaxSize()) {
                         Box(Modifier.weight(0.28f).fillMaxHeight().clickable(
-                            interactionSource = remember { androidx.compose.runtime.MutableInteractionSource() },
+                            interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { if (index > 0) index-- })
                         Box(Modifier.weight(0.72f).fillMaxHeight().clickable(
-                            interactionSource = remember { androidx.compose.runtime.MutableInteractionSource() },
+                            interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { if (index < slides.lastIndex) index++ else onClose() })
                     }
