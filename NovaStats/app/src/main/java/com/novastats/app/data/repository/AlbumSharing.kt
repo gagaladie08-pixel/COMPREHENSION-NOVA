@@ -41,7 +41,7 @@ object AlbumSharing {
             db.withTransaction { dups.filter { it.albumId != keep.albumId }.forEach { mergeInto(db, it.albumId, keep.albumId); merged++ } }
         }
         // ---- 3. Les titres dont les écoutes pointent vers un album partagé y sont rattachés (re-liaison : écoutes déplacées, pas le titre)
-        for (al in db.albumDao().allShared()) db.albumDao().adoptTracksOf(al.albumId)
+        for (al in db.albumDao().allShared()) db.trackDao().adoptTracksOf(al.albumId)
         // ---- 4. Albums partagés qui ne le sont plus (marque retirée « 0 », ou règle affinée) → redécoupés par artiste principal du titre
         for (al in db.albumDao().allShared()) {
             if (library.isSharedAlbum(al.title, null)) continue
@@ -72,6 +72,6 @@ object AlbumSharing {
         db.trackLinkDao().clearAlbumLinks(from)
         db.albumDao().fillCover(into, src.coverUrl, src.coverSource)
         db.albumDao().delete(from)
-        db.albumDao().adoptTracksOf(into)
+        db.trackDao().adoptTracksOf(into)
     }
 }
