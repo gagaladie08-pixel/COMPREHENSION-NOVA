@@ -53,6 +53,7 @@ data class ImportReport(
     val playsInFile: Int,
     val playsImported: Int,
     val playsIgnoredDuplicates: Int,
+    val playsRepaired: Int = 0,
     val playsBelowThreshold: Int,
     val unknownSongRefs: Int,
     val durationMs: Long
@@ -62,6 +63,7 @@ data class ImportReport(
         appendLine("• $songsInFile titres dans le fichier")
         appendLine("• $playsImported écoutes importées sur $playsInFile")
         if (playsIgnoredDuplicates > 0) appendLine("• $playsIgnoredDuplicates doublons ignorés")
+        if (playsRepaired > 0) appendLine("• $playsRepaired écoutes existantes réattribuées à la bonne version (invités / remix)")
         if (playsBelowThreshold > 0) appendLine("• $playsBelowThreshold écoutes sous le seuil (comptées comme skip)")
         if (unknownSongRefs > 0) appendLine("• $unknownSongRefs écoutes sans titre correspondant")
     }
@@ -108,8 +110,11 @@ object LegacyBackupImporter {
         }
 
         onProgress("Import de ${backup.plays.size} écoutes…")
-        var imported = 0; var duplicates = 0; var belowThreshold = 0; var unknown = 0
+        var imported = 0; var duplicates = 0; var belowThreshold = 0; var unknown = 0; var repaired = 0
         val batch = ArrayList<ScrobbleEntity>(500)
+        val songById = backup.songs.associateBy { it.id }
+        val rootOf = HashMap<Long, Long>()
+        suspend fun root(trackId: Long): Long = rootOf.getOrPut(trackId) { db.trackDao().getById(trackId)?.originalTrackId ?: trackId }
 
         suspend fun flush() {
             if (batch.isEmpty()) return
@@ -124,12 +129,26 @@ object LegacyBackupImporter {
             backup.plays.sortedBy { it.playedAt }.forEachIndexed { i, play ->
                 val r = trackBySongId[play.songId]
                 if (r == null) { unknown++; return@forEachIndexed }
+                val song = songById[play.songId]
+                // Même écoute déjà en base (même instant, même titre ou une version de son groupe) : jamais de doublon.
+                // Si elle était sur la mauvaise version (import ancien sans valeurs brutes) → déplacée + valeurs brutes mémorisées.
+                val existing = db.scrobbleDao().findInGroupAt(r.trackId, root(r.trackId), play.playedAt)
+                if (existing != null) {
+                    if (existing.trackId != r.trackId || existing.rawArtist == null) {
+                        db.scrobbleDao().repair(existing.scrobbleId, r.trackId, r.primaryArtistId, r.albumId ?: existing.albumId, song?.title ?: existing.rawTitle, song?.artistNames ?: existing.rawArtist, song?.albumName ?: existing.rawAlbum)
+                        if (existing.trackId != r.trackId) repaired++ else duplicates++
+                    } else duplicates++
+                    return@forEachIndexed
+                }
                 val validated = ScrobbleRules.isValidated(play.listenedDuration, thresholdSec)
                 if (!validated) belowThreshold++
                 batch += ScrobbleEntity(
                     trackId = r.trackId,
                     artistId = r.primaryArtistId,
                     albumId = r.albumId,
+                    rawTitle = song?.title,
+                    rawArtist = song?.artistNames,
+                    rawAlbum = song?.albumName,
                     startedAt = play.playedAt,
                     validatedAt = if (validated) play.playedAt + thresholdSec * 1000L else null,
                     endedAt = play.playedAt + play.listenedDuration,
@@ -154,6 +173,7 @@ object LegacyBackupImporter {
             playsInFile = backup.plays.size,
             playsImported = imported,
             playsIgnoredDuplicates = duplicates,
+            playsRepaired = repaired,
             playsBelowThreshold = belowThreshold,
             unknownSongRefs = unknown,
             durationMs = System.currentTimeMillis() - t0

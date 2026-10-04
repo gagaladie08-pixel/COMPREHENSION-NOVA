@@ -59,7 +59,9 @@ class ArtistExceptionsTest {
         assertEquals(GuestMatch.SAME, LibraryRepository.classify(setOf("#909"), setOf("#909")))
         // Version avec invité connue d'abord, puis l'original seul → l'existant devient la version
         assertEquals(GuestMatch.SUBSET, LibraryRepository.classify(setOf("#909"), emptySet()))
-        // Invités différents → autre version liée au même root
-        assertEquals(GuestMatch.OTHER, LibraryRepository.classify(setOf("#1"), setOf("#2")))
+        // Pas de version solo : deux jeux d'invités (A+B puis A+C, ou A+B puis A+B+C) → un seul titre crédité à tous
+        assertEquals(GuestMatch.SAME, LibraryRepository.classify(setOf("#1"), setOf("#2")))
+        assertEquals(GuestMatch.SAME, LibraryRepository.classify(setOf("#1"), setOf("#1", "#2")))
+        assertEquals(GuestMatch.SAME, LibraryRepository.classify(setOf("#1", "#2"), setOf("#1")))
     }
 }

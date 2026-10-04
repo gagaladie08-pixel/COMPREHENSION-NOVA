@@ -197,6 +197,20 @@ interface ScrobbleDao {
     @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId WHERE scrobble_id = :id")
     suspend fun relink(id: Long, trackId: Long, artistId: Long, albumId: Long?)
 
+    /** Écoute au même instant sur le titre cible OU une version de son groupe (original + versions liées) — le titre exact d'abord. */
+    @Query(
+        """
+        SELECT * FROM scrobbles WHERE started_at = :startedAt
+          AND (track_id = :trackId OR track_id = :rootId OR track_id IN (SELECT track_id FROM tracks WHERE original_track_id = :rootId))
+        ORDER BY (track_id = :trackId) DESC LIMIT 1
+        """
+    )
+    suspend fun findInGroupAt(trackId: Long, rootId: Long, startedAt: Long): ScrobbleEntity?
+
+    /** Réparation à l'import : déplace l'écoute vers la bonne version et mémorise les valeurs brutes du fichier. */
+    @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId, raw_title = :rawTitle, raw_artist = :rawArtist, raw_album = :rawAlbum WHERE scrobble_id = :id")
+    suspend fun repair(id: Long, trackId: Long, artistId: Long, albumId: Long?, rawTitle: String?, rawArtist: String?, rawAlbum: String?)
+
     @Query("SELECT started_at FROM scrobbles WHERE album_id = :albumId AND status = 'CONFIRMED' ORDER BY started_at LIMIT 1 OFFSET :n - 1")
     suspend fun nthPlayOfAlbum(albumId: Long, n: Int): Long?
 

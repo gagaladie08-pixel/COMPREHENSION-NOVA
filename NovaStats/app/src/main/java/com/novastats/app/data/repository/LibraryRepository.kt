@@ -65,9 +65,9 @@ class LibraryRepository(private val db: NovaDatabase) {
      *  SAME     → même titre.
      *  SUPERSET → la nouvelle écoute a des invités EN PLUS → version « Titre (with X) » liée au titre existant (root).
      *  SUBSET   → la nouvelle écoute a MOINS d'invités : c'est l'original ; le titre existant devient une version liée.
-     *  OTHER    → jeux différents (A+B vs A+C) → version liée au root existant.
+     *  (deux jeux d'invités non vides, sans version solo → SAME : un seul titre crédité à tous les artistes.)
      */
-    enum class GuestMatch { SAME, SUPERSET, SUBSET, OTHER }
+    enum class GuestMatch { SAME, SUPERSET, SUBSET }
 
 
     private suspend fun guestKeysOf(trackId: Long, primaryArtistId: Long): Set<String> {
@@ -164,12 +164,12 @@ class LibraryRepository(private val db: NovaDatabase) {
                 trackCache.clear()
                 newRoot
             }
-            GuestMatch.SUPERSET, GuestMatch.OTHER -> {
+            GuestMatch.SUPERSET -> {
                 // Version « avec invité(s) » : réutilisée si une version liée au root a exactement ce jeu d'invités, sinon créée
                 val versions = db.trackDao().versionsOf(rootId)
                 val same = versions.firstOrNull { v -> guestKeysOf(v.trackId, primaryArtistId) == guestKeys }
                 if (same != null) same.trackId else {
-                    val extra = if (match == GuestMatch.SUPERSET) guestKeys - existingGuests else guestKeys
+                    val extra = guestKeys - existingGuests
                     val extraNames = extra.mapNotNull { k -> db.artistDao().getById(k.drop(1).toLong())?.name }
                     val fromTitle = titleOnlyGuests.map { TitleNormalizer.normalizeKey(it) }.toSet()
                     val word = if (extraNames.isNotEmpty() && extraNames.all { TitleNormalizer.normalizeKey(it) in fromTitle }) "feat." else "with"
@@ -201,11 +201,17 @@ class LibraryRepository(private val db: NovaDatabase) {
 
     companion object {
         /** Comparaison des jeux d'invités (clé « #artistId » ou toute clé stable). */
+        /**
+         * La notion de « version » n'existe que face à une version SOLO (sans invité) du même titre :
+         *  - solo connu + invités en plus → SUPERSET (version « (with X) ») ;
+         *  - invités connus + écoute solo → SUBSET (l'existant devient la version, le solo devient l'original) ;
+         *  - deux jeux d'invités non vides (A+B puis A+C, ou A+B puis A+B+C) → SAME : un seul titre crédité à tous.
+         */
         fun classify(existing: Set<String>, incoming: Set<String>): GuestMatch = when {
             existing == incoming -> GuestMatch.SAME
-            incoming.containsAll(existing) -> GuestMatch.SUPERSET
-            existing.containsAll(incoming) -> GuestMatch.SUBSET
-            else -> GuestMatch.OTHER
+            existing.isEmpty() -> GuestMatch.SUPERSET
+            incoming.isEmpty() -> GuestMatch.SUBSET
+            else -> GuestMatch.SAME
         }
     }
 
@@ -264,7 +270,11 @@ class LibraryRepository(private val db: NovaDatabase) {
         rows.forEachIndexed { i, r ->
             if (i % 250 == 0) onProgress("Liens & versions : $i / ${rows.size}")
             val title = r.rawTitle ?: db.trackDao().getById(r.trackId)?.titleRaw ?: return@forEachIndexed
-            val artist = r.rawArtist ?: artistName.getOrPut(r.artistId) { db.artistDao().getById(r.artistId)?.name ?: "Artiste inconnu" }
+            // Sans valeur brute (anciens imports) : tous les artistes liés au titre actuel, principal d'abord
+            val artist = r.rawArtist ?: artistName.getOrPut(r.trackId) {
+                val ids = listOf(r.artistId) + db.trackLinkDao().artistIdsForTrack(r.trackId).filter { it != r.artistId }
+                ids.mapNotNull { db.artistDao().getById(it)?.name }.joinToString(", ").ifBlank { "Artiste inconnu" }
+            }
             val resolved = runCatching { resolve(title, artist, r.rawAlbum) }.getOrNull() ?: return@forEachIndexed
             if (resolved.trackId != r.trackId || resolved.primaryArtistId != r.artistId || (resolved.albumId != null && resolved.albumId != r.albumId)) {
                 // UNIQUE(track_id, started_at) : si une écoute du titre cible existe déjà au même instant, celle-ci est un doublon → supprimée
