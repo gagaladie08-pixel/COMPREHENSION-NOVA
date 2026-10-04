@@ -904,6 +904,9 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.9" to listOf(
+        "💎 Fiche certification : tous les artistes crédités (plus seulement le principal) et la mention « 🔗 Ce total inclut N version(s) liée(s) » avec la répartition Original / versions, comme dans la fiche titre."
+    ),
     "0.10.8" to listOf(
         "🐛 « Goals — LISA : Original 0 ▶, with Anitta, Rema, Fifa Sound 97 ▶ » : un root solo sans aucune écoute propre n'est pas une version solo. À chaque recalcul, ces roots vides sont repliés : les versions y sont fusionnées (écoutes, artistes, album, pochette) et le titre redevient unique, crédité à tous les artistes."
     ),

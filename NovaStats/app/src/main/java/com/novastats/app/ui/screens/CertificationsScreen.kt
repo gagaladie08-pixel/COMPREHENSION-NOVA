@@ -258,7 +258,9 @@ private fun Modifier.combinedClickableCompat(onClick: () -> Unit): Modifier = th
 private data class CertDetail(
     val name: String, val subtitle: String, val imageUrl: String?, val playCount: Int, val firstPlayedAt: Long?,
     val history: List<CertificationHistoryEntity>, val series: List<DayCount>,
-    val statsRanks: Map<Period, Int?>, val billboardRanks: Map<Period, Int?>
+    val statsRanks: Map<Period, Int?>, val billboardRanks: Map<Period, Int?>,
+    /** Répartition par version (original + versions liées) — vide si le titre n'a pas de version. */
+    val versions: List<Pair<String, Int>> = emptyList()
 )
 
 @Composable
@@ -282,7 +284,11 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
         }
         d = if (entityType == EntityType.TRACK) {
             val t = db.trackDao().getById(id) ?: return@LaunchedEffect
-            CertDetail(t.title, db.artistDao().getById(t.artistId)?.name ?: "", t.coverUrl, t.playCount, t.firstPlayedAt, history, db.dailyPlayDao().seriesForTrack(id), stats, billboard)
+            val ids = db.trackLinkDao().artistIdsForTrack(id).ifEmpty { listOf(t.artistId) }
+            val artists = ids.mapNotNull { db.artistDao().getById(it)?.name }.joinToString(", ")
+            val linked = db.trackDao().versionsOf(id)
+            val versions = if (linked.isEmpty()) emptyList() else listOf("Original" to db.trackDao().ownPlays(id)) + linked.map { v -> v.title.removePrefix(t.title).trim().trim('(', ')').ifBlank { v.title } to v.playCount }
+            CertDetail(t.title, artists.ifBlank { db.artistDao().getById(t.artistId)?.name ?: "" }, t.coverUrl, t.playCount, t.firstPlayedAt, history, db.dailyPlayDao().seriesForTrack(id), stats, billboard, versions)
         } else {
             val al = db.albumDao().getById(id) ?: return@LaunchedEffect
             CertDetail(al.title, db.artistDao().getById(al.artistId)?.name ?: "", al.coverUrl, al.playCount, al.firstPlayedAt, history, db.dailyPlayDao().seriesForAlbum(id), stats, billboard)
@@ -315,6 +321,14 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
         Text(current?.level?.emoji ?: "🎯", fontSize = 40.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Text(current?.label()?.uppercase() ?: "PAS ENCORE CERTIFIÉ", color = color, fontWeight = FontWeight.Black, fontSize = 28.sp, letterSpacing = 2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Text("${formatCount(det.playCount)} écoutes", color = theme.textSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        if (det.versions.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "🔗 Ce total inclut ${det.versions.size - 1} version${if (det.versions.size > 2) "s" else ""} liée${if (det.versions.size > 2) "s" else ""} à ce titre (remix featuring / version avec invité) : " +
+                    det.versions.joinToString(" · ") { (l, n) -> "$l ${formatCount(n)} ▶" },
+                color = theme.accent, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         // Progression vers le prochain palier
         val next = thresholds.next(det.playCount)
