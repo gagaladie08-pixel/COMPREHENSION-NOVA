@@ -85,8 +85,9 @@ class RecordMathTest {
 
     @Test
     fun `duree adaptative`() {
-        assertEquals("5 h", RecordCatalog.formatDurationAdaptive(5 * 3_600_000L))
-        assertEquals("3 j", RecordCatalog.formatDurationAdaptive(3 * 24 * 3_600_000L))
-        assertTrue(RecordCatalog.formatDurationAdaptive(45 * 24 * 3_600_000L).endsWith("mois"))
+        assertEquals("5 h 0 min", RecordCatalog.formatDurationAdaptive(5 * 3_600_000L))
+        assertEquals("3 j 0 h 0 min", RecordCatalog.formatDurationAdaptive(3 * 24 * 3_600_000L))
+        assertEquals("45 j 2 h 7 min", RecordCatalog.formatDurationAdaptive(45 * 24 * 3_600_000L + 2 * 3_600_000L + 7 * 60_000L))
+        assertEquals("32 min", RecordCatalog.formatDurationAdaptive(32 * 60_000L))
     }
 }
