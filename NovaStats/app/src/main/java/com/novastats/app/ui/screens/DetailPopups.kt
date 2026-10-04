@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -68,14 +69,17 @@ import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
 import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.domain.ChartHistory
+import com.novastats.app.domain.ChartHistory
 import com.novastats.app.domain.ChartHistoryStats
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.HallOfFameRules
+import com.novastats.app.domain.PantheonRules
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.ScoredCandidate
 import kotlinx.coroutines.launch
 import com.novastats.app.data.db.dao.DayCount
+import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import java.text.SimpleDateFormat
@@ -182,6 +186,8 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
     /** Répartition par version du groupe (original + remix feat. / versions avec invité) : titre → écoutes propres. */
     var versions by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
     var original by remember { mutableStateOf<TrackEntity?>(null) }
+    /** Série quotidienne (prévision du prochain palier). */
+    var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
     val cert by remember { db.certificationDao().observe(trackId, EntityType.TRACK) }.collectAsStateWithLifecycle(initialValue = null)
 
     LaunchedEffect(trackId, period) {
@@ -194,6 +200,7 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
         val ids = db.trackLinkDao().artistIdsForTrack(trackId).ifEmpty { listOf(t.artistId) }
         artists = ids.mapNotNull { db.artistDao().getById(it)?.name }.joinToString(", ")
         album = t.albumId?.let { db.albumDao().getById(it) }
+        series = runCatching { db.dailyPlayDao().seriesForTrack(trackId) }.getOrDefault(emptyList())
         ranks = Period.entries.associateWith { p ->
             if (p == Period.GLOBAL) db.trackDao().rankAllTime(trackId)
             else Dates.statsRangeFor(p).let { r -> db.trackDao().rankForPeriod(trackId, r.fromIso, r.toIso) }
@@ -252,6 +259,9 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
         }
         PopupSection("📊 Positions par période")
         PositionsTable(ranks)
+        ChartRunSection(EntityType.TRACK, trackId, theme.primary)
+        val nextCert = CertificationRules.TRACK.next(t.playCount)
+        ForecastSection(t.playCount, CertificationRules.TRACK.required(nextCert), nextCert.label(), series, theme.primary, "🏅")
         PopupSection("📅 Historique")
         if (scoped) {
             PopupInfoRow("Première écoute (${period.frLabel.lowercase()})", formatIso(ps?.firstDate))
@@ -306,6 +316,8 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
     var history by remember { mutableStateOf<List<PantheonHistoryEntity>>(emptyList()) }
     var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
+    /** Série quotidienne (prévision du prochain statut Panthéon). */
+    var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
 
     val imgVersion by UserImages.version.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
@@ -330,6 +342,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         val share = if (scoped) range else Dates.statsRangeFor(Period.WEEKLY)
         safe("part") { periodPlays = db.artistDao().playsForPeriod(artistId, share.fromIso, share.toIso); periodTotal = db.dailyPlayDao().playsBetween(share.fromIso, share.toIso) }
         safe("positions") { ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) } }
+        safe("série") { series = db.dailyPlayDao().seriesForArtist(artistId) }
     }
     val a = artist
     val status = PantheonStatus.fromDb(a?.pantheonStatus)
@@ -369,6 +382,10 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         }
         PopupSection("📊 Positions par période", theme.glowSecondary)
         PositionsTable(ranks)
+        ChartRunSection(EntityType.ARTIST, artistId, theme.glowSecondary)
+        PantheonRules.next(status)?.let { next ->
+            ForecastSection(a.playCount, next.playsThreshold, "${next.emoji} ${next.label}", series, statusColor, "👑")
+        }
         loadError?.let { Text("⚠️ Données partielles — $it", color = NovaColors.Gold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(vertical = 4.dp)) }
         PopupSection(if (scoped) "🎵 Chansons ${periodWord(period)} (${songs.size})" else "🎵 Chansons all time (${songs.size})", theme.glowSecondary)
         Text(
@@ -567,6 +584,8 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
     var artistCount by remember { mutableStateOf(0) }
     var tracks by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
+    /** Série quotidienne (prévision du prochain palier). */
+    var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
     val cert by remember { db.certificationDao().observe(albumId, EntityType.ALBUM) }.collectAsStateWithLifecycle(initialValue = null)
     // Fiche d'un titre ouverte depuis la liste (album partagé : chaque ligne est cliquable)
     var openTrack by remember { mutableStateOf<Long?>(null) }
@@ -588,6 +607,7 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
             safe("chansons") { tracks = db.trackDao().ofAlbumForPeriod(albumId, range.fromIso, range.toIso) }
         } else safe("chansons") { tracks = db.trackDao().ofAlbum(albumId) }
         safe("positions") { ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.albumDao().rankForPeriod(albumId, r.fromIso, r.toIso) } }
+        safe("série") { series = db.dailyPlayDao().seriesForAlbum(albumId) }
     }
     val al = album
     NovaPopupCard(
@@ -635,6 +655,10 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
         }
         PopupSection("📊 Positions par période", theme.secondary)
         PositionsTable(ranks)
+        ChartRunSection(EntityType.ALBUM, albumId, theme.secondary)
+        val nextCert = CertificationRules.ALBUM.next(al.playCount)
+        ForecastSection(al.playCount, CertificationRules.ALBUM.required(nextCert), nextCert.label(), series, theme.secondary, "🏅")
+
         PopupSection(if (scoped) "🎵 Chansons ${periodWord(period)} (${tracks.size})" else "🎵 Chansons (${tracks.size})", theme.secondary)
         if (tracks.isEmpty()) Text("—", color = theme.textSecondary)
         tracks.forEachIndexed { i, t ->
@@ -870,5 +894,110 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
             Text("Certification actuelle", color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
             CertBadge(det.cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }, det.cert?.multiplier ?: 1)
         }
+    }
+}
+
+/* ============================ 8. 📈 Parcours & ⏱ Prévisions ============================ */
+
+private fun chartLabel(type: String): String = when (type) {
+    EntityType.TRACK -> "Hot 100"
+    EntityType.ARTIST -> "Artist 50"
+    else -> "Albums 75"
+}
+
+/**
+ * Parcours hebdomadaire dans un chart (Billboard) : meilleur rang, semaines classées, série n°1,
+ * puis les 14 dernières semaines en bandeau horizontal avec la variation ▲ / ▼.
+ */
+@Composable
+private fun ChartRunSection(type: String, id: Long, color: Color) {
+    val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
+    val theme = Nova.theme
+    val rows by produceState<List<PriorRow>?>(initialValue = null, type, id) {
+        value = runCatching {
+            when (type) {
+                EntityType.TRACK -> db.billboardDao().trackHistory(Period.WEEKLY.dbName, id)
+                EntityType.ARTIST -> db.billboardDao().artistHistory(Period.WEEKLY.dbName, id)
+                else -> db.billboardDao().albumHistory(Period.WEEKLY.dbName, id)
+            }
+        }.getOrNull()
+    }
+    val r = rows?.takeIf { it.isNotEmpty() } ?: return
+    val appearances = r.mapNotNull { row -> runCatching { ChartAppearance(Dates.parse(row.date), row.position, row.playCount) }.getOrNull() }
+    if (appearances.isEmpty()) return
+    val stats = ChartHistory.stats(appearances)
+    val peak = stats.peak ?: return
+
+    PopupSection("📈 Parcours ${chartLabel(type)} (hebdo)", color)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+        StatPill("#${peak.position}", "meilleur rang", accent = color)
+        StatPill("${stats.periodsInChart}", "semaines classé", accent = theme.secondary)
+        StatPill("${stats.longestRunAt1}", if (stats.longestRunAt1 > 1) "semaines n°1" else "semaine n°1", accent = theme.accent)
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Entrée le ${formatIso(appearances.first().date)} · pic le ${formatIso(peak.date)}",
+        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+    )
+    Spacer(Modifier.height(8.dp))
+    val tail = r.takeLast(14)
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        tail.forEachIndexed { i, row ->
+            val prev = if (i > 0) tail[i - 1].position else null
+            val delta = prev?.let { it - row.position } // > 0 : gagne des places
+            val dColor = when { delta == null -> theme.textSecondary; delta > 0 -> theme.accent; delta < 0 -> NovaColors.Gold; else -> theme.textSecondary }
+            Column(
+                Modifier.padding(end = 8.dp).width(58.dp).clip(RoundedCornerShape(10.dp))
+                    .background(theme.surface.copy(alpha = 0.85f)).padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("#${row.position}", color = theme.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    runCatching { val dt = Dates.parse(row.date); "${dt.dayOfMonth}/${String.format(Locale.FRANCE, "%02d", dt.monthValue)}" }.getOrDefault("—"),
+                    color = theme.textSecondary, fontSize = 11.sp
+                )
+                Text(
+                    when { delta == null -> "·"; delta > 0 -> "▲$delta"; delta < 0 -> "▼${-delta}"; else -> "=" },
+                    color = dColor, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Prévision du prochain palier : écoutes restantes, barre de progression et estimation en jours
+ * calculée sur le rythme des 14 derniers jours (aucune estimation si le rythme est nul).
+ */
+@Composable
+private fun ForecastSection(
+    current: Int, target: Int, targetLabel: String, series: List<DayCount>, color: Color, emoji: String = "⏱"
+) {
+    if (target <= current) return
+    val theme = Nova.theme
+    val remaining = target - current
+    val from = Dates.today().minusDays(13).format(Dates.ISO)
+    val recent = series.filter { it.date >= from }
+    val rate = if (recent.isEmpty()) 0f else recent.sumOf { it.playCount }.toFloat() / 14f
+    val progress = (current.toFloat() / target.toFloat()).coerceIn(0f, 1f)
+
+    PopupSection("$emoji Vers $targetLabel", color)
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+        color = color, trackColor = theme.background
+    )
+    Spacer(Modifier.height(6.dp))
+    Text("${formatCount(remaining)} écoutes restantes (${formatCount(current)} / ${formatCount(target)})", color = theme.text, style = MaterialTheme.typography.bodyMedium)
+    if (rate > 0.05f) {
+        val days = kotlin.math.ceil(remaining.toDouble() / rate.toDouble()).toInt().coerceAtLeast(1)
+        val eta = Dates.today().plusDays(days.toLong())
+        Text(
+            "≈ $days jour${if (days > 1) "s" else ""} au rythme des 14 derniers jours (${String.format(Locale.FRANCE, "%.1f", rate)}/jour) → vers le ${eta.dayOfMonth}/${String.format(Locale.FRANCE, "%02d", eta.monthValue)}",
+            color = color, style = MaterialTheme.typography.bodySmall
+        )
+    } else {
+        Text("Rythme récent trop faible pour une estimation.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }

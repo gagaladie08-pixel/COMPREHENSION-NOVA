@@ -904,6 +904,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.12.1" to listOf(
+        "\ud83d\udcc8 Parcours hebdomadaire dans les fiches titre / artiste / album : meilleur rang, nombre de semaines class\u00e9es, semaines pass\u00e9es n\u00b01, date d'entr\u00e9e et de pic, puis les 14 derni\u00e8res semaines en bandeau avec la variation \u25b2 / \u25bc (donn\u00e9es Billboard d\u00e9j\u00e0 enregistr\u00e9es).",
+        "\u23f1 Pr\u00e9visions : le prochain palier (certification ou statut Panth\u00e9on) avec les \u00e9coutes restantes, une barre de progression et une estimation en jours bas\u00e9e sur ton rythme des 14 derniers jours."
+    ),
     "0.12.0" to listOf(
         "\u2728 Nova Rewind : ton mois (ou ton année) en récap façon keynote \u2014 écoutes, artiste et titre n°1, top 5, rythme (record du jour, série, heure de prédilection), découvertes, certifications et Panthéon. Sélecteur de période en haut, on avance en touchant l'écran.",
         "\ud83d\uddbc\ufe0f Carte à partager : un visuel 1080 × 1920 généré aux couleurs de ton thème (bandes des drapeaux pour Survivor) avec tes chiffres et ton top 5, partageable en story. Aucune permission de stockage \u2014 le fichier passe par le partage système.",
