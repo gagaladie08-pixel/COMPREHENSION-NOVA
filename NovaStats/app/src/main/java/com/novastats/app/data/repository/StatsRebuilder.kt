@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.first
  * Ordre : agrégats → daily_plays / daily_stats / streaks / sessions → certifications → Panthéon.
  * (Snapshots, Billboard, Hall of Fame, Records et Awards seront branchés sur ce pipeline.)
  */
-class StatsRebuilder(private val db: NovaDatabase) {
+class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryRepository? = null) {
 
     /** Nouveauté détectée après un recalcul (pour les notifications). */
     data class Achievement(val kind: String, val entityType: String, val entityId: Long, val level: String, val name: String)
@@ -44,6 +44,8 @@ class StatsRebuilder(private val db: NovaDatabase) {
 
         onProgress("Versions…")
         collapseEmptyRoots()
+        // Règle 13 : un duo arrivé avant les titres solo a créé un album homonyme chez le partenaire → fusion continue
+        if (runCatching { AlbumSharing.mergeDuoSplits(db) }.getOrDefault(0) > 0) library?.clearCaches()
 
         onProgress("Agrégats titres / artistes / albums…")
         db.withTransaction {

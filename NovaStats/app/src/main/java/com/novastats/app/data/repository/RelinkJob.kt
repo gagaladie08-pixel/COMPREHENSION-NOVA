@@ -15,8 +15,8 @@ import kotlinx.coroutines.sync.withLock
  */
 object RelinkJob {
     private const val PREFS = "nova_relink"
-    /** v3 (0.11.1) : albums multi-artistes (règle 12) — relance le recalcul une fois de plus après la mise à jour. */
-    private const val KEY_DONE = "v3_done"
+    /** v4 (0.11.2) : albums partagés (règle 12) + albums coupés par les duos (règle 13) — relance le recalcul une fois de plus après la mise à jour. */
+    private const val KEY_DONE = "v4_done"
     private val mutex = Mutex()
 
     private val _state = MutableStateFlow<String?>(null)

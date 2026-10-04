@@ -177,7 +177,7 @@ object LegacyBackupImporter {
         onProgress("Albums multi-artistes…")
         AlbumSharing.consolidate(db, library)
         onProgress("Recalcul des statistiques…")
-        StatsRebuilder(db).rebuildAll(onProgress = onProgress)
+        StatsRebuilder(db, library).rebuildAll(onProgress = onProgress)
 
         val report = ImportReport(
             songsInFile = backup.songs.size,

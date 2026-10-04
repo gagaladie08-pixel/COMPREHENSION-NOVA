@@ -904,6 +904,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.11.2" to listOf(
+        "💽 Albums coupés par les duos (règle 13) : un titre rejoint l'album existant d'UN de ses artistes, principal ou invité. « One Kiss » (Calvin Harris & Dua Lipa) va dans « Dua Lipa (Complete Edition) » de Dua Lipa — plus d'album homonyme d'un seul titre au nom du partenaire (reputation / Zayn, BEYONCÉ / Megan Thee Stallion, Ruby / Tame Impala & Zico, ANTI, Loud, My Everything, So Good…).",
+        "🧭 Plusieurs albums possibles → celui de l'artiste commun (présent sur le plus de titres), à égalité le plus écouté. Si le duo arrive avant les titres solo, les deux albums sont fusionnés dès le recalcul suivant et le propriétaire devient l'artiste commun.",
+        "🛡️ Garde-fou : deux albums homonymes d'artistes sans aucun lien (« Greatest Hits », « Ruby », « Rise ») ne sont jamais fusionnés. Les albums multi-artistes (règle 12) ne sont pas concernés.",
+        "📊 Totaux, certifications et records d'albums par artiste attribués à l'artiste commun ; fusion des albums déjà coupés au premier lancement (recalcul automatique)."
+    ),
     "0.11.1" to listOf(
         "🩹 « THE ALBUM » (BLACKPINK) n'est plus pris pour un album multi-artistes : le mot-clé « The Album » ne compte qu'accolé à un nom (« F1 The Album », « Barbie The Album »). L'album est rendu à BLACKPINK au premier lancement.",
         "🩹 Fiche d'un album partagé vide (« Chansons (0) », « 0 artiste ») alors qu'il comptait des écoutes : les titres suivent désormais leurs écoutes dans l'album fusionné (Listen Up!, K-Pop Demon Hunters…). Le nombre d'artistes compte les artistes principaux des titres.",

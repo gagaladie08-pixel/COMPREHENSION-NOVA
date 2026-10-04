@@ -25,7 +25,7 @@ class NovaStatsApp : Application() {
     val database: NovaDatabase by lazy { NovaDatabase.get(this) }
     val settings: SettingsRepository by lazy { SettingsRepository(this) }
     val library: LibraryRepository by lazy { LibraryRepository(database) }
-    val rebuilder: StatsRebuilder by lazy { StatsRebuilder(database) }
+    val rebuilder: StatsRebuilder by lazy { StatsRebuilder(database, library) }
     val billboard: BillboardEngine by lazy { BillboardEngine(database) }
     val recordExplainer: com.novastats.app.data.repository.RecordExplainer by lazy { com.novastats.app.data.repository.RecordExplainer(database) }
     val enricher: MetadataEnricher by lazy {

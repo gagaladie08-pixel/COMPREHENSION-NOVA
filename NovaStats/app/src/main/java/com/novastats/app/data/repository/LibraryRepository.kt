@@ -6,6 +6,7 @@ import com.novastats.app.data.db.entity.ArtistEntity
 import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackArtistEntity
 import com.novastats.app.data.db.entity.TrackEntity
+import com.novastats.app.domain.AlbumOwnership
 import com.novastats.app.domain.TitleNormalizer
 
 /**
@@ -112,7 +113,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         val guestKeys = guestIds.map { "#$it" }.toSet()
         // Album crédité uniquement s'il s'agit d'un album de l'artiste principal ; jamais pour une compilation
         val albumId = rawAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
-            ?.let { resolveAlbum(it, primaryArtistId, albumArtist) }
+            ?.let { resolveAlbum(it, primaryArtistId, albumArtist, artistIds = artistIds) }
 
         // ---- 1. Remix / version AVEC artiste featuring (« Song (Remix) feat. Drake ») → titre distinct « Song (feat. Drake) », lié à l'original
         val isRemixFeat = normalized.isVersion && titleOnlyGuests.isNotEmpty()
@@ -243,10 +244,11 @@ class LibraryRepository(private val db: NovaDatabase) {
      * Album : clé (titre normalisé, artiste principal) — ou titre seul pour un album PARTAGÉ (BO, « Various Artists »,
      * marquage manuel) : un seul album sans propriétaire (`artist_id` NULL) auquel tous les titres se rattachent.
      */
-    suspend fun resolveAlbum(rawTitle: String, artistId: Long, albumArtist: String? = null, forceShared: Boolean? = null): Long {
+    suspend fun resolveAlbum(rawTitle: String, artistId: Long, albumArtist: String? = null, forceShared: Boolean? = null, artistIds: List<Long> = listOf(artistId)): Long {
         val title = TitleNormalizer.normalizeAlbumTitle(rawTitle) // Deluxe / Expanded / Japan Edition… fusionnés
         val shared = forceShared ?: isSharedAlbum(title, albumArtist)
-        val key = TitleNormalizer.normalizeKey(title) + "|" + (if (shared) "shared" else artistId.toString())
+        val allIds = (listOf(artistId) + artistIds).distinct()
+        val key = TitleNormalizer.normalizeKey(title) + "|" + (if (shared) "shared" else allIds.sorted().joinToString(","))
         albumCache[key]?.let { return it }
         val id = if (shared) {
             // Partagé uniquement grâce à l'artiste d'album « Various Artists » (info absente des re-liaisons) → mémorisé comme marque
@@ -260,8 +262,16 @@ class LibraryRepository(private val db: NovaDatabase) {
             sharedAlbumIds.add(found)
             found
         } else {
-            db.albumDao().findByTitleAndArtist(title, artistId)?.albumId
-                ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = artistId))
+            // Règle 13 : album existant d'UN des artistes du titre (principal ou invité) — le duo rejoint l'album de l'artiste commun
+            val candidates = db.albumDao().findByTitleAndArtists(title, allIds)
+            val picked = when (candidates.size) {
+                0 -> null
+                1 -> candidates.first().albumId
+                else -> AlbumOwnership.pick(candidates.map { al ->
+                    AlbumOwnership.Candidate(al.albumId, al.artistId!!, db.albumDao().tracksCreditingArtist(al.albumId, al.artistId), al.playCount)
+                })
+            }
+            picked ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = artistId))
         }
         albumCache[key] = id
         return id

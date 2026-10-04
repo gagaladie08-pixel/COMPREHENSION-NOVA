@@ -3,6 +3,7 @@ package com.novastats.app.data.repository
 import androidx.room.withTransaction
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.entity.AlbumEntity
+import com.novastats.app.domain.AlbumOwnership
 import com.novastats.app.domain.TitleNormalizer
 
 /**
@@ -47,7 +48,7 @@ object AlbumSharing {
             if (library.isSharedAlbum(al.title, null)) continue
             db.withTransaction {
                 for (t in db.trackDao().inAlbum(al.albumId)) {
-                    val newAlbum = library.resolveAlbum(al.titleRaw, t.artistId, forceShared = false)
+                    val newAlbum = library.resolveAlbum(al.titleRaw, t.artistId, forceShared = false, artistIds = db.trackLinkDao().artistIdsForTrack(t.trackId))
                     db.trackDao().setAlbum(t.trackId, newAlbum)
                     db.scrobbleDao().setAlbumForTrack(t.trackId, newAlbum)
                     db.trackLinkDao().unlinkTrackAlbum(t.trackId, al.albumId)
@@ -59,7 +60,37 @@ object AlbumSharing {
                 split++
             }
         }
-        return Report(merged, split)
+        // ---- 5. Règle 13 : albums normaux homonymes coupés par les duos → fusionnés chez l'artiste commun
+        val duos = mergeDuoSplits(db)
+        return Report(merged + duos, split)
+    }
+
+    /**
+     * Albums normaux portant le même titre mais des propriétaires différents : fusionnés si le propriétaire de l'un est
+     * crédité sur un titre de l'autre (garde-fou contre les homonymes sans lien). Le propriétaire devient l'artiste commun.
+     */
+    suspend fun mergeDuoSplits(db: NovaDatabase): Int {
+        var merged = 0
+        val groups = db.albumDao().all().filter { it.artistId != null }.groupBy { TitleNormalizer.normalizeKey(it.title) }.values.filter { it.size > 1 }
+        for (group in groups) {
+            val infos = group.map { al ->
+                val pairs = db.albumDao().trackArtistPairs(al.albumId).groupBy({ it.trackId }, { it.artistId }).mapValues { (_, v) -> v.toSet() }
+                AlbumOwnership.AlbumInfo(al.albumId, al.artistId!!, pairs, al.playCount)
+            }
+            for (plan in AlbumOwnership.plan(infos)) {
+                db.withTransaction {
+                    plan.absorbed.forEach { mergeInto(db, it, plan.keepId); merged++ }
+                    plan.newOwner?.let { owner ->
+                        // L'artiste commun possède peut-être déjà un album homonyme (titre exact différent) → on le rejoint plutôt que de violer l'unicité
+                        val title = db.albumDao().getById(plan.keepId)?.title
+                        val clash = title?.let { db.albumDao().findByTitleAndArtist(it, owner) }
+                        if (clash != null && clash.albumId != plan.keepId) { mergeInto(db, plan.keepId, clash.albumId); merged++ }
+                        else db.albumDao().setOwner(plan.keepId, owner)
+                    }
+                }
+            }
+        }
+        return merged
     }
 
     /** Déplace titres, écoutes, liens et pochette de `from` vers `into`, puis supprime `from`. */
