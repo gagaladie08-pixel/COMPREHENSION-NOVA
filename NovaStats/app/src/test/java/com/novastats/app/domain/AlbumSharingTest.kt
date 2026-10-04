@@ -19,9 +19,11 @@ class AlbumSharingTest {
 
     @Test
     fun `album normal avec featurings inchange`() {
-        listOf("Dua Lipa (Complete Edition)", "Loud", "reputation", "BORN PINK", "Alter Ego", "Thriller", "Greatest Hits").forEach {
+        listOf("Dua Lipa (Complete Edition)", "Loud", "reputation", "BORN PINK", "Alter Ego", "Thriller", "Greatest Hits", "THE ALBUM", "The Album").forEach {
             assertFalse(it, TitleNormalizer.isSharedAlbum(it, "Rihanna"))
         }
+        assertFalse(TitleNormalizer.isSharedAlbum("THE ALBUM"))            // BLACKPINK : album normal
+        assertTrue(TitleNormalizer.isSharedAlbum("Barbie The Album"))     // mot-clé accolé à un nom
     }
 
     @Test

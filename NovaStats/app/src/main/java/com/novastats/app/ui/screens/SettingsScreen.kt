@@ -904,6 +904,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.11.1" to listOf(
+        "🩹 « THE ALBUM » (BLACKPINK) n'est plus pris pour un album multi-artistes : le mot-clé « The Album » ne compte qu'accolé à un nom (« F1 The Album », « Barbie The Album »). L'album est rendu à BLACKPINK au premier lancement.",
+        "🩹 Fiche d'un album partagé vide (« Chansons (0) », « 0 artiste ») alors qu'il comptait des écoutes : les titres suivent désormais leurs écoutes dans l'album fusionné (Listen Up!, K-Pop Demon Hunters…). Le nombre d'artistes compte les artistes principaux des titres.",
+        "💾 Un album partagé grâce à l'artiste d'album « Various Artists » est mémorisé comme marque : il le reste après une re-liaison ou un ré-import.",
+        "♻️ Recalcul automatique relancé une fois au premier lancement."
+    ),
     "0.11.0" to listOf(
         "💿 Albums multi-artistes (BO, albums d'événements) : « K-Pop Demon Hunters: Soundtrack… », « F1 The Album », « …FIFA World Cup Album » existent une seule fois, sans artiste propriétaire (étiquette « Artistes variés »). Tous leurs titres s'y rattachent quel que soit l'artiste principal ; le total et la certification de l'album portent sur l'ensemble.",
         "🔎 Déclencheurs : mots-clés du titre (Soundtrack, Motion Picture, Music From, The Album, World Cup, Bande originale), artiste d'album « Various Artists », ou marquage manuel dans l'Éditeur → album → 💿 Marquer multi-artistes / 👤 Retirer (mémorisé, survit aux ré-imports, exporté dans le JSON).",

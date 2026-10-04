@@ -252,7 +252,11 @@ object TitleNormalizer {
      */
     fun isSharedAlbum(albumTitle: String?, albumArtist: String? = null): Boolean {
         if (albumArtist != null && variousArtistsRegex.containsMatchIn(albumArtist.trim())) return true
-        return albumTitle != null && sharedAlbumRegex.containsMatchIn(normalizeKey(albumTitle))
+        if (albumTitle == null) return false
+        val key = normalizeKey(albumTitle)
+        // « THE ALBUM » tout court (BLACKPINK) est un album normal : le mot-clé ne vaut qu'accolé à un nom (« F1 The Album »)
+        if (key == "the album") return false
+        return sharedAlbumRegex.containsMatchIn(key)
     }
 
     /** Décision finale : correction manuelle (« 1 » / « 0 ») sinon détection automatique. */

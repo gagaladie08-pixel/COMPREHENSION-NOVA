@@ -20,23 +20,31 @@ object AlbumSharing {
 
     suspend fun consolidate(db: NovaDatabase, library: LibraryRepository): Report {
         var merged = 0; var split = 0
+        db.albumDao().recomputeAggregates() // play_count fiable pour choisir l'album conservé
         val albums = db.albumDao().all()
         // ---- 1. Albums « normaux » dont le titre doit être partagé → un seul album sans propriétaire
         val toShare = albums.filter { it.artistId != null && library.isSharedAlbum(it.title, null) }.groupBy { TitleNormalizer.normalizeKey(it.title) }
-        for ((_, group) in toShare) {
-            val title = group.first().title
+        for ((key, group) in toShare) {
+            val first = group.maxByOrNull { it.playCount }!!
             db.withTransaction {
-                val target = db.albumDao().findShared(title)?.albumId
-                    ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = group.first().titleRaw, artistId = null))
+                val target = db.albumDao().allShared().firstOrNull { TitleNormalizer.normalizeKey(it.title) == key }?.albumId
+                    ?: db.albumDao().insert(AlbumEntity(title = first.title, titleRaw = first.titleRaw, artistId = null))
                 for (al in group) {
                     mergeInto(db, al.albumId, target)
                     merged++
                 }
             }
         }
-        // ---- 2. Albums partagés dont la marque a été retirée (« 0 ») → redécoupés par artiste principal du titre
+        // ---- 2. Doublons d'albums partagés (même titre) → fusionnés
+        db.albumDao().allShared().groupBy { TitleNormalizer.normalizeKey(it.title) }.values.filter { it.size > 1 }.forEach { dups ->
+            val keep = dups.maxByOrNull { it.playCount }!!
+            db.withTransaction { dups.filter { it.albumId != keep.albumId }.forEach { mergeInto(db, it.albumId, keep.albumId); merged++ } }
+        }
+        // ---- 3. Les titres dont les écoutes pointent vers un album partagé y sont rattachés (re-liaison : écoutes déplacées, pas le titre)
+        for (al in db.albumDao().allShared()) db.albumDao().adoptTracksOf(al.albumId)
+        // ---- 4. Albums partagés qui ne le sont plus (marque retirée « 0 », ou règle affinée) → redécoupés par artiste principal du titre
         for (al in db.albumDao().allShared()) {
-            if (library.sharedOverride(al.title) != "0") continue
+            if (library.isSharedAlbum(al.title, null)) continue
             db.withTransaction {
                 for (t in db.trackDao().inAlbum(al.albumId)) {
                     val newAlbum = library.resolveAlbum(al.titleRaw, t.artistId, forceShared = false)
@@ -51,11 +59,6 @@ object AlbumSharing {
                 split++
             }
         }
-        // ---- 3. Doublons d'albums partagés (même titre) → fusionnés
-        db.albumDao().allShared().groupBy { TitleNormalizer.normalizeKey(it.title) }.values.filter { it.size > 1 }.forEach { dups ->
-            val keep = dups.maxByOrNull { it.playCount }!!
-            db.withTransaction { dups.filter { it.albumId != keep.albumId }.forEach { mergeInto(db, it.albumId, keep.albumId); merged++ } }
-        }
         return Report(merged, split)
     }
 
@@ -69,5 +72,6 @@ object AlbumSharing {
         db.trackLinkDao().clearAlbumLinks(from)
         db.albumDao().fillCover(into, src.coverUrl, src.coverSource)
         db.albumDao().delete(from)
+        db.albumDao().adoptTracksOf(into)
     }
 }

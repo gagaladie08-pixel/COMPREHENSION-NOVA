@@ -25,6 +25,8 @@ class LibraryRepository(private val db: NovaDatabase) {
     // Caches mémoire (clé normalisée) — évitent des milliers de requêtes lors d'un import.
     private val artistCache = HashMap<String, Long>()
     private val albumCache = HashMap<String, Long>()
+    /** Albums partagés résolus dans cette session : un titre déjà connu y est déplacé (règle 12). */
+    private val sharedAlbumIds = HashSet<Long>()
     private val trackCache = HashMap<String, Resolved>()
     /** Dernière résolution par (titre, artiste principal) — pour [peekTrackId] (lecture en cours). */
     private val peekCache = HashMap<String, Resolved>()
@@ -123,7 +125,7 @@ class LibraryRepository(private val db: NovaDatabase) {
                 TrackEntity(title = title, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId, durationMs = durationMs, genre = genre, isRemix = true, originalTrackId = root?.trackId)
             )
             if (existing != null && existing.originalTrackId == null && root != null && root.trackId != trackId) db.trackDao().linkToRoot(trackId, root.trackId)
-            if (existing != null && existing.albumId == null && albumId != null) db.trackDao().update(existing.copy(albumId = albumId, durationMs = existing.durationMs ?: durationMs, genre = existing.genre ?: genre))
+            if (existing != null && albumId != null && existing.albumId != albumId && (existing.albumId == null || albumId in sharedAlbumIds)) db.trackDao().update(existing.copy(albumId = albumId, durationMs = existing.durationMs ?: durationMs, genre = existing.genre ?: genre))
             return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
         }
 
@@ -142,7 +144,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         val rootId = existingPlain.originalTrackId ?: existingPlain.trackId
         val existingGuests = guestKeysOf(existingPlain.trackId, primaryArtistId)
         val match = classify(existingGuests, guestKeys)
-        if (existingPlain.albumId == null && albumId != null) {
+        if (albumId != null && existingPlain.albumId != albumId && (existingPlain.albumId == null || albumId in sharedAlbumIds)) {
             db.trackDao().update(existingPlain.copy(albumId = albumId, durationMs = existingPlain.durationMs ?: durationMs, genre = existingPlain.genre ?: genre))
         }
         val trackId: Long = when (match) {
@@ -247,8 +249,16 @@ class LibraryRepository(private val db: NovaDatabase) {
         val key = TitleNormalizer.normalizeKey(title) + "|" + (if (shared) "shared" else artistId.toString())
         albumCache[key]?.let { return it }
         val id = if (shared) {
-            db.albumDao().findShared(title)?.albumId
+            // Partagé uniquement grâce à l'artiste d'album « Various Artists » (info absente des re-liaisons) → mémorisé comme marque
+            if (forceShared == null && sharedOverride(title) == null && !TitleNormalizer.isSharedAlbum(title, null)) {
+                val key = TitleNormalizer.normalizeKey(title)
+                db.editorDao().upsertCorrection(com.novastats.app.data.db.entity.UserCorrectionEntity(originalValue = key, correctedValue = "1", correctionType = CORRECTION_ALBUM_SHARED))
+                correctionsLoadedAt = 0L
+            }
+            val found = db.albumDao().findShared(title)?.albumId
                 ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = null))
+            sharedAlbumIds.add(found)
+            found
         } else {
             db.albumDao().findByTitleAndArtist(title, artistId)?.albumId
                 ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = artistId))
@@ -264,7 +274,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         return peekCache[TitleNormalizer.normalizeKey(normalized.title) + "|" + TitleNormalizer.normalizeKey(primary)]?.trackId
     }
 
-    fun clearCaches() { artistCache.clear(); albumCache.clear(); trackCache.clear(); peekCache.clear(); correctionsLoadedAt = 0L }
+    fun clearCaches() { artistCache.clear(); albumCache.clear(); sharedAlbumIds.clear(); trackCache.clear(); peekCache.clear(); correctionsLoadedAt = 0L }
 
     /** Charge les noms protégés depuis la base (au démarrage et après édition) ; insère les valeurs par défaut la première fois. */
     suspend fun loadArtistExceptions(seedDefaults: Boolean) {
