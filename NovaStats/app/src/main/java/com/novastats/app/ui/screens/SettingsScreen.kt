@@ -904,6 +904,17 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.8" to listOf(
+        "🐛 « Goals — LISA : Original 0 ▶, with Anitta, Rema, Fifa Sound 97 ▶ » : un root solo sans aucune écoute propre n'est pas une version solo. À chaque recalcul, ces roots vides sont repliés : les versions y sont fusionnées (écoutes, artistes, album, pochette) et le titre redevient unique, crédité à tous les artistes."
+    ),
+    "0.10.7" to listOf(
+        "🎯 Règle précisée : la « version avec invité » n'existe que face à une version SOLO du même titre. Deux featurings différents sans version solo (A & B puis A & C) = un seul titre crédité à tous les artistes (comme avant 0.10.5).",
+        "🐛 BOOMPALA : les écoutes importées depuis le JSON n'avaient pas de valeurs brutes → le recalcul ne pouvait pas retrouver « Santos Bravos ». L'import mémorise désormais titre / artistes / album du fichier, et ré-importer un ancien JSON répare les écoutes existantes (déplacées vers la bonne version, jamais dupliquées).",
+        "♻️ Recalcul : sans valeur brute, tous les artistes liés au titre sont utilisés (pas seulement le principal)."
+    ),
+    "0.10.6" to listOf(
+        "🐛 Recalcul des liens interrompu par « UNIQUE constraint failed: scrobbles.track_id, started_at » : quand deux écoutes au même instant convergent vers le même titre, le doublon est supprimé au lieu de faire échouer le recalcul."
+    ),
     "0.10.5" to listOf(
         "🔒 Noms protégés : « HUNTR/X », « AC/DC », « Tyler, The Creator »… ne sont plus découpés en plusieurs artistes, même dans « HUNTR/X feat. Future ». Liste modifiable dans l'Éditeur (onglet 🔒 Noms protégés).",
         "🔗 Remix featuring + original = un seul titre dans les classements, records, certifications et Stats (écoutes additionnées). Le remix reste une version distincte, liée à l'original ; la fiche du titre montre la répartition par version.",
