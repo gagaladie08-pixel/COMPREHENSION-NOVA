@@ -68,7 +68,10 @@ class TitleNormalizerTest {
     @Test
     fun `compilations jamais creditees`() {
         assertTrue(TitleNormalizer.isCompilation("NOW That's What I Call Music! 89", null))
-        assertTrue(TitleNormalizer.isCompilation("Summer Hits", "Various Artists"))
+        // §12 : « Various Artists » seul n'est plus une compilation (album partagé « Artistes variés »)
+        assertFalse(TitleNormalizer.isCompilation("Summer Hits", "Various Artists"))
+        assertTrue(TitleNormalizer.isSharedAlbum("Summer Hits", "Various Artists"))
+        assertTrue(TitleNormalizer.isCompilation("Top Hits 2025", "Various Artists"))
         assertTrue(TitleNormalizer.isCompilation("NRJ Hits 2026", null))
         assertFalse(TitleNormalizer.isCompilation("BORN PINK", "BLACKPINK"))
         assertFalse(TitleNormalizer.isCompilation("Greatest Hits", "Queen"))
