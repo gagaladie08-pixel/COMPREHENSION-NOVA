@@ -256,6 +256,20 @@ interface RecordDao {
     )
     suspend fun tiedAt(type: String, period: String?, category: String, sub: String?, value: Double): Int
 
+    /** Toutes les lignes de cache d'une entité (tous records / périodes / sous-sections) — contexte de la fiche. */
+    @Query("SELECT * FROM records_cache WHERE category = :category AND entity_id = :entityId ORDER BY record_type, period_type, subcategory")
+    suspend fun rowsForEntity(category: String, entityId: Long): List<RecordCacheEntity>
+
+    /** Nombre d'entités strictement meilleures dans un classement (rang = n + 1). */
+    @Query(
+        """
+        SELECT COUNT(*) FROM records_cache x
+        WHERE x.record_type = :type AND IFNULL(x.period_type, '') = IFNULL(:period, '') AND x.category = :category AND IFNULL(x.subcategory, '') = IFNULL(:sub, '')
+          AND ((:asc AND x.value < :value) OR (NOT :asc AND x.value > :value))
+        """
+    )
+    suspend fun betterCount(type: String, period: String?, category: String, sub: String?, value: Double, asc: Boolean): Int
+
     @Query("SELECT COUNT(*) FROM records_cache") fun countFlow(): Flow<Int>
     @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
     @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>

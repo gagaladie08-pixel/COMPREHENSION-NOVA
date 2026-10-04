@@ -11,6 +11,7 @@ import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
 import com.novastats.app.domain.RecordDef
+import kotlinx.coroutines.flow.first
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -35,7 +36,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         val itemsTitle: String? = null,
         val items: List<Item> = emptyList(),
         /** Most Records : tous les classements détenus, groupés par famille dans la fiche. */
-        val held: List<Held> = emptyList()
+        val held: List<Held> = emptyList(),
+        /** Paragraphes de contexte propres à CET élément (place dans le classement, profil, autres records) : titre → texte. */
+        val context: List<Pair<String, String>> = emptyList()
     )
 
     private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
@@ -120,7 +123,13 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     /* ------------------------------------------------------------------ fiche ------------------------------------------------------------------ */
 
-    suspend fun explain(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story = runCatching {
+    suspend fun explain(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story {
+        val story = explainCore(def, period, cat, sub, id, name, value)
+        val ctx = runCatching { context(def, period, cat, sub, id, name, value) }.getOrDefault(emptyList())
+        return story.copy(context = ctx)
+    }
+
+    private suspend fun explainCore(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story = runCatching {
         when (def.id) {
             "MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_TIME_AT_1", "MOST_CONSISTENT", "MOST_BLOCKED_TOP5",
             "BIGGEST_JUMP", "BIGGEST_FALL", "BIGGEST_COMEBACK", "BIGGEST_CLIMBER", "SLEEPER_HIT", "FASTEST_RISE", "LONGEST_ROAD",
@@ -138,6 +147,158 @@ class RecordExplainer(private val db: NovaDatabase) {
             else -> Story(def.title, def.description)
         }
     }.getOrElse { e -> Story(def.title, "Impossible de reconstruire l'explication : ${e.message ?: e.javaClass.simpleName}") }
+
+    /* ---------------- contexte unique à l'élément (ajouté à chaque fiche) ---------------- */
+
+    private fun fmtValue(def: RecordDef, p: Period?, v: Double): String {
+        val n = v.toInt()
+        return when (def.unit) {
+            com.novastats.app.domain.RecordUnit.PERIODS -> "$n ${unit(p, n)}"
+            com.novastats.app.domain.RecordUnit.DAYS -> "$n ${plural(n, "jour")}"
+            com.novastats.app.domain.RecordUnit.POSITIONS -> "$n ${plural(n, "place")}"
+            com.novastats.app.domain.RecordUnit.PLAYS -> "$n ${plural(n, "écoute")}"
+            com.novastats.app.domain.RecordUnit.TIMES -> "$n fois"
+            com.novastats.app.domain.RecordUnit.DURATION_MS -> RecordCatalog.formatDurationAdaptive(v.toLong())
+            else -> "$n"
+        }
+    }
+
+    private fun catWord(cat: RecordCategory, n: Int = 1) = when (cat) { RecordCategory.TRACK -> plural(n, "titre"); RecordCategory.ARTIST -> plural(n, "artiste"); RecordCategory.ALBUM -> plural(n, "album") }
+    private fun ordinal(n: Int) = if (n == 1) "1er" else "${n}e"
+    private fun rankingLabel(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?): String {
+        val subLabel = def.subs[cat]?.firstOrNull { it.dbName == sub }?.label
+        return listOfNotNull(def.title, period?.frLabel, subLabel).joinToString(" · ")
+    }
+
+    /**
+     * Trois paragraphes calculés pour CET élément précis :
+     *  📊 sa place dans ce classement (écart au #1, au précédent, au suivant, égalités),
+     *  🧬 son profil dans le chart concerné (entrée, sommet, régularité, statut actuel, part de ses écoutes…),
+     *  🏆 ailleurs dans les records (même record autres périodes, autres #1, nombre de classements).
+     */
+    private suspend fun context(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        val asc = def.ascending
+        val better = if (asc) "plus court" else "plus grand"
+
+        // 📊 Place dans ce classement
+        val rows = db.recordDao().top10(def.id, period?.dbName, cat.dbName, sub, asc).first()
+        val idx = rows.indexOfFirst { it.r.entityId == id }
+        if (idx >= 0) {
+            val me = rows[idx]
+            val ties = rows.filter { it.r.value == me.r.value && it.r.entityId != id }
+            val sb = StringBuilder()
+            if (rows.size == 1) sb.append("$name est seul dans ce classement : aucun autre ${catWord(cat)} n'a (encore) rempli les conditions de ce record. ")
+            else if (idx == 0) {
+                val second = rows.firstOrNull { it.r.value != me.r.value }
+                if (ties.isNotEmpty()) sb.append("$name partage la première place avec ${ties.joinToString(", ") { it.name ?: "?" }} (${fmtValue(def, period, me.r.value)} chacun). ")
+                else sb.append("$name domine ce classement avec ${fmtValue(def, period, me.r.value)}. ")
+                if (second != null) {
+                    val gap = kotlin.math.abs(me.r.value - second.r.value)
+                    val pct = if (second.r.value > 0) (100 * gap / second.r.value).toInt() else 0
+                    sb.append((if (ties.isNotEmpty()) "Le suivant, " else "Son dauphin, ") + "${second.name}, est à ${fmtValue(def, period, second.r.value)} : " +
+                        (if (asc) "$name a été ${fmtValue(def, period, gap)} plus rapide" else "une avance de ${fmtValue(def, period, gap)}") + (if (pct > 0) " ($pct %)" else "") + ". ")
+                }
+            } else {
+                val leader = rows.first()
+                val gapLead = kotlin.math.abs(leader.r.value - me.r.value)
+                sb.append("$name est ${ordinal(idx + 1)} sur ${rows.size} dans ce classement" + (if (ties.isNotEmpty()) ", à égalité avec ${ties.joinToString(", ") { it.name ?: "?" }}" else "") + ". ")
+                sb.append("Le #1, ${leader.name}, est à ${fmtValue(def, period, leader.r.value)}" + (if (gapLead > 0) " — il lui manque ${fmtValue(def, period, gapLead)} pour le rejoindre. " else ". "))
+                val prev = rows.subList(0, idx).lastOrNull { it.r.value != me.r.value }
+                val next = rows.drop(idx + 1).firstOrNull { it.r.value != me.r.value }
+                if (prev != null && prev.r.entityId != leader.r.entityId) sb.append("Juste devant lui : ${prev.name} (${fmtValue(def, period, prev.r.value)}). ")
+                if (next != null) sb.append("Juste derrière : ${next.name} (${fmtValue(def, period, next.r.value)})" + (if (kotlin.math.abs(me.r.value - next.r.value) <= 1.0) " — à une unité près, sa place est menacée." else ".") + " ")
+                else if (idx == rows.size - 1) sb.append("Il ferme le Top 10 : le prochain ${catWord(cat)} à faire mieux l'en sortira. ")
+            }
+            if (asc) sb.append("Ici, $better = mieux.")
+            out += "📊 Sa place dans ce classement" to sb.toString().trim()
+        }
+
+        // 🧬 Profil dans le chart concerné (records basés sur une trajectoire)
+        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART")
+        if (chartBased) {
+            val p = period!!
+            val s = series(cat, p, id)
+            if (s.isNotEmpty()) {
+                val first = s.first(); val last = s.last(); val peak = s.minBy { it.position }
+                val span = last.periodIndex - first.periodIndex + 1
+                val rate = 100 * s.size / span
+                val ones = s.count { it.position == 1 }
+                val todayIdx = RecordCatalog.periodIndex(Dates.today(), p)
+                val chart = "chart ${p.frLabel.lowercase()}"
+                val sb = StringBuilder()
+                sb.append(
+                    when {
+                        first.position == 1 -> "Dans le $chart, $name est entré directement au #1 ${on(p, first.date)}"
+                        first.position <= 10 -> "Dans le $chart, $name est entré directement dans le Top 10 (${pos(first.position)}) ${on(p, first.date)}"
+                        first.position <= 30 -> "Dans le $chart, $name est entré en milieu de tableau (${pos(first.position)}) ${on(p, first.date)}"
+                        else -> "Dans le $chart, $name est entré discrètement (${pos(first.position)}) ${on(p, first.date)}"
+                    }
+                )
+                sb.append(
+                    if (peak.periodIndex == first.periodIndex) ", qui reste à ce jour sa meilleure position. "
+                    else " avant de grimper jusqu'au ${pos(peak.position)} ${on(p, peak.date)} (${peak.plays} ▶ cette période-là). "
+                )
+                if (ones > 0 && def.id != "MOST_TIME_AT_1") sb.append("Il compte $ones ${unit(p, ones)} au #1. ")
+                sb.append(
+                    "Présent ${s.size} ${unit(p, s.size)} sur $span possibles depuis son entrée ($rate %) : " +
+                        when { rate >= 85 -> "une régularité remarquable. "; rate >= 55 -> "une présence solide. "; rate >= 30 -> "une présence par vagues. "; else -> "des apparitions ponctuelles. " }
+                )
+                if (last.periodIndex >= todayIdx - 1) sb.append("Il est toujours classé en ce moment (${pos(last.position)} ${on(p, last.date)}), ce record peut donc encore évoluer. ")
+                else { val gone = todayIdx - last.periodIndex; sb.append("Il a quitté le $chart depuis $gone ${unit(p, gone)} (dernier passage ${pos(last.position)} ${on(p, last.date)}). ") }
+                val inChart = s.sumOf { it.plays }
+                when (cat) {
+                    RecordCategory.TRACK -> db.trackDao().getById(id)?.let { t ->
+                        if (t.playCount > 0) sb.append("Sur ses ${t.playCount} écoutes au total, $inChart (${(100 * inChart / t.playCount).coerceAtMost(100)} %) ont eu lieu pendant ses périodes classées. ")
+                        if (t.bestStreak >= 2) sb.append("Sa meilleure série d'écoute quotidienne : ${t.bestStreak} jours. ")
+                    }
+                    RecordCategory.ARTIST -> {
+                        val owned = db.trackLinkDao().trackIdsForArtist(id).toSet()
+                        val charted = allSeries(RecordCategory.TRACK, p).count { it.key in owned }
+                        db.artistDao().getById(id)?.let { a -> if (a.playCount > 0) sb.append("${a.playCount} écoutes au total, dont $inChart pendant ses périodes classées. ") }
+                        if (charted > 0) sb.append("$charted de ses titres sont passés par le $chart des titres. ")
+                    }
+                    RecordCategory.ALBUM -> {
+                        val owned = db.trackDao().ofAlbum(id).map { it.track.trackId }.toSet()
+                        val charted = allSeries(RecordCategory.TRACK, p).count { it.key in owned }
+                        db.albumDao().getById(id)?.let { a -> if (a.playCount > 0) sb.append("${a.playCount} écoutes au total, dont $inChart pendant ses périodes classées. ") }
+                        if (owned.isNotEmpty()) sb.append("$charted de ses ${owned.size} titres sont passés par le $chart des titres. ")
+                    }
+                }
+                out += "🧬 Son profil dans ce chart" to sb.toString().trim()
+            }
+        }
+
+        // 🏆 Ailleurs dans les records
+        val all = db.recordDao().rowsForEntity(cat.dbName, id).filter { it.recordType != "MOST_RECORDS" }
+        val isCurrent = { r: com.novastats.app.data.db.entity.RecordCacheEntity -> r.recordType == def.id && r.periodType == period?.dbName && r.subcategory == sub }
+        val others = all.filterNot(isCurrent)
+        if (others.isNotEmpty()) {
+            val sb = StringBuilder()
+            val same = others.filter { it.recordType == def.id }
+            if (same.isNotEmpty()) {
+                val parts = same.take(6).map { r ->
+                    val rank = db.recordDao().betterCount(r.recordType, r.periodType, r.category, r.subcategory, r.value, asc) + 1
+                    val pl = Period.entries.firstOrNull { it.dbName == r.periodType }
+                    val sl = def.subs[cat]?.firstOrNull { it.dbName == r.subcategory }?.label
+                    "#$rank en ${listOfNotNull(pl?.frLabel, sl).joinToString(" ")} (${fmtValue(def, pl, r.value)})"
+                }
+                sb.append("Sur ce même record, il est aussi " + parts.joinToString(", ") + (if (same.size > 6) " et ${same.size - 6} autres" else "") + ". ")
+            }
+            val held = db.recordDao().heldNumberOnes(cat.dbName, id).filterNot(isCurrent)
+            val otherTypes = others.map { it.recordType }.toSet() - def.id
+            val n = others.size
+            sb.append("Au total, $name figure dans $n ${plural(n, "autre classement", "autres classements")} de records (${otherTypes.size} ${plural(otherTypes.size, "record différent", "records différents")})")
+            if (held.isNotEmpty()) {
+                val ex = held.take(3).joinToString(", ") { r -> RecordCatalog.byId(r.recordType)?.let { d -> rankingLabel(d, Period.entries.firstOrNull { it.dbName == r.periodType }, cat, r.subcategory) } ?: r.recordType }
+                sb.append(", dont ${held.size} où il est #1 : $ex" + (if (held.size > 3) "…" else "") + ".")
+            } else sb.append(", sans autre première place pour l'instant.")
+            out += "🏆 Ailleurs dans les records" to sb.toString().trim()
+        } else if (idx >= 0) {
+            out += "🏆 Ailleurs dans les records" to "C'est le seul classement de records où $name apparaît pour le moment : ce record est sa signature."
+        }
+        return out
+    }
 
     /* ---------------- records sur la trajectoire de l'élément ---------------- */
 

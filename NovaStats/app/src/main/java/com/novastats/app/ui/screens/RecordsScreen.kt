@@ -334,7 +334,8 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                 val subs = def.subs[category].orEmpty()
                 if (subs.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    ChipRow(subs.map { it.label }, subs.indexOf(sub), color) { sub = subs[it] }
+                    // Sous-sections : segments pleine largeur (comme Titres / Artistes / Albums), sur plusieurs lignes si besoin
+                    SegmentedRows(subs.map { it.label }, subs.indexOf(sub), color) { sub = subs[it] }
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Appuie sur une ligne pour voir pourquoi l'élément est là.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
@@ -359,6 +360,34 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
 }
 
 private fun sectionLabel(c: RecordCategory) = when (c) { RecordCategory.TRACK -> "Titres"; RecordCategory.ALBUM -> "Albums"; RecordCategory.ARTIST -> "Artistes" }
+
+/** Segments pleine largeur répartis équitablement sur ⌈n/3⌉ lignes (≤ 4 par ligne si une seule ligne). */
+@Composable
+private fun SegmentedRows(labels: List<String>, selected: Int, color: Color, onSelect: (Int) -> Unit) {
+    val theme = Nova.theme
+    val pride = Nova.isPride
+    val n = labels.size
+    val rowsCount = if (n <= 4) 1 else (n + 2) / 3
+    val base = n / rowsCount; val extra = n % rowsCount
+    var start = 0
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(rowsCount) { r ->
+            val size = base + if (r < extra) 1 else 0
+            val slice = (start until start + size).toList(); start += size
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.8f)).padding(3.dp)) {
+                slice.forEach { i ->
+                    val on = i == selected
+                    Text(
+                        labels[i], color = if (on) (if (pride) prideOnFlag(prideFlagFor(i + 1)) else theme.background) else theme.text, textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelMedium, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).then(if (pride) Modifier.prideChip(on, prideFlagFor(i + 1), Color.Transparent) else Modifier.background(if (on) color else Color.Transparent))
+                            .clickable { onSelect(i) }.padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun ChipRow(labels: List<String>, selected: Int, color: Color, onSelect: (Int) -> Unit) {
@@ -463,6 +492,15 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                         Text(st.headline, color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(6.dp))
                         Text(st.narrative, color = theme.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        // Contexte propre à cet élément : place dans le classement, profil, autres records
+                        st.context.forEach { (title, text) ->
+                            Spacer(Modifier.height(10.dp))
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(color.copy(alpha = 0.2f)))
+                            Spacer(Modifier.height(8.dp))
+                            Text(title, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                            Spacer(Modifier.height(4.dp))
+                            Text(text, color = theme.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        }
                     }
                 }
             }

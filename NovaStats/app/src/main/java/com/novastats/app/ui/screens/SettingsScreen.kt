@@ -866,6 +866,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.1" to listOf(
+        "🧐 Fiche record : « Pourquoi il est là » unique à chaque élément (place dans le classement, profil dans le chart, autres records détenus)",
+        "🏅 Sous-sections en segments pleine largeur, comme Titres / Artistes / Albums"
+    ),
     "0.10.0" to listOf(
         "🏅 6 nouveaux records : Longest Lifespan, Most Re-Entries, Longest Absence Return, Longest Listening Streak, Podium Sweep (Solo / Standard), Most Records (fiche détaillée)",
         "🏎️ Fastest Rise : sections Top 1 / 3 / 5 / 10 / 20, entrées directes exclues"
