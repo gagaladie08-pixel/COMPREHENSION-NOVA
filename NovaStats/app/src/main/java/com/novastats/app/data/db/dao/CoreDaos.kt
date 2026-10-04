@@ -348,6 +348,19 @@ interface TrackDao {
     @Query("UPDATE tracks SET title = :title WHERE track_id = :trackId")
     suspend fun setTitle(trackId: Long, title: String)
 
+    /** Roots « solo » sans aucune écoute confirmée propre mais avec des versions liées : la version solo n'existe pas → à replier. */
+    @Query(
+        """
+        SELECT * FROM tracks r WHERE r.original_track_id IS NULL
+          AND EXISTS (SELECT 1 FROM tracks v WHERE v.original_track_id = r.track_id)
+          AND NOT EXISTS (SELECT 1 FROM scrobbles s WHERE s.track_id = r.track_id AND s.status = 'CONFIRMED')
+        """
+    )
+    suspend fun emptyRootsWithVersions(): List<TrackEntity>
+
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE track_id = :trackId AND cover_url IS NULL")
+    suspend fun fillCover(trackId: Long, url: String?, source: String?)
+
     /** Aplatit les chaînes (version d'une version → rattachée au root final). */
     @Query("UPDATE tracks SET original_track_id = (SELECT o.original_track_id FROM tracks o WHERE o.track_id = tracks.original_track_id) WHERE original_track_id IN (SELECT track_id FROM tracks WHERE original_track_id IS NOT NULL)")
     suspend fun flattenRoots()
@@ -640,6 +653,10 @@ interface TrackLinkDao {
     @Query("DELETE FROM track_artists WHERE artist_id = :from AND track_id IN (SELECT track_id FROM track_artists WHERE artist_id = :into)") suspend fun dropDuplicateLinks(from: Long, into: Long)
     @Query("UPDATE track_artists SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
     @Query("DELETE FROM track_artists WHERE track_id = :trackId") suspend fun clearTrackArtists(trackId: Long)
+    @Query("INSERT OR IGNORE INTO track_artists (track_id, artist_id, is_primary, role) SELECT :into, artist_id, 0, 'featured' FROM track_artists WHERE track_id = :from AND artist_id NOT IN (SELECT artist_id FROM track_artists WHERE track_id = :into)")
+    suspend fun copyArtistLinks(from: Long, into: Long)
+    @Query("INSERT OR IGNORE INTO track_albums (track_id, album_id) SELECT :into, album_id FROM track_albums WHERE track_id = :from")
+    suspend fun copyAlbumLinks(from: Long, into: Long)
     @Query("DELETE FROM track_albums WHERE track_id = :trackId") suspend fun clearTrackAlbums(trackId: Long)
     @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
 }

@@ -207,6 +207,12 @@ interface ScrobbleDao {
     )
     suspend fun findInGroupAt(trackId: Long, rootId: Long, startedAt: Long): ScrobbleEntity?
 
+    /** Fusion de deux titres : les écoutes de `from` au même instant qu'une écoute de `into` sont des doublons. */
+    @Query("DELETE FROM scrobbles WHERE track_id = :from AND started_at IN (SELECT started_at FROM scrobbles WHERE track_id = :into)")
+    suspend fun dropDuplicatesAgainst(from: Long, into: Long)
+    @Query("UPDATE scrobbles SET track_id = :into WHERE track_id = :from")
+    suspend fun moveAll(from: Long, into: Long)
+
     /** Réparation à l'import : déplace l'écoute vers la bonne version et mémorise les valeurs brutes du fichier. */
     @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId, raw_title = :rawTitle, raw_artist = :rawArtist, raw_album = :rawAlbum WHERE scrobble_id = :id")
     suspend fun repair(id: Long, trackId: Long, artistId: Long, albumId: Long?, rawTitle: String?, rawArtist: String?, rawAlbum: String?)

@@ -42,6 +42,9 @@ class StatsRebuilder(private val db: NovaDatabase) {
         val pantheonBefore: Map<Long, String> = if (fullBillboard) emptyMap() else db.pantheonDao().allCurrent().associate { it.artistId to it.currentStatus }
         val hofBefore: Set<List<String>> = if (fullBillboard) emptySet() else db.hallOfFameDao().all().map { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }.toSet()
 
+        onProgress("Versions…")
+        collapseEmptyRoots()
+
         onProgress("Agrégats titres / artistes / albums…")
         db.withTransaction {
             db.trackDao().recomputeAggregates()
@@ -105,6 +108,33 @@ class StatsRebuilder(private val db: NovaDatabase) {
             }
         }
         return news
+    }
+
+    /* ---------------- Versions ---------------- */
+
+    /**
+     * Une « version avec invité » n'existe que face à une version SOLO réellement écoutée. Si le root solo n'a aucune
+     * écoute confirmée propre (créé par un libellé incomplet, ou vidé par un ré-import / une correction), il n'y a pas de
+     * version solo : les versions sont repliées dans le root (écoutes + artistes + albums), qui redevient un titre unique
+     * crédité à tous les artistes. L'identifiant du root est conservé (certifications, historique Billboard, records).
+     */
+    suspend fun collapseEmptyRoots() {
+        val roots = db.trackDao().emptyRootsWithVersions()
+        if (roots.isEmpty()) return
+        db.withTransaction {
+            for (root in roots) {
+                val versions = db.trackDao().versionsOf(root.trackId)
+                for (v in versions) {
+                    db.scrobbleDao().dropDuplicatesAgainst(v.trackId, root.trackId)
+                    db.scrobbleDao().moveAll(v.trackId, root.trackId)
+                    db.trackLinkDao().copyArtistLinks(v.trackId, root.trackId)
+                    db.trackLinkDao().copyAlbumLinks(v.trackId, root.trackId)
+                    if (root.albumId == null && v.albumId != null) db.trackDao().update(root.copy(albumId = v.albumId))
+                    db.trackDao().fillCover(root.trackId, v.coverUrl, v.coverSource)
+                    db.trackDao().delete(v.trackId) // track_artists / track_albums en cascade
+                }
+            }
+        }
     }
 
     /* ---------------- Streaks ---------------- */
