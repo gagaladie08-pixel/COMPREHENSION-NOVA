@@ -60,10 +60,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.hapticfeedback.LocalHapticFeedback
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -87,7 +87,6 @@ import com.novastats.app.ui.theme.NovaTheme
 import com.novastats.app.ui.theme.PrideVeil
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.sin
@@ -212,14 +211,6 @@ fun RewindScreen(startKey: String? = null, onClose: () -> Unit) {
                                 onHorizontalDrag = { _, amount -> scope.launch { drag.snapTo((drag.value + amount).coerceIn(-420f, 420f)) } }
                             )
                         }
-                        .pointerInput(index, slides.size) {
-                            androidx.compose.foundation.gestures.detectTapGestures {
-                                if (drag.value > -12f && drag.value < 12f) {
-                                    if (it.x < size.width * 0.3f) { if (index > 0) { forward = false; index-- } }
-                                    else if (index < slides.lastIndex) { forward = true; index++ } else onClose()
-                                }
-                            }
-                        }
                         .graphicsLayer {
                             translationX = drag.value * 0.55f
                             alpha = 1f - (kotlin.math.abs(drag.value) / 900f).coerceIn(0f, 0.45f)
@@ -251,6 +242,15 @@ fun RewindScreen(startKey: String? = null, onClose: () -> Unit) {
                                 Slide.FINALE -> FinaleSlide(d)
                             }
                         }
+                    }
+                    // Zones tactiles : gauche = reculer, droite = avancer (le glisser est géré par le parent)
+                    Row(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(0.28f).fillMaxHeight().clickable(
+                            interactionSource = remember { MutableInteractionSource() }, indication = null
+                        ) { if (index > 0) { forward = false; index-- } })
+                        Box(Modifier.weight(0.72f).fillMaxHeight().clickable(
+                            interactionSource = remember { MutableInteractionSource() }, indication = null
+                        ) { if (index < slides.lastIndex) { forward = true; index++ } else onClose() })
                     }
                 }
 
@@ -450,7 +450,7 @@ private fun NumbersSlide(d: RewindData) {
     Spacer(Modifier.height(34.dp))
     Appear { RwTitle("Les chiffres") }
     Spacer(Modifier.height(22.dp))
-    Appear(delay = 160) { RwBigStat(d.totals.plays, "écoutes", theme) }
+    Appear(delay = 160) { RwBigStat(d.totals.plays.toLong(), "écoutes", theme) }
     Spacer(Modifier.height(12.dp))
     Appear(delay = 300) { RwBigStat(d.totals.durationMs, "de musique", theme, duration = true) }
     Spacer(Modifier.height(22.dp))
@@ -578,11 +578,11 @@ private fun RhythmSlide(d: RewindData) {
     Appear { RwTitle("Ton rythme") }
     Spacer(Modifier.height(18.dp))
     val items = buildList {
-        d.bestDay?.let { add("🔥" to "record le ${it.dayOfMonth} ${it.month.getDisplayName(TextStyle.FULL, Locale.FRANCE)} : ${formatCount(d.bestDayPlays)} écoutes") }
+        d.bestDay?.let { add("🔥" to "record le ${it.dayOfMonth} ${it.month.getDisplayName(java.time.format.TextStyle.FULL, Locale.FRANCE)} : ${formatCount(d.bestDayPlays)} écoutes") }
         if (d.longestStreak > 1) add("📆" to "${d.longestStreak} jours d'affilée au maximum")
         d.favouriteHour?.let { add("🕒" to "ton heure de prédilection : ${String.format(Locale.FRANCE, "%02d", it)}h") }
         if (d.nightShare >= 0.2f) add("🌙" to "${(d.nightShare * 100).toInt()} % de tes écoutes entre 22h et 5h")
-        d.favouriteWeekday?.let { add("🗓️" to "ton jour fort : ${java.time.DayOfWeek.of(it).getDisplayName(TextStyle.FULL, Locale.FRANCE)}") }
+        d.favouriteWeekday?.let { add("🗓️" to "ton jour fort : ${java.time.DayOfWeek.of(it).getDisplayName(java.time.format.TextStyle.FULL, Locale.FRANCE)}") }
         if (d.longestSessionMs > 0) add("🎧" to "plus longue session : ${formatDuration(d.longestSessionMs)}")
     }
     items.forEachIndexed { i, (e, t) -> Appear(delay = 180 + i * 130) { RwRowStat(e, t) } }
@@ -686,10 +686,10 @@ private fun RwTitle(text: String) {
 }
 
 @Composable
-private fun RwBigStat(value: Int, label: String, theme: NovaTheme, duration: Boolean = false) {
+private fun RwBigStat(value: Long, label: String, theme: NovaTheme, duration: Boolean = false) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        if (duration) Text(formatDuration(value.toLong()), color = theme.text, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black)
-        else CountUp(value, MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Black), theme.text, durationMs = 1400)
+        if (duration) Text(formatDuration(value), color = theme.text, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black)
+        else CountUp(value.toInt(), MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Black), theme.text, durationMs = 1400)
         Text(label, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
         val fill = remember { Animatable(0f) }
