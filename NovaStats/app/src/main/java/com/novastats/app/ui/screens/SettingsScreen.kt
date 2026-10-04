@@ -904,6 +904,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.12.3" to listOf(
+        "\ud83c\udf08 Rewind encore plus spectaculaire : aurores de couleur qui d\u00e9rivent derri\u00e8re les slides, grands chiffres en d\u00e9grad\u00e9 balayant (couleurs des drapeaux pour Survivor), titre de la couverture qui s'\u00e9crit lettre par lettre, pochettes en travelling lent (\u00ab Ken Burns \u00bb) dans leur anneau qui tourne.",
+        "\ud83c\udf8a Confettis \u00e0 la finale (or, ou couleurs des drapeaux pour Survivor) + pastilles r\u00e9cap (artiste n\u00b01, titre n\u00b01, certifications, s\u00e9rie) qui apparaissent en cascade.",
+        "\ud83c\udf9b\ufe0f Transitions en profondeur (zoom + gliss\u00e9 + l\u00e9g\u00e8re rotation au glisser), bouton d'action \u00e0 d\u00e9grad\u00e9 balayant, sons distincts (souffle en avant, tick en arri\u00e8re, impact \u00e0 la finale), 7 s par slide en lecture auto."
+    ),
     "0.12.2" to listOf(
         "\u2728 Nova Rewind devient vraiment anim\u00e9 : sc\u00e8ne vivante (halo qui d\u00e9rive + particules aux couleurs du th\u00e8me, voile des drapeaux pour Survivor), entr\u00e9e en cascade de chaque \u00e9l\u00e9ment, compteurs qui d\u00e9filent de 0, anneau lumineux qui tourne autour des pochettes, barres de progression anim\u00e9es (top 5, grands chiffres).",
         "\ud83d\udc46 D\u00e9filement au doigt : glisse vers la gauche ou la droite pour changer de slide (la slide suit ton doigt), appui \u00e0 gauche pour reculer, \u00e0 droite pour avancer.",
