@@ -254,11 +254,12 @@ class LibraryRepository(private val db: NovaDatabase) {
      * crée les versions « (with X) », rattache les remix à leur original, applique les noms protégés.
      * Les écoutes sans valeurs brutes (anciennes) gardent leur titre. Retourne le nombre d'écoutes déplacées.
      */
-    suspend fun relinkAll(onProgress: (String) -> Unit = {}): Int {
+    suspend fun relinkAll(onProgress: (String) -> Unit = {}): RelinkResult {
         clearCaches()
         loadArtistExceptions(seedDefaults = true)
         val rows = db.scrobbleDao().allForRelink()
         var moved = 0
+        var duplicates = 0
         val artistName = HashMap<Long, String>()
         rows.forEachIndexed { i, r ->
             if (i % 250 == 0) onProgress("Liens & versions : $i / ${rows.size}")
@@ -266,11 +267,20 @@ class LibraryRepository(private val db: NovaDatabase) {
             val artist = r.rawArtist ?: artistName.getOrPut(r.artistId) { db.artistDao().getById(r.artistId)?.name ?: "Artiste inconnu" }
             val resolved = runCatching { resolve(title, artist, r.rawAlbum) }.getOrNull() ?: return@forEachIndexed
             if (resolved.trackId != r.trackId || resolved.primaryArtistId != r.artistId || (resolved.albumId != null && resolved.albumId != r.albumId)) {
-                db.scrobbleDao().relink(r.scrobbleId, resolved.trackId, resolved.primaryArtistId, resolved.albumId ?: r.albumId)
-                moved++
+                // UNIQUE(track_id, started_at) : si une écoute du titre cible existe déjà au même instant, celle-ci est un doublon → supprimée
+                val clash = if (resolved.trackId != r.trackId) db.scrobbleDao().findByTrackAndStart(resolved.trackId, r.startedAt) else null
+                if (clash != null && clash.scrobbleId != r.scrobbleId) {
+                    db.scrobbleDao().delete(r.scrobbleId); duplicates++
+                } else {
+                    runCatching { db.scrobbleDao().relink(r.scrobbleId, resolved.trackId, resolved.primaryArtistId, resolved.albumId ?: r.albumId) }
+                        .onFailure { e -> if (e is android.database.sqlite.SQLiteConstraintException) { db.scrobbleDao().delete(r.scrobbleId); duplicates++ } else throw e }
+                    moved++
+                }
             }
         }
         db.trackDao().flattenRoots()
-        return moved
+        return RelinkResult(moved, duplicates)
     }
+
+    data class RelinkResult(val moved: Int, val duplicates: Int)
 }

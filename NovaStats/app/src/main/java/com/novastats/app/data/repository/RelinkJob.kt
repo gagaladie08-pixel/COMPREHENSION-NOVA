@@ -38,11 +38,12 @@ object RelinkJob {
     suspend fun run(app: NovaStatsApp): String = mutex.withLock {
         _state.value = "Préparation…"
         try {
-            val moved = app.library.relinkAll { _state.value = it }
+            val (moved, dups) = app.library.relinkAll { _state.value = it }
             app.rebuilder.rebuildAll(fullBillboard = true) { _state.value = it }
             app.library.clearCaches()
             markDone(app)
-            val msg = "✅ Liens & versions recalculés — $moved écoute${if (moved > 1) "s" else ""} réattribuée${if (moved > 1) "s" else ""}"
+            val msg = "✅ Liens & versions recalculés — $moved écoute${if (moved > 1) "s" else ""} réattribuée${if (moved > 1) "s" else ""}" +
+                if (dups > 0) " · $dups doublon${if (dups > 1) "s" else ""} supprimé${if (dups > 1) "s" else ""}" else ""
             _lastResult.value = msg
             msg
         } catch (e: Throwable) {

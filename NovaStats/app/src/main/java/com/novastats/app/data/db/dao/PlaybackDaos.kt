@@ -29,6 +29,7 @@ data class RelinkRow(
     @androidx.room.ColumnInfo(name = "track_id") val trackId: Long,
     @androidx.room.ColumnInfo(name = "artist_id") val artistId: Long,
     @androidx.room.ColumnInfo(name = "album_id") val albumId: Long?,
+    @androidx.room.ColumnInfo(name = "started_at") val startedAt: Long,
     @androidx.room.ColumnInfo(name = "raw_title") val rawTitle: String?,
     @androidx.room.ColumnInfo(name = "raw_artist") val rawArtist: String?,
     @androidx.room.ColumnInfo(name = "raw_album") val rawAlbum: String?
@@ -191,7 +192,7 @@ interface ScrobbleDao {
     suspend fun nthPlayOfTrack(trackId: Long, n: Int): Long?
 
     /** Écoutes dont le titre doit être re-résolu (liens artistes / versions) : valeurs brutes du lecteur si connues. */
-    @Query("SELECT scrobble_id, track_id, artist_id, album_id, raw_title, raw_artist, raw_album FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
+    @Query("SELECT scrobble_id, track_id, artist_id, album_id, started_at, raw_title, raw_artist, raw_album FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allForRelink(): List<RelinkRow>
     @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId WHERE scrobble_id = :id")
     suspend fun relink(id: Long, trackId: Long, artistId: Long, albumId: Long?)
