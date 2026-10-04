@@ -5,6 +5,7 @@ import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.entity.MigrationLogEntity
 import com.novastats.app.data.db.entity.ScrobbleEntity
 import com.novastats.app.data.db.entity.ScrobbleStatus
+import com.novastats.app.data.repository.AlbumSharing
 import com.novastats.app.data.repository.LibraryRepository
 import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.data.repository.StatsRebuilder
@@ -28,7 +29,9 @@ data class LegacyBackup(
     val songs: List<LegacySong> = emptyList(),
     val plays: List<LegacyPlay> = emptyList(),
     /** 🔒 Noms d'artistes protégés (format 2.1+) — restaurés AVANT la résolution des titres. */
-    val artist_exceptions: List<String> = emptyList()
+    val artist_exceptions: List<String> = emptyList(),
+    /** 💿 Marquages manuels « album multi-artistes » (format 2.2+). */
+    val album_overrides: List<com.novastats.app.data.importer.ExportAlbumOverride> = emptyList()
 )
 
 @Serializable
@@ -93,6 +96,12 @@ object LegacyBackupImporter {
             db.artistExceptionDao().insert(com.novastats.app.data.db.entity.ArtistExceptionEntity(name = n.trim(), nameKey = TitleNormalizer.normalizeKey(n)))
         }
         library.loadArtistExceptions(seedDefaults = true)
+        backup.album_overrides.forEach { o ->
+            val key = TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(o.title))
+            val existing = db.editorDao().correction(key, LibraryRepository.CORRECTION_ALBUM_SHARED)
+            db.editorDao().upsertCorrection(com.novastats.app.data.db.entity.UserCorrectionEntity(id = existing?.id ?: 0, originalValue = key, correctedValue = if (o.shared) "1" else "0", correctionType = LibraryRepository.CORRECTION_ALBUM_SHARED, timesApplied = existing?.timesApplied ?: 0))
+        }
+        library.invalidateCorrections()
 
         onProgress("Résolution de ${backup.songs.size} titres…")
         val trackBySongId = HashMap<Long, LibraryRepository.Resolved>(backup.songs.size * 2)
@@ -165,6 +174,8 @@ object LegacyBackupImporter {
             flush()
         }
 
+        onProgress("Albums multi-artistes…")
+        AlbumSharing.consolidate(db, library)
         onProgress("Recalcul des statistiques…")
         StatsRebuilder(db).rebuildAll(onProgress = onProgress)
 

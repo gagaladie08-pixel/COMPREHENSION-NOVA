@@ -904,6 +904,13 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.11.0" to listOf(
+        "💿 Albums multi-artistes (BO, albums d'événements) : « K-Pop Demon Hunters: Soundtrack… », « F1 The Album », « …FIFA World Cup Album » existent une seule fois, sans artiste propriétaire (étiquette « Artistes variés »). Tous leurs titres s'y rattachent quel que soit l'artiste principal ; le total et la certification de l'album portent sur l'ensemble.",
+        "🔎 Déclencheurs : mots-clés du titre (Soundtrack, Motion Picture, Music From, The Album, World Cup, Bande originale), artiste d'album « Various Artists », ou marquage manuel dans l'Éditeur → album → 💿 Marquer multi-artistes / 👤 Retirer (mémorisé, survit aux ré-imports, exporté dans le JSON).",
+        "🎤 Chaque artiste garde ses propres titres ; un album partagé n'est jamais crédité à un artiste (records / certifs d'albums par artiste, Panthéon). « Artistes variés » n'est pas un artiste : absent des stats, du Billboard et des records d'artistes.",
+        "🪟 Fiche album partagé : « Artistes variés · N artistes », total, certification, et la liste des titres avec leurs artistes — un clic ouvre la fiche du titre.",
+        "♻️ Les albums déjà coupés en plusieurs entrées sont fusionnés au premier lancement (recalcul automatique), puis stats, certifs et records recalculés."
+    ),
     "0.10.9" to listOf(
         "💎 Fiche certification : tous les artistes crédités (plus seulement le principal) et la mention « 🔗 Ce total inclut N version(s) liée(s) » avec la répartition Original / versions, comme dans la fiche titre."
     ),

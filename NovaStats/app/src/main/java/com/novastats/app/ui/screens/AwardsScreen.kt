@@ -196,7 +196,7 @@ private fun AwardCard(cat: AwardCategory, a: NovaAwardEntity?, year: Int, onOpen
         winner = when (a.winnerType) {
             EntityType.TRACK -> db.trackDao().getById(id)?.let { t -> Winner(t.title, db.artistDao().getById(t.artistId)?.name, t.coverUrl, false) }
             EntityType.ARTIST -> db.artistDao().getById(id)?.let { Winner(it.name, null, it.photoUrl, true) }
-            EntityType.ALBUM -> db.albumDao().getById(id)?.let { al -> Winner(al.title, db.artistDao().getById(al.artistId)?.name, al.coverUrl, false) }
+            EntityType.ALBUM -> db.albumDao().getById(id)?.let { al -> Winner(al.title, al.artistId?.let { db.artistDao().getById(it)?.name } ?: "Artistes variés", al.coverUrl, false) }
             else -> null
         }
     }

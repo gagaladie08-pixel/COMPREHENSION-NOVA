@@ -449,6 +449,8 @@ private fun EditorActionDialog(
                                 MenuItem("✏️ Renommer") { mode = "RENAME" }
                                 MenuItem("🔗 Fusionner dans un autre album") { mode = "MERGE" }
                                 MenuItem("🖼️ Pochette (URL)") { text = action.al.album.coverUrl ?: ""; mode = "IMAGE" }
+                                if (action.al.album.isShared) MenuItem("👤 Retirer la marque multi-artistes (redécouper par artiste)") { exec { editor.setAlbumShared(action.al.album.albumId, false) }; onDismiss() }
+                                else MenuItem("💿 Marquer multi-artistes (BO, album d'événement)") { exec { editor.setAlbumShared(action.al.album.albumId, true) }; onDismiss() }
                             }
                             is EditorAction.Play -> {
                                 Text("Supprimer cette écoute du ${playFmt.format(action.s.startedAt)} ? Les statistiques seront recalculées. Action irréversible.")

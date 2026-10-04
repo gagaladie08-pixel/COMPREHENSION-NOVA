@@ -28,7 +28,7 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     object Type {
         const val RENAME = "RENAME"; const val MERGE = "MERGE"; const val COVER_CHANGE = "COVER_CHANGE"
         const val ALBUM_CHANGE = "ALBUM_CHANGE"; const val ARTIST_CHANGE = "ARTIST_CHANGE"; const val DELETE_PLAY = "DELETE_PLAY"; const val REVIEWED = "REVIEWED"
-        const val REVIEW_FIX = "REVIEW_FIX"; const val REVIEW_IGNORE = "REVIEW_IGNORE"
+        const val REVIEW_FIX = "REVIEW_FIX"; const val REVIEW_IGNORE = "REVIEW_IGNORE"; const val ALBUM_SHARED = "ALBUM_SHARED"
     }
 
     private suspend fun log(type: String, entityType: String, entityId: Long, before: String?, after: String?, extra: String? = null) {
@@ -63,9 +63,23 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     suspend fun renameAlbum(id: Long, newTitle: String) = perform("Album renommé", rebuild = false) {
         val al = db.albumDao().getById(id) ?: error("Album introuvable")
         val title = newTitle.trim(); require(title.isNotEmpty()) { "Titre vide" }
-        db.albumDao().findByTitleAndArtist(title, al.artistId)?.takeIf { it.albumId != id }?.let { error("« $title » existe déjà pour cet artiste — utilise Fusionner") }
+        val clash = al.artistId?.let { db.albumDao().findByTitleAndArtist(title, it) } ?: if (al.artistId == null) db.albumDao().findShared(title) else null
+        clash?.takeIf { it.albumId != id }?.let { error("« $title » existe déjà pour cet artiste — utilise Fusionner") }
         db.albumDao().rename(id, title)
         log(Type.RENAME, "ALBUM", id, al.title, title)
+    }
+
+    /**
+     * 🎭 Album multi-artistes (BO, album d'événement) : marque / retire la marque. Mémorisé comme correction ALBUM_SHARED
+     * (survit aux ré-imports), puis les albums du même titre sont fusionnés en un album partagé — ou le partagé est
+     * redécoupé par artiste principal — et tout est recalculé.
+     */
+    suspend fun setAlbumShared(id: Long, shared: Boolean) = perform(if (shared) "Album marqué multi-artistes" else "Marque multi-artistes retirée", rebuild = true) {
+        val al = db.albumDao().getById(id) ?: error("Album introuvable")
+        saveCorrection(TitleNormalizer.normalizeKey(al.title), if (shared) "1" else "0", LibraryRepository.CORRECTION_ALBUM_SHARED)
+        library?.clearCaches()
+        AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
+        log(Type.ALBUM_SHARED, "ALBUM", id, if (shared) "normal" else "multi-artistes", if (shared) "multi-artistes" else "normal")
     }
 
     suspend fun renameTrack(id: Long, newTitle: String) = perform("Titre renommé", rebuild = false) {
@@ -354,6 +368,16 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
                 } else "⚠️ Une fusion d'${if (last.entityType == "ALBUM") "albums" else "titres"} ne peut pas être annulée"
             }
             Type.ARTIST_CHANGE -> { last.before?.toLongOrNull()?.let { setTrackArtist(last.entityId, it) }; "↩️ Artiste restauré" }
+            Type.ALBUM_SHARED -> {
+                // L'album d'origine peut avoir été fusionné / supprimé : on inverse la correction sur le titre, puis on reconsolide
+                val title = db.editorDao().correctionsOfType(LibraryRepository.CORRECTION_ALBUM_SHARED).firstOrNull { it.correctedValue == (if (last.after == "multi-artistes") "1" else "0") && last.createdAt - it.createdAt < 5 * 60_000L }?.originalValue
+                if (title == null) "⚠️ Marquage non annulable" else {
+                    saveCorrection(title, if (last.after == "multi-artistes") "0" else "1", LibraryRepository.CORRECTION_ALBUM_SHARED)
+                    library?.clearCaches()
+                    AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
+                    "↩️ Marquage multi-artistes ${if (last.after == "multi-artistes") "retiré" else "rétabli"}"
+                }
+            }
             Type.ALBUM_CHANGE -> { setTrackAlbum(last.entityId, last.before?.toLongOrNull()); "↩️ Album restauré" }
             Type.REVIEWED, Type.REVIEW_IGNORE -> "ℹ️ Marquage « correct / ignoré » conservé"
             Type.REVIEW_FIX -> {

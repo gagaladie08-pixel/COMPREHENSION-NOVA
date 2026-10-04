@@ -3,6 +3,7 @@ package com.novastats.app.data.repository
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.data.db.entity.EntityType
+import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonStatus
@@ -201,7 +202,7 @@ class RecordExplainer(private val db: NovaDatabase) {
             }
             RecordCategory.ALBUM -> {
                 val al = db.albumDao().getById(id) ?: return null
-                val artist = db.artistDao().getById(al.artistId)?.name ?: "?"
+                val artist = al.artistId?.let { db.artistDao().getById(it)?.name } ?: TitleNormalizer.SHARED_ALBUM_LABEL
                 val tracks = db.trackDao().ofAlbum(id)
                 val all = db.albumDao().all().filter { it.playCount > 0 }.sortedByDescending { it.playCount }
                 val rank = all.indexOfFirst { it.albumId == id } + 1

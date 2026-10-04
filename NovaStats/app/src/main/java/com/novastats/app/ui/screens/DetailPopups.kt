@@ -61,6 +61,7 @@ import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.HallOfFameEntity
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.TrackEntity
+import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
@@ -563,9 +564,13 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
     var ps by remember { mutableStateOf<PeriodEntityStats?>(null) }
     var album by remember { mutableStateOf<AlbumEntity?>(null) }
     var artistName by remember { mutableStateOf("") }
+    var artistCount by remember { mutableStateOf(0) }
     var tracks by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
     val cert by remember { db.certificationDao().observe(albumId, EntityType.ALBUM) }.collectAsStateWithLifecycle(initialValue = null)
+    // Fiche d'un titre ouverte depuis la liste (album partagé : chaque ligne est cliquable)
+    var openTrack by remember { mutableStateOf<Long?>(null) }
+    openTrack?.let { TrackPopup(it, period) { openTrack = null } }
 
     val imgVersion by UserImages.version.collectAsStateWithLifecycle()
     LaunchedEffect(albumId, period, imgVersion) {
@@ -574,7 +579,10 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
         }
         val al = db.albumDao().getById(albumId) ?: return@LaunchedEffect
         album = al
-        safe("artiste") { artistName = db.artistDao().getById(al.artistId)?.name ?: "" }
+        safe("artiste") {
+            artistName = al.artistId?.let { db.artistDao().getById(it)?.name } ?: TitleNormalizer.SHARED_ALBUM_LABEL
+            if (al.artistId == null) artistCount = db.albumDao().distinctArtistCount(al.albumId)
+        }
         if (scoped) {
             safe("stats période") { ps = db.albumDao().periodStats(albumId, range.fromIso, range.toIso) }
             safe("chansons") { tracks = db.trackDao().ofAlbumForPeriod(albumId, range.fromIso, range.toIso) }
@@ -597,6 +605,7 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
         if (al == null) { Text("Chargement…", color = theme.textSecondary); return@NovaPopupCard }
         Text(al.title, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp)
         Text(artistName, color = theme.secondary, fontWeight = FontWeight.SemiBold)
+        if (al.isShared) Text("💿 Album multi-artistes · $artistCount artiste${if (artistCount > 1) "s" else ""} — total de tous ses titres, chaque artiste est crédité de ses propres titres", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
         PeriodChip(period, theme.secondary)
         // 🖼️ 🌐 💡 🔑 : pochette choisie à la main / web / propositions des APIs / mots-clés
         ImagePickerBar(EntityType.ALBUM, al.albumId, al.title, artistName, al.coverUrl, al.coverSource, theme.secondary, circle = false) { album = db.albumDao().getById(albumId) }
@@ -628,7 +637,15 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
         PositionsTable(ranks)
         PopupSection(if (scoped) "🎵 Chansons ${periodWord(period)} (${tracks.size})" else "🎵 Chansons (${tracks.size})", theme.secondary)
         if (tracks.isEmpty()) Text("—", color = theme.textSecondary)
-        tracks.forEachIndexed { i, t -> PopupInfoRow("${i + 1}. ${t.track.title}", "${formatCount(t.periodPlays)} ▶") }
+        tracks.forEachIndexed { i, t ->
+            Row(Modifier.fillMaxWidth().clickable { openTrack = t.track.trackId }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${i + 1}. ${t.track.title}", color = theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (al.isShared || t.artistName.contains(',')) Text(t.artistName, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text("${formatCount(t.periodPlays)} ▶", color = theme.text, fontWeight = FontWeight.SemiBold)
+            }
+        }
         PopupSection("📅 Historique", theme.secondary)
         if (scoped) {
             PopupInfoRow("Première écoute (${period.frLabel.lowercase()})", formatIso(ps?.firstDate))

@@ -291,7 +291,7 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
             CertDetail(t.title, artists.ifBlank { db.artistDao().getById(t.artistId)?.name ?: "" }, t.coverUrl, t.playCount, t.firstPlayedAt, history, db.dailyPlayDao().seriesForTrack(id), stats, billboard, versions)
         } else {
             val al = db.albumDao().getById(id) ?: return@LaunchedEffect
-            CertDetail(al.title, db.artistDao().getById(al.artistId)?.name ?: "", al.coverUrl, al.playCount, al.firstPlayedAt, history, db.dailyPlayDao().seriesForAlbum(id), stats, billboard)
+            CertDetail(al.title, al.artistId?.let { db.artistDao().getById(it)?.name } ?: "Artistes variés", al.coverUrl, al.playCount, al.firstPlayedAt, history, db.dailyPlayDao().seriesForAlbum(id), stats, billboard)
         }
     }
     val det = d

@@ -89,7 +89,8 @@ data class AlbumEntity(
     @PrimaryKey(autoGenerate = true) @ColumnInfo(name = "album_id") val albumId: Long = 0,
     val title: String,
     @ColumnInfo(name = "title_raw") val titleRaw: String,
-    @ColumnInfo(name = "artist_id") val artistId: Long,
+    /** NULL = album partagé (BO, album d'événement, « Various Artists ») : aucun artiste propriétaire, étiquette « Artistes variés ». */
+    @ColumnInfo(name = "artist_id") val artistId: Long?,
     @ColumnInfo(name = "cover_url") val coverUrl: String? = null,
     @ColumnInfo(name = "cover_source") val coverSource: String? = null,
     @ColumnInfo(name = "release_date") val releaseDate: String? = null,
@@ -102,7 +103,7 @@ data class AlbumEntity(
     @ColumnInfo(name = "first_played_at") val firstPlayedAt: Long? = null,
     @ColumnInfo(name = "last_played_at") val lastPlayedAt: Long? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
-)
+) { val isShared: Boolean get() = artistId == null }
 
 /** Table 4 — track_artists (artistes multiples : chacun reçoit une écoute, même poids) */
 @Entity(

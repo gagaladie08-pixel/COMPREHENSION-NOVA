@@ -24,7 +24,7 @@ class RecordsEngine(private val db: NovaDatabase) {
     private val chartPeriods = listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY)
 
     /** Owner map : track → artistes (main + featured), track → album, album → artiste. */
-    private class Links(val trackArtists: Map<Long, Set<Long>>, val trackAlbum: Map<Long, Long>, val albumArtist: Map<Long, Long>, val trackMainArtist: Map<Long, Long>) {
+    private class Links(val trackArtists: Map<Long, Set<Long>>, val trackAlbum: Map<Long, Long>, val albumArtist: Map<Long, Long?>, val trackMainArtist: Map<Long, Long>) {
         /** Titre « solo » : un seul artiste (pas de featuring). */
         fun isSolo(trackId: Long) = (trackArtists[trackId]?.size ?: 1) <= 1
     }

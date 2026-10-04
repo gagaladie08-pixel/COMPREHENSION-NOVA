@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -140,11 +140,24 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v6 : `albums.artist_id` devient NULLable (album partagé = sans propriétaire). SQLite impose de recréer la table. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS albums_new (album_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, title TEXT NOT NULL, title_raw TEXT NOT NULL, artist_id INTEGER, cover_url TEXT, cover_source TEXT, release_date TEXT, is_studio INTEGER NOT NULL, is_compilation INTEGER NOT NULL, mbid TEXT, play_count INTEGER NOT NULL, total_duration_ms INTEGER NOT NULL, distinct_tracks_played INTEGER NOT NULL, first_played_at INTEGER, last_played_at INTEGER, created_at INTEGER NOT NULL)")
+                db.execSQL("INSERT INTO albums_new (album_id, title, title_raw, artist_id, cover_url, cover_source, release_date, is_studio, is_compilation, mbid, play_count, total_duration_ms, distinct_tracks_played, first_played_at, last_played_at, created_at) SELECT album_id, title, title_raw, artist_id, cover_url, cover_source, release_date, is_studio, is_compilation, mbid, play_count, total_duration_ms, distinct_tracks_played, first_played_at, last_played_at, created_at FROM albums")
+                db.execSQL("DROP TABLE albums")
+                db.execSQL("ALTER TABLE albums_new RENAME TO albums")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_albums_artist_id ON albums(artist_id)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_albums_title_artist_id ON albums(title, artist_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_albums_play_count ON albums(play_count)")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

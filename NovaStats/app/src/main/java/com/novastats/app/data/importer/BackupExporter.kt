@@ -32,11 +32,14 @@ data class NovaExport(
     val pantheon: List<ExportPantheon> = emptyList(),
     val hall_of_fame: List<ExportHof> = emptyList(),
     val edit_history: List<ExportEdit> = emptyList(),
-    val artist_exceptions: List<String> = emptyList()
-) { companion object { const val FORMAT_VERSION = "2.1" } }
+    val artist_exceptions: List<String> = emptyList(),
+    val album_overrides: List<ExportAlbumOverride> = emptyList()
+) { companion object { const val FORMAT_VERSION = "2.2" } }
 
 @Serializable data class ExportArtist(val id: Long, val name: String, val photoUrl: String? = null, val playCount: Int = 0)
-@Serializable data class ExportAlbum(val id: Long, val title: String, val artistId: Long, val coverUrl: String? = null, val playCount: Int = 0)
+@Serializable data class ExportAlbum(val id: Long, val title: String, val artistId: Long? = null, val coverUrl: String? = null, val playCount: Int = 0)
+/** Marquage manuel « album partagé » (shared = true) / « album normal » (false) — correction ALBUM_SHARED. */
+@Serializable data class ExportAlbumOverride(val title: String, val shared: Boolean)
 @Serializable data class ExportCertification(val entityId: Long, val entityType: String, val level: String, val multiplier: Int, val certifiedAt: Long)
 @Serializable data class ExportPantheon(val artistId: Long, val status: String, val statusDate: Long)
 @Serializable data class ExportHof(val entityId: Long, val entityType: String, val periodType: String, val entryType: String, val entryDate: String)
@@ -80,7 +83,8 @@ object BackupExporter {
             pantheon = db.pantheonDao().allCurrent().map { ExportPantheon(it.artistId, it.currentStatus, it.statusDate) },
             hall_of_fame = db.hallOfFameDao().all().map { ExportHof(it.entityId, it.entityType, it.periodType, it.entryType, it.entryDate) },
             edit_history = db.editorDao().historyList().map { ExportEdit(it.type, it.entityType, it.entityId, it.before, it.after, it.createdAt) },
-            artist_exceptions = db.artistExceptionDao().allList().map { it.name }
+            artist_exceptions = db.artistExceptionDao().allList().map { it.name },
+            album_overrides = db.editorDao().correctionsOfType(com.novastats.app.data.repository.LibraryRepository.CORRECTION_ALBUM_SHARED).map { ExportAlbumOverride(it.originalValue, it.correctedValue == "1") }
         )
         val text = json.encodeToString(NovaExport.serializer(), export)
         return text to ExportSummary(songs.size, plays.size, artists.size, albums.size, text.toByteArray().size)

@@ -92,6 +92,13 @@ Service / Import ──► scrobbles (CONFIRMED)
   L'album n'est crédité qu'à l'artiste principal (`albums.artist_id`) ; les compilations ne créditent jamais d'album ;
   les éditions Deluxe / Japan / UK / Platinum… sont fusionnées ; un remix n'est un titre distinct (`is_remix`,
   `original_track_id`) que s'il porte un artiste featuring identifié.
+- **Albums multi-artistes (v6, `MIGRATION_5_6`)** : `albums.artist_id` devient NULLable (table recréée). `NULL` = album
+  partagé (BO, album d'événement, « Various Artists », marquage manuel) : un seul album par titre normalisé, sans
+  propriétaire, étiquette d'affichage « Artistes variés » (jamais un artiste). Tous les titres s'y rattachent quel que
+  soit leur artiste principal ; `play_count` = somme de tous les titres ; certification sur ce total. Exclu des
+  certifications / records d'albums **par artiste** et du Panthéon (`artist_id IS NOT NULL`). Décision :
+  `user_corrections` type `ALBUM_SHARED` (clé = titre normalisé, « 1 » / « 0 ») sinon `TitleNormalizer.isSharedAlbum`.
+  `AlbumSharing.consolidate` fusionne / redécoupe les données existantes.
 - **Liens & versions (v5, `MIGRATION_4_5`)** : `daily_plays.root_id` = `tracks.original_track_id` sinon `track_id` —
   toutes les agrégations par titre (Stats `topForPeriod`, Billboard `rankTracks`, rangs, séries, records) groupent sur
   `root_id` : un **remix featuring** ou une **version avec invité** (`is_remix = 1`, `original_track_id` = root) compte

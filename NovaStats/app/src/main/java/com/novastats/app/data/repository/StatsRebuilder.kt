@@ -244,7 +244,8 @@ class StatsRebuilder(private val db: NovaDatabase) {
         }
         for (c in albumCerts) {
             val cert = c.toDomain()
-            db.albumDao().getById(c.entityId)?.let { albumsByArtist.getOrPut(it.artistId) { mutableListOf() } += cert }
+            // Albums partagés (artist_id NULL) : jamais crédités à un artiste
+            db.albumDao().getById(c.entityId)?.artistId?.let { owner -> albumsByArtist.getOrPut(owner) { mutableListOf() } += cert }
         }
 
         db.withTransaction {

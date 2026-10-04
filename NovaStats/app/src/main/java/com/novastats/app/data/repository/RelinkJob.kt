@@ -15,7 +15,8 @@ import kotlinx.coroutines.sync.withLock
  */
 object RelinkJob {
     private const val PREFS = "nova_relink"
-    private const val KEY_DONE = "v1_done"
+    /** v2 : albums multi-artistes (règle 12) — relance le recalcul une fois de plus après la mise à jour. */
+    private const val KEY_DONE = "v2_done"
     private val mutex = Mutex()
 
     private val _state = MutableStateFlow<String?>(null)
@@ -39,11 +40,15 @@ object RelinkJob {
         _state.value = "Préparation…"
         try {
             val (moved, dups) = app.library.relinkAll { _state.value = it }
+            _state.value = "Albums multi-artistes…"
+            val albums = AlbumSharing.consolidate(app.database, app.library)
+            app.library.clearCaches()
             app.rebuilder.rebuildAll(fullBillboard = true) { _state.value = it }
             app.library.clearCaches()
             markDone(app)
             val msg = "✅ Liens & versions recalculés — $moved écoute${if (moved > 1) "s" else ""} réattribuée${if (moved > 1) "s" else ""}" +
-                if (dups > 0) " · $dups doublon${if (dups > 1) "s" else ""} supprimé${if (dups > 1) "s" else ""}" else ""
+                (if (dups > 0) " · $dups doublon${if (dups > 1) "s" else ""} supprimé${if (dups > 1) "s" else ""}" else "") +
+                (if (albums.merged > 0) " · ${albums.merged} album${if (albums.merged > 1) "s" else ""} fusionné${if (albums.merged > 1) "s" else ""} en multi-artistes" else "")
             _lastResult.value = msg
             msg
         } catch (e: Throwable) {

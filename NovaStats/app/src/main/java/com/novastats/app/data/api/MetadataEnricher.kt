@@ -270,7 +270,10 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                 processed++; if (ok) found++; EnrichmentState.done(ok)
             }
             db.albumDao().missingCover(now, albums).forEach { al ->
-                val artist = db.artistDao().getById(al.artistId)?.name ?: return@forEach
+                // Album partagé (BO…) : recherche avec l'artiste principal du titre le plus écouté
+                val artist = (al.artistId?.let { db.artistDao().getById(it)?.name }
+                    ?: db.trackDao().inAlbum(al.albumId).maxByOrNull { it.playCount }?.let { t -> db.artistDao().getById(t.artistId)?.name })
+                    ?: return@forEach
                 EnrichmentState.current("💿 ${al.title}")
                 val ok = runCatching { enrichAlbum(al, artist) }.getOrElse { EnrichmentState.log("⚠️ ${al.title} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)

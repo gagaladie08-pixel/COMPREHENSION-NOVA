@@ -232,11 +232,34 @@ object TitleNormalizer {
 
     /** Sépare "A, B & C feat. D" en liste d'artistes. */
     /** Compilations ("Various Artists", "NOW That's What I Call Music"…) : jamais de crédit album. */
-    private val compilationRegex = Regex("""(?i)(various artists|artistes divers|multi-interpr|now that'?s what i call|nrj music awards|nrj hits|hits? 20\d\d|top hits|compilation|\bvol(ume)?\.? \d+\b.*(hits|party|dance))""")
+    private val compilationRegex = Regex("""(?i)(now that'?s what i call|nrj music awards|nrj hits|hits? 20\d\d|top hits|compilation|\bvol(ume)?\.? \d+\b.*(hits|party|dance))""")
 
+    /** Vraies compilations (jamais de crédit album). « Various Artists » seul ne suffit plus : c'est un album partagé. */
     fun isCompilation(albumTitle: String?, albumArtist: String?): Boolean {
         if (albumArtist != null && compilationRegex.containsMatchIn(albumArtist)) return true
         return albumTitle != null && compilationRegex.containsMatchIn(albumTitle)
+    }
+
+    /** Étiquette d'affichage d'un album partagé — PAS un artiste. */
+    const val SHARED_ALBUM_LABEL = "Artistes variés"
+    private val sharedAlbumRegex = Regex("""(soundtrack|motion picture|music from|the album|world cup|bande originale)""")
+    private val variousArtistsRegex = Regex("""(?i)^(various artists|artistes divers|multi-interpr[eè]tes?|va)$""")
+
+    /**
+     * Album multi-artistes (BO, album d'événement) : un seul album partagé, sans artiste propriétaire, auquel tous les
+     * titres se rattachent quel que soit leur artiste principal. Déclencheurs : mots-clés du titre (insensible à la casse
+     * et aux accents) ou artiste d'album « Various Artists ». Le choix manuel de l'éditeur (correction ALBUM_SHARED) prime.
+     */
+    fun isSharedAlbum(albumTitle: String?, albumArtist: String? = null): Boolean {
+        if (albumArtist != null && variousArtistsRegex.containsMatchIn(albumArtist.trim())) return true
+        return albumTitle != null && sharedAlbumRegex.containsMatchIn(normalizeKey(albumTitle))
+    }
+
+    /** Décision finale : correction manuelle (« 1 » / « 0 ») sinon détection automatique. */
+    fun sharedAlbumDecision(override: String?, albumTitle: String?, albumArtist: String?): Boolean = when (override) {
+        "1" -> true
+        "0" -> false
+        else -> isSharedAlbum(albumTitle, albumArtist)
     }
 
     /**

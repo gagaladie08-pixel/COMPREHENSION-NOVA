@@ -543,8 +543,8 @@ interface AlbumDao {
 
     @Query(
         """
-        SELECT al.*, a.name AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms
-        FROM albums al JOIN artists a ON a.artist_id = al.artist_id
+        SELECT al.*, IFNULL(a.name, 'Artistes variés') AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms
+        FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id
         WHERE al.play_count > 0 AND al.is_compilation = 0
         ORDER BY al.play_count DESC, al.total_duration_ms DESC LIMIT :limit
         """
@@ -553,11 +553,11 @@ interface AlbumDao {
 
     @Query(
         """
-        SELECT al.*, a.name AS artist_name,
+        SELECT al.*, IFNULL(a.name, 'Artistes variés') AS artist_name,
                SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
         FROM daily_plays d
         JOIN albums al ON al.album_id = d.album_id
-        JOIN artists a ON a.artist_id = al.artist_id
+        LEFT JOIN artists a ON a.artist_id = al.artist_id
         WHERE d.date BETWEEN :from AND :to AND al.is_compilation = 0
         GROUP BY d.album_id
         ORDER BY period_plays DESC, period_duration_ms DESC
@@ -586,10 +586,10 @@ interface AlbumDao {
     /** Albums d'un artiste écoutés sur une période (classés par écoutes sur la période). */
     @Query(
         """
-        SELECT al.*, a.name AS artist_name, SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
+        SELECT al.*, IFNULL(a.name, 'Artistes variés') AS artist_name, SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
         FROM daily_plays d
         JOIN albums al ON al.album_id = d.album_id
-        JOIN artists a ON a.artist_id = al.artist_id
+        LEFT JOIN artists a ON a.artist_id = al.artist_id
         WHERE al.artist_id = :artistId AND d.date BETWEEN :from AND :to
         GROUP BY al.album_id
         ORDER BY period_plays DESC, period_duration_ms DESC
@@ -607,13 +607,13 @@ interface AlbumDao {
     )
     suspend fun periodStats(albumId: Long, from: String, to: String): PeriodEntityStats?
 
-    @Query("SELECT al.*, a.name AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.play_count > 0 ORDER BY al.play_count DESC LIMIT :limit")
+    @Query("SELECT al.*, IFNULL(a.name, 'Artistes variés') AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.play_count > 0 ORDER BY al.play_count DESC LIMIT :limit")
     fun mostPlayed(limit: Int = 100): Flow<List<RankedAlbum>>
 
     @Query("SELECT * FROM albums") suspend fun all(): List<AlbumEntity>
 
     /* ---- Éditeur de données ---- */
-    @Query("SELECT al.*, a.name AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al JOIN artists a ON a.artist_id = al.artist_id ORDER BY al.play_count DESC, al.title")
+    @Query("SELECT al.*, IFNULL(a.name, 'Artistes variés') AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id ORDER BY al.play_count DESC, al.title")
     fun allForEditor(): Flow<List<RankedAlbum>>
 
     @Query("UPDATE albums SET title = :title WHERE album_id = :id") suspend fun rename(id: Long, title: String)

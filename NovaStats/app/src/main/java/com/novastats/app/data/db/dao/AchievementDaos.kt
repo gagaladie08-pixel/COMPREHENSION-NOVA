@@ -97,10 +97,10 @@ interface CertificationDao {
     @Query("SELECT * FROM certifications") fun allCurrentFlow(): Flow<List<CertificationEntity>>
     @Query("SELECT t.track_id AS entity_id, t.title AS name, a.name AS subtitle, t.cover_url AS image_url, t.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM tracks t JOIN artists a ON a.artist_id = t.artist_id LEFT JOIN certifications c ON c.entity_id = t.track_id AND c.entity_type = 'TRACK' WHERE t.play_count > 0 AND t.original_track_id IS NULL ORDER BY t.play_count DESC")
     fun trackCandidates(): Flow<List<CertCandidate>>
-    @Query("SELECT al.album_id AS entity_id, al.title AS name, a.name AS subtitle, al.cover_url AS image_url, al.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM albums al JOIN artists a ON a.artist_id = al.artist_id LEFT JOIN certifications c ON c.entity_id = al.album_id AND c.entity_type = 'ALBUM' WHERE al.play_count > 0 ORDER BY al.play_count DESC")
+    @Query("SELECT al.album_id AS entity_id, al.title AS name, IFNULL(a.name, 'Artistes variés') AS subtitle, al.cover_url AS image_url, al.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id LEFT JOIN certifications c ON c.entity_id = al.album_id AND c.entity_type = 'ALBUM' WHERE al.play_count > 0 ORDER BY al.play_count DESC")
     fun albumCandidates(): Flow<List<CertCandidate>>
     @Query("SELECT level, COUNT(*) AS n FROM certifications WHERE entity_type = :type GROUP BY level") fun countsByLevel(type: String): Flow<List<LevelCount>>
-    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM'")
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id IS NOT NULL")
     fun artistCertRows(): Flow<List<ArtistCertRow>>
     @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
     suspend fun certsOfArtist(artistId: Long): List<ArtistCertRow>
@@ -174,7 +174,7 @@ interface HallOfFameDao {
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
     @Query("SELECT * FROM hall_of_fame") suspend fun all(): List<HallOfFameEntity>
     @Query("SELECT * FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType ORDER BY entry_date") suspend fun ofEntity(entityId: Long, entityType: String): List<HallOfFameEntity>
-    @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name, CASE h.entity_type WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT a.name FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = h.entity_id) ELSE NULL END AS subtitle, CASE h.entity_type WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = h.entity_id) ELSE (SELECT photo_url FROM artists WHERE artist_id = h.entity_id) END AS image_url FROM hall_of_fame h WHERE h.period_type = :period AND h.entity_type = :entityType ORDER BY h.entry_date DESC")
+    @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name, CASE h.entity_type WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = h.entity_id) ELSE NULL END AS subtitle, CASE h.entity_type WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = h.entity_id) ELSE (SELECT photo_url FROM artists WHERE artist_id = h.entity_id) END AS image_url FROM hall_of_fame h WHERE h.period_type = :period AND h.entity_type = :entityType ORDER BY h.entry_date DESC")
     fun rows(period: String, entityType: String): Flow<List<HallOfFameRow>>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM hall_of_fame h ORDER BY h.created_at DESC LIMIT :limit")
     fun latest(limit: Int = 10): Flow<List<HallOfFameNews>>
@@ -194,7 +194,7 @@ interface RecordDao {
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
                CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
-                               WHEN 'ALBUM' THEN (SELECT a.name FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
@@ -217,7 +217,7 @@ interface RecordDao {
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
                CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
-                               WHEN 'ALBUM' THEN (SELECT a.name FROM albums al JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
@@ -334,6 +334,7 @@ interface EditorDao {
     @Query("SELECT * FROM user_corrections WHERE original_value = :original AND correction_type = :type") suspend fun correction(original: String, type: String): UserCorrectionEntity?
     @Query("UPDATE user_corrections SET times_applied = times_applied + 1 WHERE id = :id") suspend fun bumpCorrection(id: Long)
     @Query("SELECT * FROM user_corrections") suspend fun allCorrections(): List<UserCorrectionEntity>
+    @Query("SELECT * FROM user_corrections WHERE correction_type = :type ORDER BY created_at DESC") suspend fun correctionsOfType(type: String): List<UserCorrectionEntity>
     @Query("SELECT COUNT(*) FROM user_corrections") fun correctionCountFlow(): Flow<Int>
 }
 

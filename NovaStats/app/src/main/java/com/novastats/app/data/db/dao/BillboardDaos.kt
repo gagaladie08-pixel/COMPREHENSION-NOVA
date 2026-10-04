@@ -206,10 +206,10 @@ interface BillboardDao {
 
     @Query(
         """
-        SELECT sa.*, al.title AS title, a.name AS artist_name, al.cover_url AS cover_url
+        SELECT sa.*, al.title AS title, IFNULL(a.name, 'Artistes variés') AS artist_name, al.cover_url AS cover_url
         FROM snapshot_albums sa
         JOIN albums al ON al.album_id = sa.album_id
-        JOIN artists a ON a.artist_id = al.artist_id
+        LEFT JOIN artists a ON a.artist_id = al.artist_id
         WHERE sa.snapshot_id = :snapshotId ORDER BY sa.position
         """
     )
