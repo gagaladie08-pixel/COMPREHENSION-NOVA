@@ -92,6 +92,7 @@ abstract class NovaDatabase : RoomDatabase() {
     abstract fun editorDao(): EditorDao
     abstract fun migrationLogDao(): MigrationLogDao
     abstract fun artistExceptionDao(): com.novastats.app.data.db.dao.ArtistExceptionDao
+    abstract fun rewindDao(): com.novastats.app.data.db.dao.RewindDao
 
     companion object {
         const val NAME = "novastats.db"

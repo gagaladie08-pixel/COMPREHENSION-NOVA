@@ -904,6 +904,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.12.0" to listOf(
+        "\u2728 Nova Rewind : ton mois (ou ton année) en récap façon keynote \u2014 écoutes, artiste et titre n°1, top 5, rythme (record du jour, série, heure de prédilection), découvertes, certifications et Panthéon. Sélecteur de période en haut, on avance en touchant l'écran.",
+        "\ud83d\uddbc\ufe0f Carte à partager : un visuel 1080 × 1920 généré aux couleurs de ton thème (bandes des drapeaux pour Survivor) avec tes chiffres et ton top 5, partageable en story. Aucune permission de stockage \u2014 le fichier passe par le partage système.",
+        "\ud83d\udccc Accès depuis l'Accueil : carte \u00ab Nova Rewind \u00bb en haut de la page."
+    ),
     "0.11.4" to listOf(
         "🩹 Éditeur — fusions qui « ne faisaient rien » : (1) une écoute journalisée deux fois au même instant sous les deux titres bloquait toute la fusion (contrainte d'unicité) → dédoublonnée ; (2) un lot est traité paire par paire, un échec n'annule plus les autres et le message indique lequel ; (3) le doublon renaissait à l'écoute suivante (« Can't Stop the High » / « …The High ») → la fusion est mémorisée comme correction et les recherches de titres/albums ignorent la casse.",
         "🩹 Les versions liées (« (with X) », remix) suivent le titre conservé lors d'une fusion ; les caches de résolution sont vidés après chaque action de l'éditeur.",

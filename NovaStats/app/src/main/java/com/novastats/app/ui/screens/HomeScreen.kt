@@ -90,12 +90,21 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     DetailPopupHost(detail) { detail = null }
 
+    var rewindKey by remember { mutableStateOf<String?>(null) }
+    if (rewindKey != null) {
+        RewindScreen(rewindKey) { rewindKey = null }
+        return
+    }
+
     if (totalScrobbles == 0 && nowPlaying?.rawTitle == null) {
         FirstContactHome()
         return
     }
 
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        /* ---------- 0. Nova Rewind ---------- */
+        item { RewindEntryCard { rewindKey = it } }
+
         /* ---------- 1. En cours de lecture ---------- */
         item {
             SectionTitle("En cours de lecture")
