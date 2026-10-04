@@ -904,6 +904,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.11.3" to listOf(
+        "🩹 Fiche album : les versions d'un titre (« Free (with Jinu) », « ExtraL (with Doechii) », remix lié) n'apparaissent plus en double sous leur original. Une ligne par titre, écoutes cumulées (comme dans les classements), artistes réunis (« Rumi, Jinu »). Le compteur « titres écoutés » suit la même règle.",
+        "ℹ️ Deux titres non liés (ex. « EXTANCY » et « EXTANCY (Wumuti&Rui) ») restent séparés : fusionne-les dans l'Éditeur si c'est le même morceau."
+    ),
     "0.11.2" to listOf(
         "💽 Albums coupés par les duos (règle 13) : un titre rejoint l'album existant d'UN de ses artistes, principal ou invité. « One Kiss » (Calvin Harris & Dua Lipa) va dans « Dua Lipa (Complete Edition) » de Dua Lipa — plus d'album homonyme d'un seul titre au nom du partenaire (reputation / Zayn, BEYONCÉ / Megan Thee Stallion, Ruby / Tame Impala & Zico, ANTI, Loud, My Everything, So Good…).",
         "🧭 Plusieurs albums possibles → celui de l'artiste commun (présent sur le plus de titres), à égalité le plus écouté. Si le duo arrive avant les titres solo, les deux albums sont fusionnés dès le recalcul suivant et le propriétaire devient l'artiste commun.",

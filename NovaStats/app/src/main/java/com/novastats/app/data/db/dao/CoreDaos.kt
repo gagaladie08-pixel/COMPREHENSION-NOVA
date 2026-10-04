@@ -170,13 +170,18 @@ interface TrackDao {
     )
     suspend fun topOfArtist(artistId: Long, limit: Int = 5): List<RankedTrack>
 
-    /** Titres écoutés d'un album, les plus écoutés d'abord. */
+    /**
+     * Titres écoutés d'un album, les plus écoutés d'abord — une ligne par TITRE : les versions (« (with X) », remix)
+     * dont l'original est dans l'album sont fondues dedans (écoutes déjà cumulées dans `play_count`, artistes réunis),
+     * comme dans les classements ; une version dont l'original est ailleurs reste une ligne à part.
+     */
     @Query(
         """
-        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name,
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id OR ta2.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = t.track_id AND v.album_id = t.album_id) GROUP BY a2.artist_id ORDER BY MAX(ta2.is_primary) DESC, MIN(ta2.id))) AS artist_name,
                (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title,
                t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms
         FROM tracks t WHERE t.album_id = :albumId AND t.play_count > 0
+          AND (t.original_track_id IS NULL OR t.original_track_id NOT IN (SELECT r.track_id FROM tracks r WHERE r.album_id = :albumId))
         ORDER BY t.play_count DESC, t.total_duration_ms DESC
         """
     )
@@ -257,15 +262,17 @@ interface TrackDao {
     )
     suspend fun allOfArtistAllTime(artistId: Long): List<RankedTrackPos>
 
-    /** Titres d'un album écoutés sur une période, les plus écoutés d'abord. */
+    /** Titres d'un album écoutés sur une période, les plus écoutés d'abord — versions fondues dans leur original (cf. [ofAlbum]). */
     @Query(
         """
-        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, al.title AS album_title,
+        SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id OR ta2.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = t.track_id AND v.album_id = t.album_id) GROUP BY a2.artist_id ORDER BY MAX(ta2.is_primary) DESC, MIN(ta2.id))) AS artist_name, al.title AS album_title,
                SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
         FROM daily_plays d
-        JOIN tracks t ON t.track_id = d.track_id
+        JOIN tracks x ON x.track_id = d.track_id
+        LEFT JOIN tracks r ON r.track_id = x.original_track_id
+        JOIN tracks t ON t.track_id = CASE WHEN r.album_id = :albumId THEN r.track_id ELSE x.track_id END
         LEFT JOIN albums al ON al.album_id = t.album_id
-        WHERE t.album_id = :albumId AND d.date BETWEEN :from AND :to
+        WHERE (x.album_id = :albumId OR r.album_id = :albumId) AND d.date BETWEEN :from AND :to
         GROUP BY t.track_id
         ORDER BY period_plays DESC, period_duration_ms DESC
         """
@@ -651,7 +658,7 @@ interface AlbumDao {
         UPDATE albums SET
             play_count = (SELECT COUNT(*) FROM scrobbles s WHERE s.album_id = albums.album_id AND s.status = 'CONFIRMED'),
             total_duration_ms = (SELECT IFNULL(SUM(s.duration_listened_ms), 0) FROM scrobbles s WHERE s.album_id = albums.album_id AND s.status = 'CONFIRMED'),
-            distinct_tracks_played = (SELECT COUNT(DISTINCT s.track_id) FROM scrobbles s WHERE s.album_id = albums.album_id AND s.status = 'CONFIRMED'),
+            distinct_tracks_played = (SELECT COUNT(DISTINCT IFNULL((SELECT v.original_track_id FROM tracks v WHERE v.track_id = s.track_id), s.track_id)) FROM scrobbles s WHERE s.album_id = albums.album_id AND s.status = 'CONFIRMED'),
             first_played_at = (SELECT MIN(s.started_at) FROM scrobbles s WHERE s.album_id = albums.album_id AND s.status = 'CONFIRMED'),
             last_played_at = (SELECT MAX(s.started_at) FROM scrobbles s WHERE s.album_id = albums.album_id AND s.status = 'CONFIRMED')
         """
