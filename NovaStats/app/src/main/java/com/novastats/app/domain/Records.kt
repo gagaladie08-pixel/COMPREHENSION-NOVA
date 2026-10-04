@@ -163,13 +163,14 @@ object RecordCatalog {
         else -> if (plural) "périodes" else "période"
     }
 
-    /** Unité adaptative : < 24 h → heures · 1-29 jours → jours · ≥ 30 jours → mois. */
+    /** Durée en jours, heures et minutes : « 12 j 5 h 32 min », « 5 h 32 min », « 32 min ». */
     fun formatDurationAdaptive(ms: Long): String {
-        val h = ms / 3_600_000.0
+        val totalMin = (ms / 60_000).coerceAtLeast(0)
+        val d = totalMin / 1440; val h = (totalMin % 1440) / 60; val m = totalMin % 60
         return when {
-            h < 24 -> "${h.toInt().coerceAtLeast(1)} h"
-            h < 24 * 30 -> "${(h / 24).toInt()} j"
-            else -> String.format(java.util.Locale.FRANCE, "%.1f mois", h / 24 / 30.44)
+            d > 0 -> "$d j $h h $m min"
+            h > 0 -> "$h h $m min"
+            else -> "$m min"
         }
     }
 

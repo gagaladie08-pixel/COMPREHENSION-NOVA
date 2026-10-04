@@ -126,7 +126,109 @@ class RecordExplainer(private val db: NovaDatabase) {
     suspend fun explain(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story {
         val story = explainCore(def, period, cat, sub, id, name, value)
         val ctx = runCatching { context(def, period, cat, sub, id, name, value) }.getOrDefault(emptyList())
-        return story.copy(context = ctx)
+        val lede = runCatching { lede(def, cat, id, name) }.getOrNull()
+        val narrative = if (lede == null) story.narrative else lede + "\n\n" + rephrase(def, cat, id, name, story.narrative)
+        return story.copy(narrative = narrative, context = ctx)
+    }
+
+    /* ---------------- accroche unique à l'élément ---------------- */
+
+    /** Choix déterministe d'une formulation parmi plusieurs, propre au couple (record, élément) : deux fiches ne se ressemblent pas. */
+    private fun <T> pick(def: RecordDef, id: Long, vararg variants: T): T {
+        val h = (def.id.hashCode() * 31 + id.hashCode()).let { if (it < 0) -it else it }
+        return variants[h % variants.size]
+    }
+
+    private fun dateOf(ms: Long?): String = ms?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate().format(dayFmt) } ?: "—"
+    private fun daysSince(ms: Long?): Long = ms?.let { java.time.temporal.ChronoUnit.DAYS.between(java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate(), Dates.today()) } ?: 0L
+
+    /** Portrait de l'élément (écoutes, découverte, rang général, certification / Panthéon, série, fraîcheur) — différent pour chaque titre / artiste / album. */
+    private suspend fun lede(def: RecordDef, cat: RecordCategory, id: Long, name: String): String? {
+        val sb = StringBuilder()
+        when (cat) {
+            RecordCategory.TRACK -> {
+                val t = db.trackDao().getById(id) ?: return null
+                val artist = db.artistDao().getById(t.artistId)?.name ?: "?"
+                val all = db.trackDao().allPlayed().sortedByDescending { it.playCount }
+                val rank = all.indexOfFirst { it.trackId == id } + 1
+                val days = daysSince(t.firstPlayedAt).coerceAtLeast(1)
+                val perWeek = String.format(Locale.FRANCE, "%.1f", t.playCount * 7.0 / days)
+                val rankTxt = if (rank > 0) " (${ordinal(rank)} titre le plus écouté de ta bibliothèque sur ${all.size})" else ""
+                sb.append(
+                    pick(
+                        def, id,
+                        "« $name » de $artist : ${t.playCount} écoutes depuis sa découverte le ${dateOf(t.firstPlayedAt)}$rankTxt.",
+                        "Découvert le ${dateOf(t.firstPlayedAt)}, « $name » ($artist) en est à ${t.playCount} écoutes$rankTxt.",
+                        "${t.playCount} écoutes en $days jours : « $name » de $artist tourne en moyenne $perWeek fois par semaine depuis le ${dateOf(t.firstPlayedAt)}$rankTxt.",
+                        "Côté chiffres, « $name » ($artist) pèse ${t.playCount} écoutes depuis le ${dateOf(t.firstPlayedAt)}$rankTxt."
+                    )
+                )
+                db.certificationDao().current(id, EntityType.TRACK)?.let { c ->
+                    val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
+                    sb.append(" Il est certifié ${lvl?.emoji ?: ""} ${lvl?.label ?: c.level}${if (c.multiplier > 1) " ×${c.multiplier}" else ""}.")
+                }
+                if (t.bestStreak >= 3) sb.append(" Sa plus longue série : ${t.bestStreak} jours d'écoute d'affilée.")
+                val since = daysSince(t.lastPlayedAt)
+                sb.append(if (since <= 1) " Tu l'as encore écouté aujourd'hui ou hier." else if (since <= 7) " Dernière écoute il y a $since jours." else " Plus écouté depuis $since jours.")
+            }
+            RecordCategory.ARTIST -> {
+                val a = db.artistDao().getById(id) ?: return null
+                val all = db.artistDao().allPlayedList()
+                val rank = all.indexOfFirst { it.artistId == id } + 1
+                val tracks = db.trackLinkDao().trackIdsForArtist(id).size
+                val days = daysSince(a.firstPlayedAt).coerceAtLeast(1)
+                val rankTxt = if (rank > 0) ", ${ordinal(rank)} artiste le plus écouté sur ${all.size}" else ""
+                sb.append(
+                    pick(
+                        def, id,
+                        "$name, c'est ${a.playCount} écoutes réparties sur $tracks titres depuis le ${dateOf(a.firstPlayedAt)}$rankTxt.",
+                        "Présent dans ta bibliothèque depuis le ${dateOf(a.firstPlayedAt)}, $name cumule ${a.playCount} écoutes sur $tracks titres$rankTxt.",
+                        "${a.playCount} écoutes, $tracks titres, $days jours de présence : voilà le poids de $name dans tes stats$rankTxt.",
+                        "Avec $tracks titres écoutés et ${a.playCount} écoutes depuis le ${dateOf(a.firstPlayedAt)}, $name est ${if (rank in 1..3) "l'un de tes artistes majeurs" else "un artiste bien installé"}$rankTxt."
+                    )
+                )
+                db.pantheonDao().forArtist(id)?.let { ps ->
+                    val st = PantheonStatus.entries.firstOrNull { it.dbName == ps.currentStatus }
+                    if (st != null) sb.append(" Au Panthéon, il est ${st.emoji} ${st.label} depuis le ${dateOf(ps.statusDate)}.")
+                }
+                val since = daysSince(a.lastPlayedAt)
+                sb.append(if (since <= 1) " Encore écouté ces dernières 24 h." else if (since <= 7) " Dernière écoute il y a $since jours." else " Plus écouté depuis $since jours.")
+            }
+            RecordCategory.ALBUM -> {
+                val al = db.albumDao().getById(id) ?: return null
+                val artist = db.artistDao().getById(al.artistId)?.name ?: "?"
+                val tracks = db.trackDao().ofAlbum(id)
+                val all = db.albumDao().all().filter { it.playCount > 0 }.sortedByDescending { it.playCount }
+                val rank = all.indexOfFirst { it.albumId == id } + 1
+                val top = tracks.maxByOrNull { it.track.playCount }
+                val rankTxt = if (rank > 0) " (${ordinal(rank)} album le plus écouté sur ${all.size})" else ""
+                sb.append(
+                    pick(
+                        def, id,
+                        "« $name » de $artist : ${al.playCount} écoutes sur ${tracks.size} titres depuis le ${dateOf(al.firstPlayedAt)}$rankTxt.",
+                        "Depuis le ${dateOf(al.firstPlayedAt)}, l'album « $name » ($artist) totalise ${al.playCount} écoutes réparties sur ${tracks.size} titres$rankTxt.",
+                        "${al.playCount} écoutes pour ${tracks.size} titres : « $name » de $artist est un disque que tu reviens chercher$rankTxt."
+                    )
+                )
+                if (top != null && al.playCount > 0) sb.append(" Son titre moteur : « ${top.track.title} » (${top.track.playCount} ▶, ${100 * top.track.playCount / al.playCount} % des écoutes de l'album).")
+                db.certificationDao().current(id, EntityType.ALBUM)?.let { c ->
+                    val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
+                    sb.append(" Certifié ${lvl?.emoji ?: ""} ${lvl?.label ?: c.level}${if (c.multiplier > 1) " ×${c.multiplier}" else ""}.")
+                }
+            }
+        }
+        return sb.toString().ifBlank { null }
+    }
+
+    /** Évite de répéter le nom en tête du récit juste après l'accroche : « Ce titre… », « Le morceau… », « Il… ». */
+    private fun rephrase(def: RecordDef, cat: RecordCategory, id: Long, name: String, narrative: String): String {
+        if (!narrative.startsWith(name)) return narrative
+        val subject = when (cat) {
+            RecordCategory.TRACK -> pick(def, id + 7, "Ce titre", "Le morceau", "Il", "Ce même titre")
+            RecordCategory.ARTIST -> pick(def, id + 7, "L'artiste", "Il", "Ce même artiste")
+            RecordCategory.ALBUM -> pick(def, id + 7, "Cet album", "Le disque", "Il", "Ce même album")
+        }
+        return subject + narrative.removePrefix(name)
     }
 
     private suspend fun explainCore(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story = runCatching {

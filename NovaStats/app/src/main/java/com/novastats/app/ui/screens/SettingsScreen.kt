@@ -866,6 +866,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.2" to listOf(
+        "🧐 Fiche record : accroche-portrait unique par élément (écoutes, découverte, rang général, certification / Panthéon, série, fraîcheur) + formulations variées",
+        "⚡ Fastest Certification / Panthéon affichés en jours, heures et minutes",
+        "🏅 Périodes Daily / Weekly / Monthly / Yearly en segments pleine largeur"
+    ),
     "0.10.1" to listOf(
         "🧐 Fiche record : « Pourquoi il est là » unique à chaque élément (place dans le classement, profil dans le chart, autres records détenus)",
         "🏅 Sous-sections en segments pleine largeur, comme Titres / Artistes / Albums"

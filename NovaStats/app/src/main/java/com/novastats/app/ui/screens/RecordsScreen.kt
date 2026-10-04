@@ -329,7 +329,7 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                 }
                 if (def.periods.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    ChipRow(def.periods.map { it.label }, def.periods.indexOf(period), color) { period = def.periods[it] }
+                    SegmentedRows(def.periods.map { it.label }, def.periods.indexOf(period), color) { period = def.periods[it] }
                 }
                 val subs = def.subs[category].orEmpty()
                 if (subs.isNotEmpty()) {
