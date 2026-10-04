@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.novastats.app.domain.TitleNormalizer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -58,7 +59,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-private enum class EditorTab(val label: String) { TRACKS("🎵 Titres"), ARTISTS("🎤 Artistes"), ALBUMS("💿 Albums"), PLAYS("▶ Écoutes"), REVIEW("⚠️ À corriger"), HISTORY("🕘 Historique") }
+private enum class EditorTab(val label: String) { TRACKS("🎵 Titres"), ARTISTS("🎤 Artistes"), ALBUMS("💿 Albums"), PLAYS("▶ Écoutes"), REVIEW("⚠️ À corriger"), PROTECTED("🔒 Noms protégés"), HISTORY("🕘 Historique") }
 
 /**
  * 🛠️ Éditeur de données (Paramètres → Éditeur). Recherche, suggestions de fusion, renommage, fusion,
@@ -88,6 +89,8 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
     val redItems = remember(reviewGroups, lowConfidence) { buildRedItems(reviewGroups, lowConfidence) }
     val yellowItems = remember(flagged, proposals) { buildYellowItems(flagged, proposals) }
     val history by app.database.editorDao().history(50).collectAsStateWithLifecycle(initialValue = emptyList())
+    val protectedNames by app.database.artistExceptionDao().all().collectAsStateWithLifecycle(initialValue = emptyList())
+    var newProtected by remember { mutableStateOf("") }
     val recentPlays by app.database.scrobbleDao().recent(200).collectAsStateWithLifecycle(initialValue = emptyList())
 
     var action by remember { mutableStateOf<EditorAction?>(null) }
@@ -154,6 +157,34 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
                 EditorTab.REVIEW -> {
                     item(key = "review") {
                         ReviewSection(redItems, yellowItems, focusTrackId, artists, albums.map { it.album }, busy = busy, exec = exec)
+                    }
+                }
+                EditorTab.PROTECTED -> {
+                    item {
+                        Column(Modifier.fillMaxWidth().padding(16.dp, 8.dp)) {
+                            Text("Noms d'artistes jamais découpés", color = theme.text, fontWeight = FontWeight.Bold)
+                            Text("Les artistes sont séparés sur « , & / + x feat. with… ». Les noms listés ici sont protégés : « HUNTR/X » reste un seul artiste, même dans « HUNTR/X feat. Future ». Les écoutes existantes sont corrigées par 🔗 Recalculer liens & versions (Réglages → Données).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(value = newProtected, onValueChange = { newProtected = it }, singleLine = true, placeholder = { Text("Ex. AC/DC") }, modifier = Modifier.weight(1f))
+                                Button(
+                                    onClick = {
+                                        val n = newProtected.trim(); newProtected = ""
+                                        if (n.isNotEmpty()) exec {
+                                            app.database.artistExceptionDao().insert(com.novastats.app.data.db.entity.ArtistExceptionEntity(name = n, nameKey = TitleNormalizer.normalizeKey(n)))
+                                            app.library.loadArtistExceptions(seedDefaults = false); app.library.clearCaches()
+                                        }
+                                    },
+                                    enabled = newProtected.isNotBlank() && !busy, colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
+                                ) { Text("Ajouter") }
+                            }
+                        }
+                    }
+                    if (protectedNames.isEmpty()) item { Text("Aucun nom protégé.", color = theme.textSecondary, modifier = Modifier.padding(16.dp)) }
+                    items(protectedNames, key = { "p" + it.id }) { e ->
+                        Row(Modifier.fillMaxWidth().padding(16.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔒 ${e.name}", color = theme.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { exec { app.database.artistExceptionDao().delete(e.id); app.library.loadArtistExceptions(seedDefaults = false); app.library.clearCaches() } }, enabled = !busy) { Text("Retirer", color = theme.secondary) }
+                        }
                     }
                 }
                 EditorTab.HISTORY -> {

@@ -95,7 +95,7 @@ interface CertificationDao {
     @Query("SELECT * FROM certification_history") suspend fun allHistory(): List<CertificationHistoryEntity>
     @Query("SELECT * FROM certifications") suspend fun allCurrent(): List<CertificationEntity>
     @Query("SELECT * FROM certifications") fun allCurrentFlow(): Flow<List<CertificationEntity>>
-    @Query("SELECT t.track_id AS entity_id, t.title AS name, a.name AS subtitle, t.cover_url AS image_url, t.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM tracks t JOIN artists a ON a.artist_id = t.artist_id LEFT JOIN certifications c ON c.entity_id = t.track_id AND c.entity_type = 'TRACK' WHERE t.play_count > 0 ORDER BY t.play_count DESC")
+    @Query("SELECT t.track_id AS entity_id, t.title AS name, a.name AS subtitle, t.cover_url AS image_url, t.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM tracks t JOIN artists a ON a.artist_id = t.artist_id LEFT JOIN certifications c ON c.entity_id = t.track_id AND c.entity_type = 'TRACK' WHERE t.play_count > 0 AND t.original_track_id IS NULL ORDER BY t.play_count DESC")
     fun trackCandidates(): Flow<List<CertCandidate>>
     @Query("SELECT al.album_id AS entity_id, al.title AS name, a.name AS subtitle, al.cover_url AS image_url, al.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM albums al JOIN artists a ON a.artist_id = al.artist_id LEFT JOIN certifications c ON c.entity_id = al.album_id AND c.entity_type = 'ALBUM' WHERE al.play_count > 0 ORDER BY al.play_count DESC")
     fun albumCandidates(): Flow<List<CertCandidate>>

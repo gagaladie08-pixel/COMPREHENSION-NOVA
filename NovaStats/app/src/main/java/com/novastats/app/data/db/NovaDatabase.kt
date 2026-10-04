@@ -61,9 +61,10 @@ import com.novastats.app.data.db.entity.*
         // Module 11 — APIs & Éditeur
         ApiCacheEntity::class, ApiReliabilityEntity::class, EditHistoryEntity::class, UserCorrectionEntity::class,
         // Import/Export
-        MigrationLogEntity::class
+        MigrationLogEntity::class,
+        com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -90,6 +91,7 @@ abstract class NovaDatabase : RoomDatabase() {
     abstract fun apiCacheDao(): ApiCacheDao
     abstract fun editorDao(): EditorDao
     abstract fun migrationLogDao(): MigrationLogDao
+    abstract fun artistExceptionDao(): com.novastats.app.data.db.dao.ArtistExceptionDao
 
     companion object {
         const val NAME = "novastats.db"
@@ -127,11 +129,22 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 : titre racine dans daily_plays (fusion remix / version avec invité) + noms d'artistes à ne jamais découper. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE daily_plays ADD COLUMN root_id INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_daily_plays_root_id ON daily_plays(root_id)")
+                db.execSQL("UPDATE daily_plays SET root_id = IFNULL((SELECT t.original_track_id FROM tracks t WHERE t.track_id = daily_plays.track_id), track_id)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS artist_exceptions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, name_key TEXT NOT NULL, created_at INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_artist_exceptions_name_key ON artist_exceptions(name_key)")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

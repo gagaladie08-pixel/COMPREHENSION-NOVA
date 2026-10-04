@@ -1,4 +1,4 @@
-# 🗄️ Base de données NovaStats — 34 tables
+# 🗄️ Base de données NovaStats — 35 tables
 
 Conventions Room :
 
@@ -47,6 +47,7 @@ Fichier source : `app/src/main/java/com/novastats/app/data/db/entity/*.kt`
 | 32 | `edit_history` | Éditeur | SystemEntities.kt |
 | 33 | `user_corrections` | Éditeur | SystemEntities.kt |
 | 34 | `migration_log` | Import/Export | SystemEntities.kt |
+| 35 | `artist_exceptions` | Référentiel | CoreEntities.kt |
 
 ## Flux de données
 
@@ -91,6 +92,19 @@ Service / Import ──► scrobbles (CONFIRMED)
   L'album n'est crédité qu'à l'artiste principal (`albums.artist_id`) ; les compilations ne créditent jamais d'album ;
   les éditions Deluxe / Japan / UK / Platinum… sont fusionnées ; un remix n'est un titre distinct (`is_remix`,
   `original_track_id`) que s'il porte un artiste featuring identifié.
+- **Liens & versions (v5, `MIGRATION_4_5`)** : `daily_plays.root_id` = `tracks.original_track_id` sinon `track_id` —
+  toutes les agrégations par titre (Stats `topForPeriod`, Billboard `rankTracks`, rangs, séries, records) groupent sur
+  `root_id` : un **remix featuring** ou une **version avec invité** (`is_remix = 1`, `original_track_id` = root) compte
+  dans le total de l'original. `tracks.play_count` d'un root = somme du groupe (`recomputeAggregates`), celui d'une
+  version = ses propres écoutes ; `topAllTime` / `rankAllTime` / candidats certification = roots seulement. Résolution
+  (`LibraryRepository.resolve`) : même titre + même artiste principal mais jeu d'invités différent → version
+  « Titre (with Invité) » (invité du champ artiste) ou « Titre (feat. Invité) » (invité du titre) liée au root ; si la
+  version avec invité existait avant l'original, elle est renommée et l'original devient root ; remix dont l'artiste
+  principal diffère → original cherché parmi les titres portant le même nom et partageant un artiste ; versions
+  orphelines rattachées quand l'original apparaît. Table `artist_exceptions` (`name`, `name_key` UNIQUE) = noms
+  jamais découpés par `splitArtists` (« HUNTR/X », « AC/DC », « Tyler, The Creator »…), éditables (Éditeur →
+  🔒 Noms protégés), exportés dans le JSON (format 2.1, `artist_exceptions`). `RelinkJob` re-résout toutes les
+  écoutes depuis `raw_title` / `raw_artist` / `raw_album` (une fois après la mise à jour, puis Réglages → Données).
 - **Révision (v4, `MIGRATION_3_4`)** : `scrobbles.needs_review` / `review_reason` (ex. "Artiste manquant", "Titre
   inconnu", "Notification incomplète") et `raw_title` / `raw_artist` / `raw_album` (valeur brute du player). Le score
   `confidence_score` suit la source : MediaSession 100 · Mixte 80 · Notification complète 70 · Incomplet 50 ; titre ou

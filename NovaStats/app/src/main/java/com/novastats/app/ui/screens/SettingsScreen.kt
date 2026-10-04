@@ -584,6 +584,21 @@ private fun DataPage() {
             }
         }
 
+        SectionTitle("🔗 Liens artistes & versions")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                val relinkState by com.novastats.app.data.repository.RelinkJob.state.collectAsStateWithLifecycle()
+                val relinkResult by com.novastats.app.data.repository.RelinkJob.lastResult.collectAsStateWithLifecycle()
+                Text("Re-lit chaque écoute depuis les infos brutes du lecteur : artistes invités manquants créés, versions « Titre (with Invité) » et remix featuring rattachés à l'original (total fusionné dans classements, records et certifications), noms protégés appliqués (🔒 Éditeur). Fait automatiquement une fois après la mise à jour.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { scope.launch { withContext(Dispatchers.IO) { com.novastats.app.data.repository.RelinkJob.run(app) } } },
+                    enabled = relinkState == null && !working && scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
+                ) { Text(if (relinkState != null) "⏳ ${relinkState}" else "🔗 Recalculer liens & versions") }
+                relinkResult?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp)) }
+            }
+        }
+
         SectionTitle("💾 Sauvegarde automatique")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
@@ -889,6 +904,13 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.5" to listOf(
+        "🔒 Noms protégés : « HUNTR/X », « AC/DC », « Tyler, The Creator »… ne sont plus découpés en plusieurs artistes, même dans « HUNTR/X feat. Future ». Liste modifiable dans l'Éditeur (onglet 🔒 Noms protégés).",
+        "🔗 Remix featuring + original = un seul titre dans les classements, records, certifications et Stats (écoutes additionnées). Le remix reste une version distincte, liée à l'original ; la fiche du titre montre la répartition par version.",
+        "🎤 Invité absent de la base : « BOOMPALA » par « LE SSERAFIM & Santos Bravos » crée désormais Santos Bravos ET une version « BOOMPALA (with Santos Bravos) » liée à l'original (87 + 47 = 134 écoutes sur la fiche).",
+        "♻️ Recalcul automatique des liens au premier lancement (boîte de progression) + bouton 🔗 Recalculer liens & versions dans Réglages → Données.",
+        "💾 Les noms protégés sont inclus dans l'export JSON et restaurés avant l'import."
+    ),
     "0.10.4" to listOf(
         "🐛 Stats : plus de fermeture de l'app en passant en Daily sur Artistes / Albums (liste tronquée pendant le rechargement — IndexOutOfBounds)",
         "🐛 Billboard : même protection sur le bouton « Voir plus »"

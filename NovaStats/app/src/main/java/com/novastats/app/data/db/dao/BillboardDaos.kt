@@ -58,10 +58,10 @@ interface BillboardDao {
 
     @Query(
         """
-        SELECT d.track_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+        SELECT d.root_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
                0 AS distinct_tracks, 0 AS distinct_albums
         FROM daily_plays d WHERE d.date BETWEEN :from AND :to
-        GROUP BY d.track_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        GROUP BY d.root_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
         """
     )
     suspend fun rankTracks(from: String, to: String, limit: Int): List<RankedEntry>

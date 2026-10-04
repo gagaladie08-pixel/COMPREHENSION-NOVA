@@ -24,6 +24,16 @@ data class RecentScrobble(
     @androidx.room.ColumnInfo(name = "cover_url") val coverUrl: String?
 )
 
+data class RelinkRow(
+    @androidx.room.ColumnInfo(name = "scrobble_id") val scrobbleId: Long,
+    @androidx.room.ColumnInfo(name = "track_id") val trackId: Long,
+    @androidx.room.ColumnInfo(name = "artist_id") val artistId: Long,
+    @androidx.room.ColumnInfo(name = "album_id") val albumId: Long?,
+    @androidx.room.ColumnInfo(name = "raw_title") val rawTitle: String?,
+    @androidx.room.ColumnInfo(name = "raw_artist") val rawArtist: String?,
+    @androidx.room.ColumnInfo(name = "raw_album") val rawAlbum: String?
+)
+
 data class DayCount(val date: String, @androidx.room.ColumnInfo(name = "play_count") val playCount: Int)
 data class DailyEntityRow(@androidx.room.ColumnInfo(name = "track_id") val trackId: Long, @androidx.room.ColumnInfo(name = "artist_id") val artistId: Long, @androidx.room.ColumnInfo(name = "album_id") val albumId: Long?, val date: String)
 data class IdCount(val id: Long, val plays: Int, @androidx.room.ColumnInfo(name = "duration_ms") val durationMs: Long)
@@ -177,8 +187,14 @@ interface ScrobbleDao {
     fun summary(fromMs: Long, toMs: Long): Flow<PeriodSummary>
 
     /** Date (epoch ms) de la N-ième écoute confirmée d'un titre — dates rétroactives des certifications. */
-    @Query("SELECT started_at FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED' ORDER BY started_at LIMIT 1 OFFSET :n - 1")
+    @Query("SELECT started_at FROM scrobbles WHERE status = 'CONFIRMED' AND (track_id = :trackId OR track_id IN (SELECT track_id FROM tracks WHERE original_track_id = :trackId)) ORDER BY started_at LIMIT 1 OFFSET :n - 1")
     suspend fun nthPlayOfTrack(trackId: Long, n: Int): Long?
+
+    /** Écoutes dont le titre doit être re-résolu (liens artistes / versions) : valeurs brutes du lecteur si connues. */
+    @Query("SELECT scrobble_id, track_id, artist_id, album_id, raw_title, raw_artist, raw_album FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
+    suspend fun allForRelink(): List<RelinkRow>
+    @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId WHERE scrobble_id = :id")
+    suspend fun relink(id: Long, trackId: Long, artistId: Long, albumId: Long?)
 
     @Query("SELECT started_at FROM scrobbles WHERE album_id = :albumId AND status = 'CONFIRMED' ORDER BY started_at LIMIT 1 OFFSET :n - 1")
     suspend fun nthPlayOfAlbum(albumId: Long, n: Int): Long?
@@ -215,12 +231,12 @@ interface DailyPlayDao {
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
         """
-        INSERT INTO daily_plays (track_id, artist_id, album_id, date, play_count, total_duration_ms)
-        SELECT track_id, artist_id, album_id,
-               date(started_at / 1000, 'unixepoch', 'localtime') AS d,
-               COUNT(*), SUM(duration_listened_ms)
-        FROM scrobbles WHERE status = 'CONFIRMED'
-        GROUP BY track_id, d
+        INSERT INTO daily_plays (track_id, root_id, artist_id, album_id, date, play_count, total_duration_ms)
+        SELECT s.track_id, IFNULL(t.original_track_id, s.track_id), s.artist_id, s.album_id,
+               date(s.started_at / 1000, 'unixepoch', 'localtime') AS d,
+               COUNT(*), SUM(s.duration_listened_ms)
+        FROM scrobbles s LEFT JOIN tracks t ON t.track_id = s.track_id WHERE s.status = 'CONFIRMED'
+        GROUP BY s.track_id, d
         """
     )
     suspend fun rebuildFromScrobbles()
@@ -241,8 +257,8 @@ interface DailyPlayDao {
     @Query("SELECT MIN(date) FROM daily_plays")
     suspend fun firstDate(): String?
     /** Toutes les lignes (titre, artiste principal, album, jour) avec au moins une écoute — base des séries d'écoute (record 28). */
-    @Query("SELECT track_id, artist_id, album_id, date FROM daily_plays WHERE play_count > 0 ORDER BY date") suspend fun allEntityDays(): List<DailyEntityRow>
-    @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE track_id = :id GROUP BY date ORDER BY date") suspend fun seriesForTrack(id: Long): List<DayCount>
+    @Query("SELECT root_id AS track_id, artist_id, album_id, date FROM daily_plays WHERE play_count > 0 ORDER BY date") suspend fun allEntityDays(): List<DailyEntityRow>
+    @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE root_id = :id GROUP BY date ORDER BY date") suspend fun seriesForTrack(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE album_id = :id GROUP BY date ORDER BY date") suspend fun seriesForAlbum(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE artist_id = :id GROUP BY date ORDER BY date") suspend fun seriesForArtist(id: Long): List<DayCount>
     @Query("SELECT DISTINCT date FROM daily_plays WHERE date BETWEEN :from AND :to ORDER BY date") suspend fun activeDatesBetween(from: String, to: String): List<String>

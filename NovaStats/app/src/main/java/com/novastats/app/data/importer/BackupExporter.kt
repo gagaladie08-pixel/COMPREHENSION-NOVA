@@ -31,8 +31,9 @@ data class NovaExport(
     val certifications: List<ExportCertification> = emptyList(),
     val pantheon: List<ExportPantheon> = emptyList(),
     val hall_of_fame: List<ExportHof> = emptyList(),
-    val edit_history: List<ExportEdit> = emptyList()
-) { companion object { const val FORMAT_VERSION = "2.0" } }
+    val edit_history: List<ExportEdit> = emptyList(),
+    val artist_exceptions: List<String> = emptyList()
+) { companion object { const val FORMAT_VERSION = "2.1" } }
 
 @Serializable data class ExportArtist(val id: Long, val name: String, val photoUrl: String? = null, val playCount: Int = 0)
 @Serializable data class ExportAlbum(val id: Long, val title: String, val artistId: Long, val coverUrl: String? = null, val playCount: Int = 0)
@@ -78,7 +79,8 @@ object BackupExporter {
             certifications = db.certificationDao().allCurrent().map { ExportCertification(it.entityId, it.entityType, it.level, it.multiplier, it.certifiedAt) },
             pantheon = db.pantheonDao().allCurrent().map { ExportPantheon(it.artistId, it.currentStatus, it.statusDate) },
             hall_of_fame = db.hallOfFameDao().all().map { ExportHof(it.entityId, it.entityType, it.periodType, it.entryType, it.entryDate) },
-            edit_history = db.editorDao().historyList().map { ExportEdit(it.type, it.entityType, it.entityId, it.before, it.after, it.createdAt) }
+            edit_history = db.editorDao().historyList().map { ExportEdit(it.type, it.entityType, it.entityId, it.before, it.after, it.createdAt) },
+            artist_exceptions = db.artistExceptionDao().allList().map { it.name }
         )
         val text = json.encodeToString(NovaExport.serializer(), export)
         return text to ExportSummary(songs.size, plays.size, artists.size, albums.size, text.toByteArray().size)

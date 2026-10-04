@@ -138,3 +138,16 @@ data class TrackAlbumEntity(
     @ColumnInfo(name = "track_number") val trackNumber: Int? = null,
     @ColumnInfo(name = "is_primary") val isPrimary: Boolean = true
 )
+
+
+/**
+ * 🔒 Noms d'artistes à ne jamais découper (« HUNTR/X », « AC/DC », « Tyler, The Creator »…).
+ * Comparés par clé normalisée ; éditables dans l'éditeur de données ; inclus dans les backups.
+ */
+@Entity(tableName = "artist_exceptions", indices = [Index(value = ["name_key"], unique = true)])
+data class ArtistExceptionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    @ColumnInfo(name = "name_key") val nameKey: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+)

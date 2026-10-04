@@ -106,7 +106,7 @@ interface TrackDao {
         FROM tracks t
         JOIN artists a ON a.artist_id = t.artist_id
         LEFT JOIN albums al ON al.album_id = t.album_id
-        WHERE t.play_count > 0
+        WHERE t.play_count > 0 AND t.original_track_id IS NULL
         ORDER BY t.play_count DESC, t.total_duration_ms DESC
         LIMIT :limit
         """
@@ -121,11 +121,11 @@ interface TrackDao {
         SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, al.title AS album_title,
                SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
         FROM daily_plays d
-        JOIN tracks t ON t.track_id = d.track_id
+        JOIN tracks t ON t.track_id = d.root_id
         JOIN artists a ON a.artist_id = t.artist_id
         LEFT JOIN albums al ON al.album_id = t.album_id
         WHERE d.date BETWEEN :from AND :to
-        GROUP BY d.track_id
+        GROUP BY d.root_id
         ORDER BY period_plays DESC, period_duration_ms DESC
         LIMIT :limit
         """
@@ -136,11 +136,11 @@ interface TrackDao {
     @Query(
         """
         SELECT (SELECT COUNT(*) + 1 FROM (
-                    SELECT track_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
-                    WHERE date BETWEEN :from AND :to GROUP BY track_id) x
+                    SELECT root_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+                    WHERE date BETWEEN :from AND :to GROUP BY root_id) x
                 WHERE x.p > me.p OR (x.p = me.p AND x.d > me.d))
         FROM (SELECT SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
-              WHERE track_id = :trackId AND date BETWEEN :from AND :to) me
+              WHERE root_id = :trackId AND date BETWEEN :from AND :to) me
         WHERE me.p > 0
         """
     )
@@ -148,7 +148,7 @@ interface TrackDao {
 
     @Query(
         """
-        SELECT (SELECT COUNT(*) + 1 FROM tracks t WHERE t.play_count > me.p OR (t.play_count = me.p AND t.total_duration_ms > me.d))
+        SELECT (SELECT COUNT(*) + 1 FROM tracks t WHERE t.original_track_id IS NULL AND (t.play_count > me.p OR (t.play_count = me.p AND t.total_duration_ms > me.d)))
         FROM (SELECT play_count AS p, total_duration_ms AS d FROM tracks WHERE track_id = :trackId) me
         WHERE me.p > 0
         """
@@ -197,7 +197,7 @@ interface TrackDao {
         """
         SELECT IFNULL(SUM(play_count), 0) AS plays, IFNULL(SUM(total_duration_ms), 0) AS duration_ms, MIN(date) AS first_date, MAX(date) AS last_date,
                COUNT(DISTINCT date) AS active_days, COUNT(DISTINCT track_id) AS distinct_tracks, COUNT(DISTINCT album_id) AS distinct_albums
-        FROM daily_plays WHERE track_id = :trackId AND date BETWEEN :from AND :to
+        FROM daily_plays WHERE root_id = :trackId AND date BETWEEN :from AND :to
         """
     )
     suspend fun periodStats(trackId: Long, from: String, to: String): PeriodEntityStats?
@@ -225,13 +225,14 @@ interface TrackDao {
     @Query(
         """
         SELECT t.*, al.title AS album_title, x.p AS period_plays, x.d AS period_duration_ms,
-               (SELECT COUNT(*) + 1 FROM (SELECT track_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
-                                          WHERE date BETWEEN :from AND :to GROUP BY track_id) y
-                WHERE y.p > x.p OR (y.p = x.p AND y.d > x.d)) AS period_rank
-        FROM (SELECT d.track_id AS track_id, SUM(d.play_count) AS p, SUM(d.total_duration_ms) AS d
+               (SELECT COUNT(*) + 1 FROM (SELECT root_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+                                          WHERE date BETWEEN :from AND :to GROUP BY root_id) y
+                WHERE y.p > g.p OR (y.p = g.p AND y.d > g.d)) AS period_rank
+        FROM (SELECT d.root_id AS root_id, SUM(d.play_count) AS p, SUM(d.total_duration_ms) AS d
               FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id
-              WHERE ta.artist_id = :artistId AND d.date BETWEEN :from AND :to GROUP BY d.track_id) x
-        JOIN tracks t ON t.track_id = x.track_id
+              WHERE ta.artist_id = :artistId AND d.date BETWEEN :from AND :to GROUP BY d.root_id) x
+        JOIN (SELECT root_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY root_id) g ON g.root_id = x.root_id
+        JOIN tracks t ON t.track_id = x.root_id
         LEFT JOIN albums al ON al.album_id = t.album_id
         ORDER BY x.p DESC, x.d DESC
         """
@@ -241,13 +242,15 @@ interface TrackDao {
     /** Idem all time (cumul `tracks.play_count`, position dans le classement général). */
     @Query(
         """
-        SELECT t.*, al.title AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms,
-               (SELECT COUNT(*) + 1 FROM tracks y WHERE y.play_count > t.play_count OR (y.play_count = t.play_count AND y.total_duration_ms > t.total_duration_ms)) AS period_rank
-        FROM tracks t JOIN track_artists ta ON ta.track_id = t.track_id
+        SELECT t.*, al.title AS album_title, x.p AS period_plays, x.d AS period_duration_ms,
+               (SELECT COUNT(*) + 1 FROM tracks y WHERE y.original_track_id IS NULL AND (y.play_count > t.play_count OR (y.play_count = t.play_count AND y.total_duration_ms > t.total_duration_ms))) AS period_rank
+        FROM (SELECT d.root_id AS root_id, SUM(d.play_count) AS p, SUM(d.total_duration_ms) AS d
+              FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id
+              WHERE ta.artist_id = :artistId GROUP BY d.root_id) x
+        JOIN tracks t ON t.track_id = x.root_id
         LEFT JOIN albums al ON al.album_id = t.album_id
-        WHERE ta.artist_id = :artistId AND t.play_count > 0
-        GROUP BY t.track_id
-        ORDER BY t.play_count DESC, t.total_duration_ms DESC
+        WHERE x.p > 0
+        ORDER BY x.p DESC, x.d DESC
         """
     )
     suspend fun allOfArtistAllTime(artistId: Long): List<RankedTrackPos>
@@ -304,13 +307,50 @@ interface TrackDao {
     @Query(
         """
         UPDATE tracks SET
-            play_count = (SELECT COUNT(*) FROM scrobbles s WHERE s.track_id = tracks.track_id AND s.status = 'CONFIRMED'),
-            total_duration_ms = (SELECT IFNULL(SUM(s.duration_listened_ms), 0) FROM scrobbles s WHERE s.track_id = tracks.track_id AND s.status = 'CONFIRMED'),
-            first_played_at = (SELECT MIN(s.started_at) FROM scrobbles s WHERE s.track_id = tracks.track_id AND s.status = 'CONFIRMED'),
-            last_played_at = (SELECT MAX(s.started_at) FROM scrobbles s WHERE s.track_id = tracks.track_id AND s.status = 'CONFIRMED')
+            play_count = (SELECT COUNT(*) FROM scrobbles s WHERE s.status = 'CONFIRMED' AND (s.track_id = tracks.track_id OR s.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id))),
+            total_duration_ms = (SELECT IFNULL(SUM(s.duration_listened_ms), 0) FROM scrobbles s WHERE s.status = 'CONFIRMED' AND (s.track_id = tracks.track_id OR s.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id))),
+            first_played_at = (SELECT MIN(s.started_at) FROM scrobbles s WHERE s.status = 'CONFIRMED' AND (s.track_id = tracks.track_id OR s.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id))),
+            last_played_at = (SELECT MAX(s.started_at) FROM scrobbles s WHERE s.status = 'CONFIRMED' AND (s.track_id = tracks.track_id OR s.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id)))
         """
     )
     suspend fun recomputeAggregates()
+
+    /** Écoutes PROPRES d'un titre (sans ses versions liées) — répartition par version dans les popups. */
+    @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")
+    suspend fun ownPlays(trackId: Long): Int
+
+    /** Versions liées à un titre racine (remix featuring, version avec invité). */
+    @Query("SELECT * FROM tracks WHERE original_track_id = :rootId ORDER BY play_count DESC")
+    suspend fun versionsOf(rootId: Long): List<TrackEntity>
+
+    /** Titre racine portant exactement ce titre, crédité à l'un des artistes donnés (original d'un remix dont l'artiste principal diffère). */
+    @Query(
+        """
+        SELECT * FROM tracks t WHERE t.title = :title AND t.original_track_id IS NULL
+          AND (t.artist_id IN (:artistIds) OR t.track_id IN (SELECT track_id FROM track_artists WHERE artist_id IN (:artistIds)))
+        ORDER BY t.play_count DESC LIMIT 1
+        """
+    )
+    suspend fun findRootByTitleAnyArtist(title: String, artistIds: List<Long>): TrackEntity?
+
+    /** Versions orphelines (« Titre (feat. X) » / « Titre (with X) » sans original) partageant un artiste → à rattacher au nouveau root. */
+    @Query(
+        """
+        SELECT * FROM tracks t WHERE t.original_track_id IS NULL AND t.track_id != :rootId AND t.title LIKE :titlePrefix || ' (%'
+          AND (t.artist_id IN (:artistIds) OR t.track_id IN (SELECT track_id FROM track_artists WHERE artist_id IN (:artistIds)))
+        """
+    )
+    suspend fun orphanVersions(rootId: Long, titlePrefix: String, artistIds: List<Long>): List<TrackEntity>
+
+    @Query("UPDATE tracks SET original_track_id = :rootId, is_remix = 1 WHERE track_id = :trackId")
+    suspend fun linkToRoot(trackId: Long, rootId: Long)
+
+    @Query("UPDATE tracks SET title = :title WHERE track_id = :trackId")
+    suspend fun setTitle(trackId: Long, title: String)
+
+    /** Aplatit les chaînes (version d'une version → rattachée au root final). */
+    @Query("UPDATE tracks SET original_track_id = (SELECT o.original_track_id FROM tracks o WHERE o.track_id = tracks.original_track_id) WHERE original_track_id IN (SELECT track_id FROM tracks WHERE original_track_id IS NOT NULL)")
+    suspend fun flattenRoots()
 
     /** Rang de découverte = ordre de première écoute. */
     @Query(
@@ -602,4 +642,14 @@ interface TrackLinkDao {
     @Query("DELETE FROM track_artists WHERE track_id = :trackId") suspend fun clearTrackArtists(trackId: Long)
     @Query("DELETE FROM track_albums WHERE track_id = :trackId") suspend fun clearTrackAlbums(trackId: Long)
     @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
+}
+
+
+@Dao
+interface ArtistExceptionDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(e: com.novastats.app.data.db.entity.ArtistExceptionEntity): Long
+    @Query("SELECT * FROM artist_exceptions ORDER BY name COLLATE NOCASE") fun all(): Flow<List<com.novastats.app.data.db.entity.ArtistExceptionEntity>>
+    @Query("SELECT * FROM artist_exceptions ORDER BY name COLLATE NOCASE") suspend fun allList(): List<com.novastats.app.data.db.entity.ArtistExceptionEntity>
+    @Query("DELETE FROM artist_exceptions WHERE id = :id") suspend fun delete(id: Long)
+    @Query("SELECT COUNT(*) FROM artist_exceptions") suspend fun count(): Int
 }

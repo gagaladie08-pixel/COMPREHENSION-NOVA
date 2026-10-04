@@ -239,11 +239,39 @@ object TitleNormalizer {
         return albumTitle != null && compilationRegex.containsMatchIn(albumTitle)
     }
 
-    fun splitArtists(raw: String): List<String> =
-        raw.split(Regex("""(?i)\s*(,|&|;|/|\+| x | feat\.? | ft\.? | featuring | with | and )\s*"""))
+    /**
+     * 🔒 Noms d'artistes à ne jamais découper (« HUNTR/X », « AC/DC », « Tyler, The Creator »…), par clé normalisée.
+     * Alimenté depuis la table `artist_exceptions` au démarrage et après chaque édition ([setNeverSplit]).
+     */
+    @Volatile private var neverSplit: Map<String, String> = DEFAULT_NEVER_SPLIT.associateBy { normalizeKey(it) }
+    val DEFAULT_NEVER_SPLIT: List<String> get() = listOf("HUNTR/X", "AC/DC", "Tyler, The Creator", "Simon & Garfunkel", "Earth, Wind & Fire", "Florence + the Machine", "Of Monsters and Men")
+    fun setNeverSplit(names: Collection<String>) { neverSplit = names.filter { it.isNotBlank() }.associateBy { normalizeKey(it) } }
+    fun neverSplitNames(): Collection<String> = neverSplit.values
+    fun isNeverSplit(name: String): Boolean = normalizeKey(name) in neverSplit
+
+    private val splitRegex = Regex("""(?i)\s*(,|&|;|/|\+| x | feat\.? | ft\.? | featuring | with | and )\s*""")
+
+    fun splitArtists(raw: String): List<String> {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return emptyList()
+        // 1) Le champ entier est un nom protégé → un seul artiste, conservé tel quel
+        neverSplit[normalizeKey(trimmed)]?.let { return listOf(trimmed) }
+        // 2) Un nom protégé apparaît dans une liste (« HUNTR/X feat. Future ») → remplacé par un jeton avant le découpage
+        var work = trimmed
+        val tokens = ArrayList<String>()
+        for (name in neverSplit.values) {
+            val rx = Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(name) + "(?![\\p{L}\\p{N}])")
+            if (rx.containsMatchIn(work)) {
+                work = rx.replace(work) { m -> tokens.add(m.value); "\u0001${tokens.size - 1}\u0001" }
+            }
+        }
+        return work.split(splitRegex)
             .map { it.trim().trim('(', ')', '[', ']') }
             .filter { it.isNotBlank() }
+            .map { part -> Regex("\u0001(\\d+)\u0001").replace(part) { m -> tokens[m.groupValues[1].toInt()] }.trim() }
+            .filter { it.isNotBlank() }
             .distinctBy { normalizeKey(it) }
+    }
 
     /** Clé de comparaison : minuscules, sans accents, sans ponctuation, espaces réduits. */
     fun normalizeKey(s: String): String {

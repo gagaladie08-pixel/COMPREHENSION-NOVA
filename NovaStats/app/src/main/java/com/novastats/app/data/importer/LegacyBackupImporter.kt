@@ -6,6 +6,7 @@ import com.novastats.app.data.db.entity.MigrationLogEntity
 import com.novastats.app.data.db.entity.ScrobbleEntity
 import com.novastats.app.data.db.entity.ScrobbleStatus
 import com.novastats.app.data.repository.LibraryRepository
+import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.data.repository.StatsRebuilder
 import com.novastats.app.domain.ScrobbleRules
 import kotlinx.serialization.Serializable
@@ -25,7 +26,9 @@ data class LegacyBackup(
     val version: Int = 1,
     val exportedAt: Long? = null,
     val songs: List<LegacySong> = emptyList(),
-    val plays: List<LegacyPlay> = emptyList()
+    val plays: List<LegacyPlay> = emptyList(),
+    /** 🔒 Noms d'artistes protégés (format 2.1+) — restaurés AVANT la résolution des titres. */
+    val artist_exceptions: List<String> = emptyList()
 )
 
 @Serializable
@@ -83,6 +86,11 @@ object LegacyBackupImporter {
     ): ImportReport {
         val t0 = System.currentTimeMillis()
         val library = LibraryRepository(db)
+        // Noms protégés du backup (+ défauts) → chargés avant de découper « HUNTR/X & … »
+        backup.artist_exceptions.filter { it.isNotBlank() }.forEach { n ->
+            db.artistExceptionDao().insert(com.novastats.app.data.db.entity.ArtistExceptionEntity(name = n.trim(), nameKey = TitleNormalizer.normalizeKey(n)))
+        }
+        library.loadArtistExceptions(seedDefaults = true)
 
         onProgress("Résolution de ${backup.songs.size} titres…")
         val trackBySongId = HashMap<Long, LibraryRepository.Resolved>(backup.songs.size * 2)

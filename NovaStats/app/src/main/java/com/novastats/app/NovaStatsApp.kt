@@ -49,6 +49,8 @@ class NovaStatsApp : Application() {
         // Icône du launcher = thème actif (15 activity-alias, un seul activé)
         // La bascule est reportée au passage en arrière-plan (sinon l'app se ferme) et désactivable dans Réglages
         com.novastats.app.ui.theme.IconSwitcher.install(this)
+        // 🔗 Noms protégés + recalcul unique des liens artistes / versions après la mise à jour
+        appScope.launch { runCatching { com.novastats.app.data.repository.RelinkJob.ensure(this@NovaStatsApp) } }
         appScope.launch {
             kotlinx.coroutines.flow.combine(settings.themeId, settings.dynamicIcon) { id, dyn -> if (dyn) id else com.novastats.app.ui.theme.NovaThemes.DEFAULT.id }
                 .collect { id -> com.novastats.app.ui.theme.IconSwitcher.request(id) }

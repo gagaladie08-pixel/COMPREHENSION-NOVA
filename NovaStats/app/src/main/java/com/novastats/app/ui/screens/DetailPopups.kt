@@ -178,11 +178,17 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
     var artists by remember { mutableStateOf("") }
     var album by remember { mutableStateOf<AlbumEntity?>(null) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
+    /** Répartition par version du groupe (original + remix feat. / versions avec invité) : titre → écoutes propres. */
+    var versions by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
+    var original by remember { mutableStateOf<TrackEntity?>(null) }
     val cert by remember { db.certificationDao().observe(trackId, EntityType.TRACK) }.collectAsStateWithLifecycle(initialValue = null)
 
     LaunchedEffect(trackId, period) {
         val t = db.trackDao().getById(trackId) ?: return@LaunchedEffect
         track = t
+        original = t.originalTrackId?.let { db.trackDao().getById(it) }
+        val linked = db.trackDao().versionsOf(trackId)
+        versions = if (linked.isEmpty()) emptyList() else listOf("Original" to db.trackDao().ownPlays(trackId)) + linked.map { v -> v.title.removePrefix(t.title).trim().trim('(', ')').ifBlank { v.title } to v.playCount }
         if (scoped) ps = db.trackDao().periodStats(trackId, range.fromIso, range.toIso)
         val ids = db.trackLinkDao().artistIdsForTrack(trackId).ifEmpty { listOf(t.artistId) }
         artists = ids.mapNotNull { db.artistDao().getById(it)?.name }.joinToString(", ")
@@ -208,7 +214,9 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
         Text(t.title, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp)
         Text(artists, color = theme.primary, fontWeight = FontWeight.SemiBold)
         album?.let { Text(it.title, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium) }
-        if (t.isRemix) Text("Version featuring — liée au titre original", color = theme.accent, style = MaterialTheme.typography.labelSmall)
+        val o = original
+        if (o != null) Text("Version liée à « ${o.title} » — ses écoutes comptent dans le total de l'original (classements, records, certifications)", color = theme.accent, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+        else if (t.isRemix) Text("Version featuring — original pas encore écouté", color = theme.accent, style = MaterialTheme.typography.labelSmall)
         PeriodChip(period, theme.primary)
         Spacer(Modifier.height(8.dp))
         if (scoped) {
@@ -221,6 +229,14 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
         } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
             StatPill(formatCount(t.playCount), "écoutes")
             StatPill(formatDuration(t.totalDurationMs), "temps cumulé", accent = theme.secondary)
+        }
+        if (versions.isNotEmpty()) {
+            PopupSection("🔗 Versions fusionnées")
+            Text(
+                "Ce total inclut ${versions.size - 1} version${if (versions.size > 2) "s" else ""} liée${if (versions.size > 2) "s" else ""} à ce titre (remix featuring / version avec invité). Répartition des ${formatCount(t.playCount)} écoutes :",
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+            )
+            versions.forEach { (label, n) -> PopupInfoRow(label, "${formatCount(n)} ▶" + if (t.playCount > 0) "  (${100 * n / t.playCount} %)" else "") }
         }
         PopupSection(if (scoped) "🏅 Certification (cumul all time)" else "🏅 Certification")
         val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }

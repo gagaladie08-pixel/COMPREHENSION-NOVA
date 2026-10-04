@@ -149,7 +149,7 @@ class RecordExplainer(private val db: NovaDatabase) {
             RecordCategory.TRACK -> {
                 val t = db.trackDao().getById(id) ?: return null
                 val artist = db.artistDao().getById(t.artistId)?.name ?: "?"
-                val all = db.trackDao().allPlayed().sortedByDescending { it.playCount }
+                val all = db.trackDao().allPlayed().filter { it.originalTrackId == null }.sortedByDescending { it.playCount }
                 val rank = all.indexOfFirst { it.trackId == id } + 1
                 val days = daysSince(t.firstPlayedAt).coerceAtLeast(1)
                 val perWeek = String.format(Locale.FRANCE, "%.1f", t.playCount * 7.0 / days)
@@ -163,6 +163,11 @@ class RecordExplainer(private val db: NovaDatabase) {
                         "Côté chiffres, « $name » ($artist) pèse ${t.playCount} écoutes depuis le ${dateOf(t.firstPlayedAt)}$rankTxt."
                     )
                 )
+                val linked = db.trackDao().versionsOf(id)
+                if (linked.isNotEmpty()) {
+                    val own = db.trackDao().ownPlays(id)
+                    sb.append(" Ce total inclut ${linked.size} version${if (linked.size > 1) "s" else ""} liée${if (linked.size > 1) "s" else ""} : original $own ▶, " + linked.joinToString(", ") { v -> "${v.title.removePrefix(t.title).trim().trim('(', ')')} ${v.playCount} ▶" } + ".")
+                }
                 db.certificationDao().current(id, EntityType.TRACK)?.let { c ->
                     val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
                     sb.append(" Il est certifié ${lvl?.emoji ?: ""} ${lvl?.label ?: c.level}${if (c.multiplier > 1) " ×${c.multiplier}" else ""}.")

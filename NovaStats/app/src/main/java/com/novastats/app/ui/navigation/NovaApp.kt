@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -100,6 +101,26 @@ fun NovaApp() {
 
     var globalSearch by remember { mutableStateOf(false) }
     if (globalSearch) GlobalSearchDialog { globalSearch = false }
+
+    // 🔗 Recalcul des liens & versions en cours (une fois après la mise à jour, ou à la demande) → boîte bloquante
+    val relink by com.novastats.app.data.repository.RelinkJob.state.collectAsStateWithLifecycle()
+    relink?.let { msg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            containerColor = theme.surface,
+            title = { androidx.compose.material3.Text("🔗 Mise à jour des données", color = theme.text, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    androidx.compose.material3.Text("Liens artistes, versions avec invité et remix sont recalculés à partir de tes écoutes. Ça ne prend qu'une fois.", color = theme.textSecondary)
+                    androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
+                    androidx.compose.material3.LinearProgressIndicator(androidx.compose.ui.Modifier.fillMaxWidth(), color = theme.primary)
+                    androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(8.dp))
+                    androidx.compose.material3.Text(msg, color = theme.text, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        )
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

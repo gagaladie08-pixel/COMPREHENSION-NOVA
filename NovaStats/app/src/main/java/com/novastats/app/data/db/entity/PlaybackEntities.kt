@@ -84,11 +84,13 @@ data class PendingQueueEntity(
 /** Table 9 — daily_plays : agrégat par (titre, jour) — base des snapshots et des périodes */
 @Entity(
     tableName = "daily_plays",
-    indices = [Index(value = ["track_id", "date"], unique = true), Index("date"), Index("artist_id"), Index("album_id")]
+    indices = [Index(value = ["track_id", "date"], unique = true), Index("date"), Index("artist_id"), Index("album_id"), Index("root_id")]
 )
 data class DailyPlayEntity(
     @PrimaryKey(autoGenerate = true) @ColumnInfo(name = "daily_id") val dailyId: Long = 0,
     @ColumnInfo(name = "track_id") val trackId: Long,
+    /** Titre racine du groupe (original d'un remix / d'une version avec invité, sinon le titre lui-même) : base des classements titres. */
+    @ColumnInfo(name = "root_id", defaultValue = "0") val rootId: Long = 0,
     @ColumnInfo(name = "artist_id") val artistId: Long,
     @ColumnInfo(name = "album_id") val albumId: Long? = null,
     val date: String,
