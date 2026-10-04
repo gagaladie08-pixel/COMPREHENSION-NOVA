@@ -904,6 +904,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.12.2" to listOf(
+        "\u2728 Nova Rewind devient vraiment anim\u00e9 : sc\u00e8ne vivante (halo qui d\u00e9rive + particules aux couleurs du th\u00e8me, voile des drapeaux pour Survivor), entr\u00e9e en cascade de chaque \u00e9l\u00e9ment, compteurs qui d\u00e9filent de 0, anneau lumineux qui tourne autour des pochettes, barres de progression anim\u00e9es (top 5, grands chiffres).",
+        "\ud83d\udc46 D\u00e9filement au doigt : glisse vers la gauche ou la droite pour changer de slide (la slide suit ton doigt), appui \u00e0 gauche pour reculer, \u00e0 droite pour avancer.",
+        "\u25b6\ufe0f Lecture automatique type story avec barre de progression segment\u00e9e et bouton \u23f8 / \u25b6 ; petit son discret et vibration l\u00e9g\u00e8re \u00e0 chaque slide (vibration selon ton r\u00e9glage).",
+        "\ud83d\udc48 Carte d'entr\u00e9e \u00ab Nova Rewind \u00bb anim\u00e9e sur l'Accueil."
+    ),
     "0.12.1" to listOf(
         "\ud83d\udcc8 Parcours hebdomadaire dans les fiches titre / artiste / album : meilleur rang, nombre de semaines class\u00e9es, semaines pass\u00e9es n\u00b01, date d'entr\u00e9e et de pic, puis les 14 derni\u00e8res semaines en bandeau avec la variation \u25b2 / \u25bc (donn\u00e9es Billboard d\u00e9j\u00e0 enregistr\u00e9es).",
         "\u23f1 Pr\u00e9visions : le prochain palier (certification ou statut Panth\u00e9on) avec les \u00e9coutes restantes, une barre de progression et une estimation en jours bas\u00e9e sur ton rythme des 14 derniers jours."
