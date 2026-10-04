@@ -669,7 +669,6 @@ interface TrackLinkDao {
     /** Fusion d'albums : les liens titre↔album de `from` passent sur `into`. */
     @Query("INSERT OR IGNORE INTO track_albums (track_id, album_id) SELECT track_id, :into FROM track_albums WHERE album_id = :from")
     suspend fun retargetAlbumLinks(from: Long, into: Long)
-    @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
     @Query("DELETE FROM track_albums WHERE track_id = :trackId AND album_id = :albumId") suspend fun unlinkTrackAlbum(trackId: Long, albumId: Long)
     @Query("DELETE FROM track_albums WHERE track_id = :trackId") suspend fun clearTrackAlbums(trackId: Long)
     @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
