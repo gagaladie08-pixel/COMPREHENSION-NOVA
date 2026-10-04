@@ -24,6 +24,8 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     data class Point(val date: String, val label: String, val position: Int?, val plays: Int?, val highlight: Boolean = false, val note: String? = null)
     data class Item(val type: String, val id: Long, val name: String, val detail: String, val imageUrl: String?, val highlight: Boolean = false)
+    /** Un classement de record détenu (#1, ex æquo compris) — fiche Most Records. */
+    data class Held(val def: RecordDef, val period: Period?, val category: RecordCategory, val sub: String?, val row: com.novastats.app.data.db.entity.RecordCacheEntity, val tied: Int)
     data class Story(
         val headline: String,
         val narrative: String,
@@ -31,7 +33,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         val timelineTitle: String? = null,
         val timeline: List<Point> = emptyList(),
         val itemsTitle: String? = null,
-        val items: List<Item> = emptyList()
+        val items: List<Item> = emptyList(),
+        /** Most Records : tous les classements détenus, groupés par famille dans la fiche. */
+        val held: List<Held> = emptyList()
     )
 
     private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
@@ -120,7 +124,10 @@ class RecordExplainer(private val db: NovaDatabase) {
         when (def.id) {
             "MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_TIME_AT_1", "MOST_CONSISTENT", "MOST_BLOCKED_TOP5",
             "BIGGEST_JUMP", "BIGGEST_FALL", "BIGGEST_COMEBACK", "BIGGEST_CLIMBER", "SLEEPER_HIT", "FASTEST_RISE", "LONGEST_ROAD",
-            "BIGGEST_PERIOD", "BIGGEST_DEBUT" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
+            "BIGGEST_PERIOD", "BIGGEST_DEBUT", "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
+            "PODIUM_SWEEP" -> podiumSweep(period ?: Period.WEEKLY, cat, sub, id, name)
+            "LONGEST_LISTENING_STREAK" -> listeningStreak(cat, id, name)
+            "MOST_RECORDS" -> mostRecords(cat, id, name)
             "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_AT_1", "MOST_DEBUT_1", "MOST_DEBUT_TOP10", "MOST_SIMULTANEOUS", "MOST_SUCCESSIVE_1" ->
                 ownerStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
             "FASTEST_CERT" -> fastestCert(cat, sub, id, name)
@@ -262,18 +269,53 @@ class RecordExplainer(private val db: NovaDatabase) {
                 )
             }
             "FASTEST_RISE", "LONGEST_ROAD" -> {
-                val target = if (def.id == "FASTEST_RISE") 3 else 1
-                val hit = s.firstOrNull { it.position <= target } ?: return Story(def.title, "$name n'a pas (encore) atteint ${if (target == 3) "le Top 3" else "le #1"} dans ce chart.")
+                val target = if (def.id == "FASTEST_RISE") RecordCatalog.zoneLimit(sub ?: "TOP3") else 1
+                val goal = if (def.id == "FASTEST_RISE") RecordCatalog.zoneLabel(sub ?: "TOP3") else "le #1"
+                val hit = s.firstOrNull { it.position <= target } ?: return Story(def.title, "$name n'a pas (encore) atteint $goal dans ce chart.")
                 val took = hit.periodIndex - first.periodIndex
-                val goal = if (target == 3) "le Top 3" else "le #1"
                 Story(
-                    (if (target == 3) "🏎️ " else "🛣️ ") + (if (took == 0) "$goal dès l'entrée" else "$goal après $took ${unit(p, took)}"),
+                    (if (def.id == "FASTEST_RISE") "🏎️ " else "🛣️ ") + (if (took == 0) "$goal dès l'entrée" else "$goal après $took ${unit(p, took)}"),
                     "$name est entré dans le $chart ${on(p, first.date)} à la ${pos(first.position)}. " +
-                        (if (took == 0) "Il a atteint $goal immédiatement, dès sa première apparition." else "Il lui a fallu $took ${unit(p, took)} pour atteindre $goal : c'est chose faite ${on(p, hit.date)} (${pos(hit.position)}, ${hit.plays} ▶). ") +
+                        (if (took == 0) "Il a atteint $goal immédiatement, dès sa première apparition (les entrées directes ne sont pas classées dans Fastest Rise : voir Debut #1 / Debut Top 10)." else "Il lui a fallu $took ${unit(p, took)} (périodes calendaires, absences comprises) pour atteindre $goal : c'est chose faite ${on(p, hit.date)} (${pos(hit.position)}, ${hit.plays} ▶). ") +
                         (if (took > 1) "Positions sur le chemin : " + s.filter { it.periodIndex in first.periodIndex..hit.periodIndex }.joinToString(" → ") { pos(it.position) } + "." else ""),
                     base + ("Objectif atteint" to "${on(p, hit.date)} · ${pos(hit.position)}") + ("Délai" to "$took ${unit(p, took)}"),
                     "Trajectoire (entrée et objectif en surbrillance)", points(p, s, { it.periodIndex == first.periodIndex || it.periodIndex == hit.periodIndex })
                 )
+            }
+            "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> {
+                val max = RecordCatalog.zoneLimit(sub); val zone = RecordCatalog.zoneLabel(sub)
+                val z = s.filter { it.position <= max }
+                if (z.size < 2) return Story(def.title, "$name n'a pas assez d'apparitions dans $zone du $chart pour ce record.")
+                val gaps = (1 until z.size).map { i -> Triple(z[i - 1], z[i], z[i].periodIndex - z[i - 1].periodIndex - 1) }
+                val returns = gaps.filter { it.third >= 1 }
+                val span = z.last().periodIndex - z.first().periodIndex + 1
+                val zoneFacts = base + ("Première fois dans $zone" to "${on(p, z.first().date)} · ${pos(z.first().position)}") + ("Dernière fois dans $zone" to "${on(p, z.last().date)} · ${pos(z.last().position)}") +
+                    ("Apparitions dans $zone" to "${z.size} ${unit(p, z.size)}") + ("Durée de vie dans $zone" to "$span ${unit(p, span)}") + ("Retours après absence" to "${returns.size}")
+                val note: (RecordAppearance) -> String? = { a -> returns.firstOrNull { it.second.periodIndex == a.periodIndex }?.let { "retour après ${it.third} ${unit(p, it.third)}" } }
+                when (def.id) {
+                    "LONGEST_LIFESPAN" -> Story(
+                        "⏱️ $span ${unit(p, span)} de vie dans $zone",
+                        "Entre sa première apparition dans $zone du $chart (${on(p, z.first().date)}, ${pos(z.first().position)}) et sa dernière (${on(p, z.last().date)}, ${pos(z.last().position)}), il s'est écoulé $span ${unit(p, span)}, absences comprises. " +
+                            "Sur cette durée, $name était effectivement dans $zone ${z.size} fois (${100 * z.size / span} %)" + (if (returns.isNotEmpty()) ", avec ${returns.size} ${plural(returns.size, "retour")} après absence (la plus longue : ${returns.maxOf { it.third }} ${unit(p, returns.maxOf { it.third })})." else ", sans jamais en sortir."),
+                        zoneFacts, "Trajectoire (première et dernière apparition dans $zone en surbrillance)", points(p, s, { it.periodIndex == z.first().periodIndex || it.periodIndex == z.last().periodIndex }, note)
+                    )
+                    "MOST_REENTRIES" -> Story(
+                        "↩️ ${returns.size} ${plural(returns.size, "retour")} dans $zone",
+                        "$name est revenu ${returns.size} fois dans $zone du $chart après au moins une période d'absence (un jour sans chart compte comme une absence). " +
+                            "Détail des retours : " + returns.joinToString(" ; ") { "${short(p, it.second.date)} (${pos(it.second.position)}) après ${it.third} ${unit(p, it.third)}" } + ".",
+                        zoneFacts, "Trajectoire (retours en surbrillance)", points(p, s, { a -> returns.any { it.second.periodIndex == a.periodIndex } }, note)
+                    )
+                    else -> {
+                        val best = returns.maxByOrNull { it.third } ?: return Story(def.title, "$name n'a jamais quitté $zone du $chart entre deux apparitions.")
+                        Story(
+                            "🕰️ De retour après ${best.third} ${unit(p, best.third)} d'absence",
+                            "$name avait quitté $zone du $chart après ${on(p, best.first.date)} (${pos(best.first.position)}). Il y est revenu ${on(p, best.second.date)}, à la ${pos(best.second.position)} avec ${best.second.plays} ▶ — soit ${best.third} ${unit(p, best.third)} sans y apparaître. " +
+                                "Contrairement à Biggest Comeback, seule la durée de l'absence compte ici, pas la remontée en places.",
+                            zoneFacts + ("Plus longue absence" to "${best.third} ${unit(p, best.third)} · ${short(p, best.first.date)} → ${short(p, best.second.date)}"),
+                            "Trajectoire (départ et retour en surbrillance)", points(p, s, { it.periodIndex == best.first.periodIndex || it.periodIndex == best.second.periodIndex }, note)
+                        )
+                    }
+                }
             }
             "BIGGEST_PERIOD" -> {
                 val best = s.maxBy { it.plays }
@@ -439,6 +481,93 @@ class RecordExplainer(private val db: NovaDatabase) {
             "$name compte ${items.size} ${plural(items.size, what)} ayant atteint la certification ${level?.emoji ?: ""} ${level?.label ?: levelName}" + (if (ids.size > items.size) " (sur ${ids.size} en bibliothèque)" else "") + " : " + items.joinToString(", ") { it.name } + ".",
             listOf("Certifiés ${level?.label ?: levelName}" to "${items.size}", "${what.replaceFirstChar { it.uppercase() }}s en bibliothèque" to "${ids.size}"),
             itemsTitle = "Les certifiés", items = items
+        )
+    }
+
+    /* ---------------- 29. Podium Sweep ---------------- */
+
+    private suspend fun podiumSweep(p: Period, cat: RecordCategory, sub: String?, id: Long, name: String): Story {
+        val z = RecordCatalog.sweepZoneOf(sub); val solo = RecordCatalog.sweepSolo(sub)
+        val chart = "chart ${p.frLabel.lowercase()}"
+        val all = allSeries(RecordCategory.TRACK, p)
+        val owned = if (cat == RecordCategory.ARTIST) db.trackLinkDao().trackIdsForArtist(id).toSet() else db.trackDao().ofAlbum(id).map { it.track.trackId }.toSet()
+        // Solo = un seul artiste (principal + liens de featuring), même règle que le moteur
+        val artistsOf = HashMap<Long, HashSet<Long>>()
+        db.trackDao().allPlayed().forEach { t -> artistsOf.getOrPut(t.trackId) { HashSet() }.add(t.artistId) }
+        db.trackLinkDao().allTrackArtists().forEach { artistsOf.getOrPut(it.trackId) { HashSet() }.add(it.artistId) }
+        fun isSolo(t: Long) = (artistsOf[t]?.size ?: 1) <= 1
+        val byDate = HashMap<String, HashMap<Int, Long>>()
+        for ((tid, s) in all) for (a in s) if (a.position <= z) byDate.getOrPut(a.date) { HashMap() }[a.position] = tid
+        val sweeps = byDate.entries.filter { (_, posMap) -> (1..z).all { pos -> posMap[pos]?.let { it in owned && (!solo || isSolo(it)) } == true } }.sortedBy { it.key }
+        if (sweeps.isEmpty()) return Story("🧹 Podium Sweep", "$name n'occupe plus l'intégralité du Top $z du $chart (les records seront recalculés à la prochaine écoute).")
+        val last = sweeps.last()
+        val items = (1..z).mapNotNull { place -> last.value[place]?.let { tid -> val (nm, img) = nameOf(EntityType.TRACK, tid); Item(EntityType.TRACK, tid, nm, "${pos(place)} ${on(p, last.key)}" + (if (isSolo(tid)) " · solo" else " · feat."), img, place == 1) } }
+        val mode = if (solo) "uniquement avec des titres solo (sans featuring)" else "feat. compris"
+        return Story(
+            "🧹 Top $z complet ${sweeps.size} fois",
+            "$name a occupé les $z premières places du $chart en même temps, $mode, pendant ${sweeps.size} ${unit(p, sweeps.size)} : " + sweeps.joinToString(", ") { short(p, it.key) } + ". " +
+                "Un balayage ne compte que si TOUTES les places de la zone lui appartiennent la même période — c'est voulu rare.",
+            listOf("Zone" to "Top $z · ${if (solo) "Solo" else "Standard"}", "Premier balayage" to on(p, sweeps.first().key), "Dernier balayage" to on(p, last.key), "Titres différents utilisés" to "${sweeps.flatMap { it.value.values }.toSet().size}"),
+            "Les périodes de balayage", sweeps.map { Point(it.key, short(p, it.key), 1, null, true, "Top $z complet") },
+            "Le dernier Top $z complet", items
+        )
+    }
+
+    /* ---------------- 28. Longest Listening Streak ---------------- */
+
+    private suspend fun listeningStreak(cat: RecordCategory, id: Long, name: String): Story {
+        val days = when (cat) {
+            RecordCategory.TRACK -> db.dailyPlayDao().seriesForTrack(id)
+            RecordCategory.ALBUM -> db.dailyPlayDao().seriesForAlbum(id)
+            RecordCategory.ARTIST -> db.dailyPlayDao().seriesForArtist(id)
+        }
+        val epoch = days.associate { Dates.parse(it.date).toEpochDay().toInt() to it }
+        val (len, start, end) = com.novastats.app.domain.RecordMath.longestDayStreak(epoch.keys) ?: return Story("🎧 Série d'écoute", "Aucune écoute enregistrée pour $name.")
+        val streakDays = (start..end).mapNotNull { epoch[it] }
+        val plays = streakDays.sumOf { it.playCount }
+        val today = Dates.today().toEpochDay().toInt()
+        val ongoing = end >= today - 1
+        val startIso = java.time.LocalDate.ofEpochDay(start.toLong()); val endIso = java.time.LocalDate.ofEpochDay(end.toLong())
+        val totalDays = days.size
+        return Story(
+            "🎧 $len jours d'affilée" + (if (ongoing) " (en cours)" else ""),
+            "$name a été écouté chaque jour, sans exception, du ${startIso.format(dayFmt)} au ${endIso.format(dayFmt)} : $len jours consécutifs, $plays écoutes sur la série (${if (len > 0) plays / len else 0} par jour en moyenne). " +
+                (if (ongoing) "La série est toujours en cours — une journée sans écoute la rompra." else "Elle s'est arrêtée le lendemain, ${endIso.plusDays(1).format(dayFmt)}, première journée sans écoute.") +
+                " Au total, $name a été écouté $totalDays jours différents.",
+            listOf("Début de la série" to startIso.format(dayFmt), "Fin de la série" to endIso.format(dayFmt), "Écoutes pendant la série" to "$plays", "Meilleure journée de la série" to (streakDays.maxByOrNull { it.playCount }?.let { "${Dates.parse(it.date).format(dayFmt)} · ${it.playCount} ▶" } ?: "—"), "Jours d'écoute au total" to "$totalDays"),
+            "Les jours de la série (écoutes par jour)", streakDays.map { Point(it.date, Dates.parse(it.date).format(shortFmt), null, it.playCount, true) }
+        )
+    }
+
+    /* ---------------- 30. Most Records (fiche détaillée) ---------------- */
+
+    private suspend fun mostRecords(cat: RecordCategory, id: Long, name: String): Story {
+        val rows = db.recordDao().heldNumberOnes(cat.dbName, id)
+        val held = rows.mapNotNull { r ->
+            val def = RecordCatalog.byId(r.recordType) ?: return@mapNotNull null
+            val period = Period.entries.firstOrNull { it.dbName == r.periodType }
+            val tied = db.recordDao().tiedAt(r.recordType, r.periodType, r.category, r.subcategory, r.value)
+            Held(def, period, cat, r.subcategory, r, tied)
+        }
+        if (held.isEmpty()) return Story("🏆 Palmarès", "$name ne détient actuellement aucun #1 de record.")
+        val byFamily = held.groupBy { RecordCatalog.groupOf[it.def.id] ?: com.novastats.app.domain.RecordGroup.TOTALS }
+        val byRecord = held.groupBy { it.def }.entries.sortedByDescending { it.value.size }
+        val byPeriod = held.groupBy { it.period }.entries.sortedByDescending { it.value.size }
+        val shared = held.count { it.tied > 1 }
+        val facts = ArrayList<Pair<String, String>>()
+        facts += "Records détenus" to "${held.size} (dont $shared ${plural(shared, "partagé")})"
+        facts += "Records différents" to "${byRecord.size} sur ${RecordCatalog.ALL.size - 1}"
+        byFamily.entries.sortedByDescending { it.value.size }.forEach { (g, l) -> facts += "${g.emoji} ${g.label}" to "${l.size}" }
+        byPeriod.forEach { (p, l) -> facts += "Période ${p?.frLabel ?: "sans période"}" to "${l.size}" }
+        val top = byRecord.first()
+        return Story(
+            "🏆 ${held.size} ${plural(held.size, "record")} détenus",
+            "$name est #1 de ${held.size} ${plural(held.size, "classement")} de records (chaque combinaison record × période × zone compte 1 ; les ex æquo comptent aussi). " +
+                "Son point fort : ${top.key.emoji} ${top.key.title} avec ${top.value.size} ${plural(top.value.size, "classement")}. " +
+                "Répartition par famille : " + byFamily.entries.sortedByDescending { it.value.size }.joinToString(", ") { "${it.value.size} ${it.key.label.lowercase()}" } + ". " +
+                (if (shared > 0) "$shared de ces records sont partagés avec au moins un autre élément à égalité. " else "") +
+                "La liste complète, groupée par famille, est ci-dessous — appuie sur un record pour ouvrir son classement.",
+            facts, held = held
         )
     }
 

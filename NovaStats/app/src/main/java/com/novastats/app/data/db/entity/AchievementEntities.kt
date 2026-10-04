@@ -115,7 +115,7 @@ data class PantheonHistoryEntity(
     @ColumnInfo(name = "play_count_at_status") val playCountAtStatus: Int
 )
 
-/** Table 24 — records_cache : résultats pré-calculés des 24 records */
+/** Table 24 — records_cache : résultats pré-calculés des 30 records */
 @Entity(
     tableName = "records_cache",
     indices = [Index(value = ["record_type", "period_type", "category", "subcategory"])]

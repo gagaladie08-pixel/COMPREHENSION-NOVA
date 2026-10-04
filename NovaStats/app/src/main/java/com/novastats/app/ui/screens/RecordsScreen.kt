@@ -81,7 +81,9 @@ fun RecordsScreen() {
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var page by remember { mutableStateOf<RecordDef?>(null) }
-    var entry by remember { mutableStateOf<RecordEntryRef?>(null) }
+    // Pile de fiches : depuis la fiche Most Records on ouvre les classements détenus, retour = fiche précédente
+    var entryStack by remember { mutableStateOf<List<RecordEntryRef>>(emptyList()) }
+    val entry = entryStack.lastOrNull()
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     // État de la page record (période / section / sous-filtre / scroll) conservé ici : la page quitte la composition
     // quand on ouvre une fiche d'entrée, sinon ses filtres repartaient à « Semaine / Titres » et en haut de liste.
@@ -91,15 +93,15 @@ fun RecordsScreen() {
 
     BackHandler(enabled = entry != null || page != null || searching) {
         when {
-            entry != null -> entry = null
+            entry != null -> entryStack = entryStack.dropLast(1)
             page != null -> page = null
             else -> { searching = false; query = "" }
         }
     }
 
     when {
-        entry != null -> RecordEntryPage(entry!!, onBack = { entry = null }, onEntity = { detail = it })
-        page != null -> RecordPage(page!!, pageState!!, onBack = { page = null }, onEntry = { entry = it })
+        entry != null -> RecordEntryPage(entry, onBack = { entryStack = entryStack.dropLast(1) }, onEntity = { detail = it }, onEntry = { entryStack = entryStack + it })
+        page != null -> RecordPage(page!!, pageState!!, onBack = { page = null }, onEntry = { entryStack = listOf(it) })
         else -> LazyColumn(Modifier.fillMaxSize().background(theme.background), state = mainList) {
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -130,7 +132,7 @@ fun RecordsScreen() {
                     )
                     Spacer(Modifier.height(8.dp))
                 }
-                item { RecordSearchResults(query) { entry = it } }
+                item { RecordSearchResults(query) { entryStack = listOf(it) } }
             } else {
                 item {
                     // Familles : puces horizontales façon niveaux de certification, avec le nombre de records
@@ -180,6 +182,8 @@ private fun groupColor(g: RecordGroup): Color {
         RecordGroup.SPEED -> NovaColors.Gold
         RecordGroup.TOTALS -> t.glowSecondary
         RecordGroup.DOMINATION -> Color(0xFF9B59B6)
+        RecordGroup.LISTENING -> Color(0xFF1ABC9C)
+        RecordGroup.PALMARES -> NovaColors.Gold
     }
 }
 
@@ -410,7 +414,7 @@ private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Pe
 /* ================================ 🧐 Page « pourquoi il est là » — spécifique à chaque record ================================ */
 
 @Composable
-private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (DetailTarget) -> Unit) {
+private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (DetailTarget) -> Unit, onEntry: (RecordEntryRef) -> Unit = {}) {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
     val def = ref.def; val row = ref.row
@@ -477,6 +481,45 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("📈 " + (st.timelineTitle ?: "Frise"), color)
                     Timeline(st.timeline, color)
+                }
+            }
+            if (st.held.isNotEmpty()) {
+                // 🏆 Most Records : tous les classements détenus, groupés par famille, chaque ligne ouvre le classement
+                val groups = st.held.groupBy { RecordCatalog.groupOf[it.def.id] ?: RecordGroup.TOTALS }.entries.sortedByDescending { it.value.size }
+                item { Box(Modifier.padding(horizontal = 16.dp)) { SectionTitle("🏆 Tous ses records (${st.held.size})", color) } }
+                groups.forEach { (g, list) ->
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${g.emoji} ${g.label}", color = groupColor(g), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            Text("${list.size}", color = groupColor(g), fontWeight = FontWeight.Black)
+                        }
+                    }
+                    items(list.size) { i ->
+                        val h = list[i]
+                        val subLabel = h.def.subs[h.category]?.firstOrNull { it.dbName == h.sub }?.label
+                        val ctx = listOfNotNull(h.period?.frLabel, subLabel).joinToString(" · ")
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp).clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.6f))
+                                .border(1.dp, groupColor(g).copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                                .clickable { onEntry(RecordEntryRef(h.def, h.period, h.category, h.sub, RecordRow(h.row, name, row.subtitle, row.imageUrl), rank = 1)) }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(h.def.emoji, fontSize = 20.sp, modifier = Modifier.width(30.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(h.def.title, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    listOfNotNull(ctx.ifBlank { null }, h.row.extraData, if (h.tied > 1) "ex æquo (${h.tied})" else null).joinToString(" · "),
+                                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(formatRecordValue(h.def, h.period, h.row.value), color = if (h.tied > 1) theme.textSecondary else NovaColors.Gold, fontWeight = FontWeight.Bold)
+                                h.row.valueDate?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
+                            }
+                            Text("›", color = theme.textSecondary, fontSize = 20.sp, modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
                 }
             }
             if (st.items.isNotEmpty()) {
@@ -553,7 +596,10 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
         RecordUnit.POSITIONS -> (if (def.id == "BIGGEST_FALL") "−" else "+") + "$n place${if (n > 1) "s" else ""}"
         RecordUnit.DURATION_MS -> RecordCatalog.formatDurationAdaptive(value.toLong())
         RecordUnit.TIMES -> "$n fois"
+        RecordUnit.DAYS -> "$n jour${if (n > 1) "s" else ""}"
         RecordUnit.COUNT -> when (def.id) {
+            "MOST_REENTRIES" -> "$n retour${if (n > 1) "s" else ""}"
+            "MOST_RECORDS" -> "$n record${if (n > 1) "s" else ""}"
             "MOST_CERTIFICATIONS" -> "$n certif${if (n > 1) "s" else ""}"
             "MOST_HOF", "MOST_GLOBAL" -> "$n entrée${if (n > 1) "s" else ""}"
             "MOST_SUCCESSIVE_1" -> "$n #1 successifs"

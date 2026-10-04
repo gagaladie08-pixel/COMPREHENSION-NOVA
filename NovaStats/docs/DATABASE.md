@@ -101,3 +101,20 @@ Service / Import ──► scrobbles (CONFIRMED)
   "Ignorer" mémorise la valeur brute comme confirmée (`REVIEW_IGNORE`).
 - Les index d'unicité (`scrobbles(track_id, started_at)`, `artists(name)`, `albums(title, artist_id)`) portent la
   règle "doublons ignorés à l'import" et la fusion des entités.
+
+## Records 25-30 (extension 0.10.0) — `records_cache`
+
+Aucun changement de schéma : nouvelles valeurs de `record_type` / `subcategory`, recalculées à chaque rebuild.
+
+| record_type | period_type | category | subcategory | value | value_date | extra_data |
+|---|---|---|---|---|---|---|
+| `LONGEST_LIFESPAN` | D/W/M/Y | TRACK/ARTIST/ALBUM | `TOP10` `TOP20` `TOP50` `CHART` | périodes (inclusif, absences comprises, ≥ 2 apparitions) | dernière apparition dans la zone | « du … au … · n apparitions » |
+| `MOST_REENTRIES` | D/W/M/Y | idem | idem | nb de retours (≥ 1 période manquée, sortie de la zone suffit) | dernier retour | plus longue absence |
+| `LONGEST_ABSENCE_RETURN` | D/W/M/Y | idem | idem | plus longue pause (périodes) | date du retour | « #a → #b après n » |
+| `LONGEST_LISTENING_STREAK` | NULL | idem | NULL | jours consécutifs (≥ 2) avec ≥ 1 écoute (`daily_plays`, artistes feat. compris) | fin de série | « du … au … (· en cours) » |
+| `PODIUM_SWEEP` | D/W/M/Y | ARTIST/ALBUM | `TOP3_SOLO` `TOP3_STD` `TOP5_*` `TOP10_*` | nb de périodes où toutes les places de la zone (chart titres) lui appartiennent ; Solo = aucun featuring | dernier balayage | premier balayage |
+| `MOST_RECORDS` | NULL | idem | NULL | nb de classements (record × période × catégorie × sous-section) où l'entité est #1 (ex æquo compris, `MOST_RECORDS` exclu) | — | répartition par famille |
+| `FASTEST_RISE` (modifié) | D/W/M/Y | idem | `TOP1` `TOP3` `TOP5` `TOP10` `TOP20` | périodes calendaires entre l'entrée et la 1ʳᵉ atteinte de la zone, **≥ 1** (entrées directes exclues) | date d'atteinte | « entré #a → #b » |
+
+Règles communes : un jour sans chart = une absence ; égalités départagées par la date la plus ancienne (`RecordsEngine.top`).
+Requêtes dédiées : `RecordDao.heldNumberOnes(category, entityId)` (fiche Most Records) et `RecordDao.tiedAt(...)` (ex æquo), `DailyPlayDao.allEntityDays()` (séries d'écoute).

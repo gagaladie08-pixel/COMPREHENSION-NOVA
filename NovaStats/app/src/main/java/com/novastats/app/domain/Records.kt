@@ -1,7 +1,7 @@
 package com.novastats.app.domain
 
 /*
- * 🏅 Les 24 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
+ * 🏅 Les 30 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
  * Kotlin pur : définitions + moteur de calcul sur des séries de positions, testable en JVM.
  */
 
@@ -14,7 +14,7 @@ enum class RecordCategory(val dbName: String, val label: String, val emoji: Stri
 data class RecordSub(val dbName: String, val label: String)
 
 /** Type d'unité pour l'affichage de la valeur. */
-enum class RecordUnit { PERIODS, COUNT, PLAYS, POSITIONS, DURATION_MS, TIMES }
+enum class RecordUnit { PERIODS, COUNT, PLAYS, POSITIONS, DURATION_MS, TIMES, DAYS }
 
 /**
  * Définition d'un record.
@@ -39,12 +39,14 @@ data class RecordDef(
 
 /** Familles de records (onglet Records : puces horizontales façon niveaux de certification). */
 enum class RecordGroup(val emoji: String, val label: String, val description: String) {
+    PALMARES("🏆", "Palmarès", "La synthèse : qui détient le plus de #1 dans tous les classements de records"),
     DURATION("⏳", "Durée dans le chart", "Combien de temps un élément est resté classé, dans le Top 10, au #1…"),
     MOVEMENT("📈", "Mouvements de position", "Les plus grands bonds, chutes, retours et ascensions"),
     DEBUT("🚀", "Débuts", "Les entrées les plus fortes dans le chart"),
     SPEED("⚡", "Vitesse", "Les certifications et statuts Panthéon atteints le plus vite"),
     TOTALS("🧮", "Cumuls", "Les plus gros volumes : écoutes, certifications, Hall of Fame, Global, multi-charts"),
-    DOMINATION("🎼", "Domination", "Les artistes / albums qui occupent le chart avec plusieurs titres à la fois")
+    DOMINATION("🎼", "Domination", "Les artistes / albums qui occupent le chart avec plusieurs titres à la fois"),
+    LISTENING("🎧", "Écoute", "Les séries d'écoute, indépendantes des charts : jours consécutifs avec au moins une écoute")
 }
 
 object RecordCatalog {
@@ -58,7 +60,13 @@ object RecordCatalog {
         "FASTEST_CERT" to RecordGroup.SPEED, "FASTEST_PANTHEON" to RecordGroup.SPEED,
         "BIGGEST_PERIOD" to RecordGroup.TOTALS, "MOST_CERTIFICATIONS" to RecordGroup.TOTALS, "MOST_HOF" to RecordGroup.TOTALS, "MOST_GLOBAL" to RecordGroup.TOTALS, "MULTI_CHART" to RecordGroup.TOTALS,
         "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
-        "MOST_SIMULTANEOUS" to RecordGroup.DOMINATION, "MOST_SUCCESSIVE_1" to RecordGroup.DOMINATION
+        "MOST_SIMULTANEOUS" to RecordGroup.DOMINATION, "MOST_SUCCESSIVE_1" to RecordGroup.DOMINATION,
+        // 25-30 (extension)
+        "LONGEST_LIFESPAN" to RecordGroup.DURATION,
+        "MOST_REENTRIES" to RecordGroup.MOVEMENT, "LONGEST_ABSENCE_RETURN" to RecordGroup.MOVEMENT,
+        "LONGEST_LISTENING_STREAK" to RecordGroup.LISTENING,
+        "PODIUM_SWEEP" to RecordGroup.DOMINATION,
+        "MOST_RECORDS" to RecordGroup.PALMARES
     )
     fun inGroup(g: RecordGroup): List<RecordDef> = groupOf.filterValues { it == g }.keys.mapNotNull { id -> ALL.firstOrNull { it.id == id } }
 
@@ -80,6 +88,17 @@ object RecordCatalog {
     val zones = listOf(RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("ALL", "🌍 Top Global"))
     val consistencySubs = listOf(RecordSub("TOP5", "🏆 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("CHART", "📊 Total Chart"))
     val multiChartLevels = listOf(RecordSub("DWMY", "🌍 D+W+M+Y"), RecordSub("DWM", "🔥 D+W+M"), RecordSub("DW", "⚡ D+W"), RecordSub("WM", "⚡ W+M"), RecordSub("MY", "⚡ M+Y"))
+    /** Zones des records de longévité / retours (25-27) : Top 10, Top 20, Top 50, chart complet. */
+    val lifespanZones = listOf(RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("CHART", "🌍 Chart"))
+    fun zoneLimit(sub: String?): Int = when (sub) { "TOP1" -> 1; "TOP3" -> 3; "TOP5" -> 5; "TOP10" -> 10; "TOP20" -> 20; "TOP50" -> 50; else -> Int.MAX_VALUE }
+    fun zoneLabel(sub: String?): String = when (sub) { "TOP1" -> "le #1"; "TOP3" -> "le Top 3"; "TOP5" -> "le Top 5"; "TOP10" -> "le Top 10"; "TOP20" -> "le Top 20"; "TOP50" -> "le Top 50"; else -> "le chart" }
+    /** Sections de Fastest Rise (16) : la zone à atteindre. */
+    val riseZones = listOf(RecordSub("TOP1", "👑 Top 1"), RecordSub("TOP3", "🥉 Top 3"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"))
+    /** Podium Sweep (29) : zone × mode (Solo = uniquement des titres sans featuring ; Standard = feat. compris). */
+    val sweepZones = listOf("TOP3" to "Top 3", "TOP5" to "Top 5", "TOP10" to "Top 10")
+    val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }
+    fun sweepZoneOf(sub: String?): Int = zoneLimit(sub?.substringBefore("_"))
+    fun sweepSolo(sub: String?): Boolean = sub?.endsWith("_SOLO") == true
     val globalSubs = listOf(RecordSub("TRIPLE_DEBUT", "🌍 Triple Debut"), RecordSub("LEGENDARY_RUN", "🏅 Legendary Run"), RecordSub("ALL", "🌍 All Global"))
 
     val ALL: List<RecordDef> = listOf(
@@ -103,7 +122,8 @@ object RecordCatalog {
         RecordDef(14, "MOST_GLOBAL", "🌍", "Most Global Entries", "Le plus d'entrées Global (Triple Debut, Legendary Run)", emptyList(), all3,
             mapOf(RecordCategory.TRACK to globalSubs, RecordCategory.ARTIST to globalSubs, RecordCategory.ALBUM to globalSubs), RecordUnit.COUNT, screen = "HOF_GLOBAL"),
         RecordDef(15, "BIGGEST_COMEBACK", "🔄", "Biggest Comeback", "Plus grande remontée lors d'un retour après absence (5 j / 3 sem. / 2 mois / 1 an)", chartPeriods, all3, unit = RecordUnit.POSITIONS),
-        RecordDef(16, "FASTEST_RISE", "🏎️", "Fastest Rise", "Top 3 atteint le plus vite depuis l'entrée dans le chart", chartPeriods, all3, ascending = true),
+        RecordDef(16, "FASTEST_RISE", "🏎️", "Fastest Rise", "Zone (Top 1 / 3 / 5 / 10 / 20) atteinte le plus vite après l'entrée dans le chart — entrées directes exclues", chartPeriods, all3,
+            mapOf(RecordCategory.TRACK to riseZones, RecordCategory.ARTIST to riseZones, RecordCategory.ALBUM to riseZones), ascending = true),
         RecordDef(17, "MOST_CONSISTENT", "🧱", "Most Consistent", "Plus longue série consécutive dans le Top 5 / Top 10 / chart", chartPeriods, all3,
             mapOf(RecordCategory.TRACK to consistencySubs, RecordCategory.ARTIST to consistencySubs, RecordCategory.ALBUM to consistencySubs)),
         RecordDef(18, "BIGGEST_JUMP", "⬆️", "Biggest Jump", "Plus grande progression en une seule période", chartPeriods, all3, unit = RecordUnit.POSITIONS, screen = "JUMP_FALL"),
@@ -116,7 +136,18 @@ object RecordCatalog {
         RecordDef(22, "MOST_BLOCKED_TOP5", "🚧", "Most Weeks Blocked at Top 5", "Le plus de périodes dans le Top 5 sans jamais atteindre le #1", chartPeriods, all3),
         RecordDef(23, "MOST_SIMULTANEOUS", "🎯", "Most Simultaneous Songs", "Le plus de titres en même temps dans une zone du chart", chartPeriods, artistAlbum,
             mapOf(RecordCategory.ARTIST to songsAlbums.flatMap { s -> zones.map { z -> RecordSub("${s.dbName}_${z.dbName}", "${s.label} · ${z.label}") } }, RecordCategory.ALBUM to zones), RecordUnit.COUNT),
-        RecordDef(24, "MOST_SUCCESSIVE_1", "🔁", "Most Successive #1", "Le plus de #1 successifs avec des titres différents, sans interruption", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT)
+        RecordDef(24, "MOST_SUCCESSIVE_1", "🔁", "Most Successive #1", "Le plus de #1 successifs avec des titres différents, sans interruption", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
+        // ---- Extension 25-30 ----
+        RecordDef(25, "LONGEST_LIFESPAN", "⏱️", "Longest Lifespan", "Plus longue durée entre la première et la dernière apparition dans une zone du chart, absences comprises", chartPeriods, all3,
+            mapOf(RecordCategory.TRACK to lifespanZones, RecordCategory.ARTIST to lifespanZones, RecordCategory.ALBUM to lifespanZones)),
+        RecordDef(26, "MOST_REENTRIES", "↩️", "Most Re-Entries", "Le plus de retours dans une zone du chart après au moins une période d'absence", chartPeriods, all3,
+            mapOf(RecordCategory.TRACK to lifespanZones, RecordCategory.ARTIST to lifespanZones, RecordCategory.ALBUM to lifespanZones), RecordUnit.COUNT),
+        RecordDef(27, "LONGEST_ABSENCE_RETURN", "🕰️", "Longest Absence Return", "Retour dans une zone du chart après la plus longue absence (en périodes)", chartPeriods, all3,
+            mapOf(RecordCategory.TRACK to lifespanZones, RecordCategory.ARTIST to lifespanZones, RecordCategory.ALBUM to lifespanZones)),
+        RecordDef(28, "LONGEST_LISTENING_STREAK", "🎧", "Longest Listening Streak", "Plus longue série de jours consécutifs avec au moins une écoute (séries en cours comprises)", emptyList(), all3, unit = RecordUnit.DAYS),
+        RecordDef(29, "PODIUM_SWEEP", "🧹", "Podium Sweep", "Un même artiste / album occupe TOUTES les places du Top 3 / 5 / 10 des titres en même temps — nombre de périodes", chartPeriods, artistAlbum,
+            mapOf(RecordCategory.ARTIST to sweepSubs, RecordCategory.ALBUM to sweepSubs)),
+        RecordDef(30, "MOST_RECORDS", "🏆", "Most Records", "Le plus de #1 détenus dans l'ensemble des classements de records (record × période × zone) — ex æquo compris", emptyList(), all3, unit = RecordUnit.COUNT)
     )
 
     fun byId(id: String): RecordDef? = ALL.firstOrNull { it.id == id }
@@ -269,4 +300,78 @@ object RecordMath {
     }
 
     data class NumberOne(val periodIndex: Int, val date: String, val entityId: Long, val ownerIds: Set<Long>)
+
+    /* ---------------- 25-28 : longévité, retours, absences, séries d'écoute ---------------- */
+
+    /** Apparitions dans la zone (position ≤ [maxPosition]). */
+    fun inZone(series: List<RecordAppearance>, maxPosition: Int) = series.filter { it.position <= maxPosition }
+
+    /**
+     * 25. Longest Lifespan : périodes écoulées (inclusif, absences comprises) entre la première et la dernière apparition
+     * dans la zone. Minimum 2 apparitions (une apparition isolée = 1 période, non classée).
+     */
+    fun lifespan(series: List<RecordAppearance>, maxPosition: Int): RecordResult? {
+        val z = inZone(series, maxPosition)
+        if (z.size < 2) return null
+        val span = z.last().periodIndex - z.first().periodIndex + 1
+        return RecordResult(0, span.toDouble(), z.last().date, "du ${z.first().date} au ${z.last().date} · ${z.size} apparitions")
+    }
+
+    /** 26. Most Re-Entries : nombre de retours dans la zone après ≥ 1 période manquée (jour sans chart = absence). */
+    fun reentries(series: List<RecordAppearance>, maxPosition: Int): RecordResult? {
+        val z = inZone(series, maxPosition)
+        var n = 0; var lastReturn: String? = null; var longest = 0
+        for (i in 1 until z.size) {
+            val gap = z[i].periodIndex - z[i - 1].periodIndex - 1
+            if (gap >= 1) { n++; lastReturn = z[i].date; if (gap > longest) longest = gap }
+        }
+        return if (n > 0) RecordResult(0, n.toDouble(), lastReturn, "dernier retour le $lastReturn · plus longue absence $longest") else null
+    }
+
+    /** 27. Longest Absence Return : plus longue pause (en périodes) entre deux apparitions consécutives dans la zone. */
+    fun longestAbsence(series: List<RecordAppearance>, maxPosition: Int): RecordResult? {
+        val z = inZone(series, maxPosition)
+        var best: RecordResult? = null
+        for (i in 1 until z.size) {
+            val gap = z[i].periodIndex - z[i - 1].periodIndex - 1
+            if (gap >= 1 && (best == null || gap > best.value)) best = RecordResult(0, gap.toDouble(), z[i].date, "#${z[i - 1].position} → #${z[i].position} après $gap périodes d'absence")
+        }
+        return best
+    }
+
+    /**
+     * 16. Fastest Rise (nouvelle règle) : périodes calendaires entre l'entrée dans le chart et la première atteinte de la
+     * zone ; les entrées directes (0) sont exclues.
+     */
+    fun fastestRise(series: List<RecordAppearance>, target: Int): RecordResult? {
+        val (n, d) = periodsToReach(series, target) ?: return null
+        return if (n >= 1) RecordResult(0, n.toDouble(), d, "entré #${series.first().position} → #${series.first { it.position <= target }.position}") else null
+    }
+
+    /** 28. Plus longue série de jours consécutifs (jours epoch triés, dédoublonnés) : (longueur, jour de début, jour de fin). */
+    fun longestDayStreak(days: Collection<Int>): Triple<Int, Int, Int>? {
+        val sorted = days.toSortedSet()
+        if (sorted.isEmpty()) return null
+        var best = 1; var bestStart = sorted.first(); var bestEnd = sorted.first()
+        var cur = 1; var start = sorted.first(); var prev = sorted.first()
+        for (d in sorted.drop(1)) {
+            if (d == prev + 1) cur++ else { cur = 1; start = d }
+            if (cur > best) { best = cur; bestStart = start; bestEnd = d }
+            prev = d
+        }
+        return Triple(best, bestStart, bestEnd)
+    }
+
+    /**
+     * 29. Podium Sweep — pour une zone complète (liste des titres aux places 1..N) : propriétaires qui balaient la zone.
+     * Standard = chaque titre appartient au propriétaire (feat. compris) ; Solo = en plus, chaque titre est sans featuring.
+     * @return (propriétaires standard, propriétaires solo)
+     */
+    fun sweepOwners(tracks: List<Long>, owners: (Long) -> Set<Long>, solo: (Long) -> Boolean): Pair<Set<Long>, Set<Long>> {
+        if (tracks.isEmpty()) return emptySet<Long>() to emptySet()
+        var common: Set<Long> = owners(tracks.first())
+        for (t in tracks.drop(1)) { common = common intersect owners(t); if (common.isEmpty()) break }
+        val allSolo = tracks.all(solo)
+        return common to (if (allSolo) common else emptySet())
+    }
 }

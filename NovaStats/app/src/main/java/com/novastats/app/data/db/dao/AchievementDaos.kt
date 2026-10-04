@@ -229,6 +229,33 @@ interface RecordDao {
     )
     suspend fun search(q: String): List<RecordRow>
 
+    /**
+     * 🏆 Most Records — tous les classements (record × période × catégorie × sous-section) où l'entité est #1
+     * (ex æquo compris : même valeur que le meilleur ; records « ascendants » = plus petite valeur). Most Records exclu.
+     */
+    @Query(
+        """
+        SELECT r.* FROM records_cache r
+        WHERE r.category = :category AND r.entity_id = :entityId AND r.record_type != 'MOST_RECORDS'
+          AND r.value = (SELECT CASE WHEN r.record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_RISE') THEN MIN(x.value) ELSE MAX(x.value) END
+                         FROM records_cache x
+                         WHERE x.record_type = r.record_type AND IFNULL(x.period_type, '') = IFNULL(r.period_type, '')
+                           AND x.category = r.category AND IFNULL(x.subcategory, '') = IFNULL(r.subcategory, ''))
+        ORDER BY r.record_type, r.period_type, r.subcategory
+        """
+    )
+    suspend fun heldNumberOnes(category: String, entityId: Long): List<RecordCacheEntity>
+
+    /** Nombre d'entités à égalité au #1 d'un classement. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM records_cache x
+        WHERE x.record_type = :type AND IFNULL(x.period_type, '') = IFNULL(:period, '') AND x.category = :category AND IFNULL(x.subcategory, '') = IFNULL(:sub, '')
+          AND x.value = :value
+        """
+    )
+    suspend fun tiedAt(type: String, period: String?, category: String, sub: String?, value: Double): Int
+
     @Query("SELECT COUNT(*) FROM records_cache") fun countFlow(): Flow<Int>
     @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
     @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>
