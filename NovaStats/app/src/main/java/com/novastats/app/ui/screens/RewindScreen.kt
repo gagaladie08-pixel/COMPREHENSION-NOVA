@@ -387,14 +387,13 @@ private fun Celebration(modifier: Modifier = Modifier, pieces: Int = 80) {
             val t = ((p * (0.6f + s[2] * 0.8f)) + s[5]) % 1f
             val x = s[0] * w + sin(t * 6.28f + s[4] * 6.28f) * 70f
             val y = -60f + t * (h + 120f)
-            val rot = t * 720f + s[4] * 360f
+            // « Papillon » : la largeur respire pour simuler la rotation du confetti
+            val spin = abs(sin(t * 18.84f + s[4] * 6.28f))
             val a = ((1f - t) * 0.95f).coerceIn(0f, 1f)
             val col = palette[(s[3].toInt() % palette.size)]
-            val pw = 5f + s[1] * 7f
+            val pw = (5f + s[1] * 7f) * (0.35f + 0.65f * spin) + 1.5f
             val ph = 9f + s[1] * 13f
-            rotate(rot, x, y) {
-                drawRoundRect(color = col.copy(alpha = a), topLeft = Offset(x, y), size = Size(pw, ph), cornerRadius = CornerRadius(2f, 2f))
-            }
+            drawRoundRect(color = col.copy(alpha = a), topLeft = Offset(x, y), size = Size(pw, ph), cornerRadius = CornerRadius(2f, 2f))
         }
     }
 }
