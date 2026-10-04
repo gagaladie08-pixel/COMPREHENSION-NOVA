@@ -69,8 +69,11 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE track_id = :id")
     suspend fun getById(id: Long): TrackEntity?
 
-    @Query("SELECT * FROM tracks WHERE title = :title AND artist_id = :artistId LIMIT 1")
+    @Query("SELECT * FROM tracks WHERE artist_id = :artistId AND title = :title COLLATE NOCASE LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artistId: Long): TrackEntity?
+    /** Fusion : les versions de [from] suivent la cible (ou son original). */
+    @Query("UPDATE tracks SET original_track_id = :root WHERE original_track_id = :from") suspend fun repointVersions(from: Long, root: Long?)
+    @Query("UPDATE tracks SET original_track_id = NULL WHERE track_id = :id") suspend fun detachRoot(id: Long)
 
     @Query("SELECT COUNT(*) FROM tracks")
     fun countFlow(): Flow<Int>
@@ -531,10 +534,10 @@ interface AlbumDao {
     @Query("SELECT * FROM albums WHERE album_id = :id")
     suspend fun getById(id: Long): AlbumEntity?
 
-    @Query("SELECT * FROM albums WHERE title = :title AND artist_id = :artistId LIMIT 1")
+    @Query("SELECT * FROM albums WHERE artist_id = :artistId AND title = :title COLLATE NOCASE LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artistId: Long): AlbumEntity?
     /** Règle 13 : albums homonymes appartenant à l'un des artistes du titre. */
-    @Query("SELECT * FROM albums WHERE title = :title AND artist_id IN (:artistIds)")
+    @Query("SELECT * FROM albums WHERE artist_id IN (:artistIds) AND title = :title COLLATE NOCASE")
     suspend fun findByTitleAndArtists(title: String, artistIds: List<Long>): List<AlbumEntity>
     /** Nombre de titres distincts de l'album créditant cet artiste (principal ou invité). */
     @Query("SELECT COUNT(DISTINCT t.track_id) FROM tracks t JOIN track_artists ta ON ta.track_id = t.track_id WHERE t.album_id = :albumId AND ta.artist_id = :artistId")
@@ -544,7 +547,7 @@ interface AlbumDao {
     suspend fun trackArtistPairs(albumId: Long): List<TrackArtistPair>
     @Query("UPDATE albums SET artist_id = :artistId WHERE album_id = :albumId") suspend fun setOwner(albumId: Long, artistId: Long)
     /** Album partagé (sans propriétaire) portant ce titre. */
-    @Query("SELECT * FROM albums WHERE title = :title AND artist_id IS NULL LIMIT 1")
+    @Query("SELECT * FROM albums WHERE artist_id IS NULL AND title = :title COLLATE NOCASE LIMIT 1")
     suspend fun findShared(title: String): AlbumEntity?
     @Query("SELECT * FROM albums WHERE artist_id IS NULL")
     suspend fun allShared(): List<AlbumEntity>
@@ -568,6 +571,19 @@ interface AlbumDao {
     suspend fun propagateCoverToTracks(albumId: Long, url: String, source: String)
     @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND (cover_source IS NULL OR cover_source != 'USER')")
     suspend fun overwriteCoverOfTracks(albumId: Long, url: String, source: String)
+    /** Tous les titres d'un album portent la pochette de l'album (sauf pochette choisie par l'utilisateur) — après fusions / déplacements. */
+    @Query(
+        """
+        UPDATE tracks SET
+            cover_url = (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id),
+            cover_source = (SELECT a.cover_source FROM albums a WHERE a.album_id = tracks.album_id)
+        WHERE album_id IS NOT NULL
+          AND (cover_source IS NULL OR cover_source != 'USER')
+          AND (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id) IS NOT NULL
+          AND IFNULL(cover_url, '') != (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id)
+        """
+    )
+    suspend fun alignTrackCovers(): Int
 
     @Query("SELECT COUNT(*) FROM albums")
     fun countFlow(): Flow<Int>

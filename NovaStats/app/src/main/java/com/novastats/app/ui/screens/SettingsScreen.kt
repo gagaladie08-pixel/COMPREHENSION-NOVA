@@ -904,6 +904,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.11.4" to listOf(
+        "🩹 Éditeur — fusions qui « ne faisaient rien » : (1) une écoute journalisée deux fois au même instant sous les deux titres bloquait toute la fusion (contrainte d'unicité) → dédoublonnée ; (2) un lot est traité paire par paire, un échec n'annule plus les autres et le message indique lequel ; (3) le doublon renaissait à l'écoute suivante (« Can't Stop the High » / « …The High ») → la fusion est mémorisée comme correction et les recherches de titres/albums ignorent la casse.",
+        "🩹 Les versions liées (« (with X) », remix) suivent le titre conservé lors d'une fusion ; les caches de résolution sont vidés après chaque action de l'éditeur.",
+        "🖼️ Pochettes : tous les titres d'un album prennent la pochette de l'album à chaque recalcul (après fusions, déplacements, albums multi-artistes) — sauf pochette choisie par toi. Un titre pouvait garder la pochette trouvée seul avant que son album ne soit résolu, ou celle d'un ancien album."
+    ),
     "0.11.3" to listOf(
         "🩹 Fiche album : les versions d'un titre (« Free (with Jinu) », « ExtraL (with Doechii) », remix lié) n'apparaissent plus en double sous leur original. Une ligne par titre, écoutes cumulées (comme dans les classements), artistes réunis (« Rumi, Jinu »). Le compteur « titres écoutés » suit la même règle.",
         "ℹ️ Deux titres non liés (ex. « EXTANCY » et « EXTANCY (Wumuti&Rui) ») restent séparés : fusionne-les dans l'Éditeur si c'est le même morceau."

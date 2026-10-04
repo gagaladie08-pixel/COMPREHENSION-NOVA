@@ -39,13 +39,14 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     private suspend fun <T> perform(message: String, rebuild: Boolean, block: suspend () -> T): T {
         _busy.value = true
         try {
-            val r = block()
+            val r = runCatching { block() }
+            // Les caches de résolution peuvent pointer vers des entités fusionnées/supprimées → toujours vidés
+            library?.clearCaches()
+            // Recalcul même en cas d'échec partiel (lot de fusions) pour ne jamais laisser des stats incohérentes
             if (rebuild) { _status.value = "$message · recalcul…"; rebuilder.rebuildAll(fullBillboard = true) }
+            r.onFailure { t -> _status.value = "❌ ${t.message ?: t.javaClass.simpleName}"; throw t }
             _status.value = "✅ $message"
-            return r
-        } catch (t: Throwable) {
-            _status.value = "❌ ${t.message ?: t.javaClass.simpleName}"
-            throw t
+            return r.getOrThrow()
         } finally { _busy.value = false }
     }
 
@@ -156,21 +157,32 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     }
 
     suspend fun mergeAlbumsBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) d'albums", rebuild = true) {
-        db.withTransaction {
-            for ((from, into) in pairs) {
-                if (from == into) continue
-                val a = db.albumDao().getById(from) ?: continue
-                val b = db.albumDao().getById(into) ?: continue
-                mergeAlbumsInternal(from, into)
-                log(Type.MERGE, "ALBUM", from, a.title, b.title, extra = into.toString())
-            }
+        // Une transaction PAR paire : un échec n'annule pas les autres fusions
+        val errors = ArrayList<String>()
+        for ((from, into) in pairs) {
+            if (from == into) continue
+            val a = db.albumDao().getById(from) ?: continue
+            val b = db.albumDao().getById(into) ?: continue
+            runCatching { db.withTransaction { mergeAlbumsInternal(from, into); log(Type.MERGE, "ALBUM", from, a.title, b.title, extra = into.toString()) } }
+                .onFailure { errors += "${a.title} : ${it.message ?: it.javaClass.simpleName}" }
         }
+        if (errors.isNotEmpty()) error("${pairs.size - errors.size} fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
     }
 
     private suspend fun mergeAlbumsInternal(from: Long, into: Long) {
+        val a = db.albumDao().getById(from); val b = db.albumDao().getById(into)
         db.trackDao().moveAlbum(from, into)
         db.scrobbleDao().moveAlbum(from, into)
+        db.trackLinkDao().retargetAlbumLinks(from, into)
         db.trackLinkDao().clearAlbumLinks(from)
+        if (a != null && b != null) {
+            db.albumDao().fillCover(into, a.coverUrl, a.coverSource)
+            // Mémorisé : le prochain passage de ce nom d'album retombe sur la cible (sinon le doublon renaît à la prochaine écoute)
+            if (TitleNormalizer.normalizeKey(a.title) != TitleNormalizer.normalizeKey(b.title) || a.title != b.title) {
+                saveCorrection(a.title, b.title, "ALBUM")
+                if (a.titleRaw != a.title) saveCorrection(a.titleRaw, b.title, "ALBUM")
+            }
+        }
         db.albumDao().delete(from)
     }
 
@@ -185,24 +197,37 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     }
 
     suspend fun mergeTracksBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) de titres", rebuild = true) {
-        db.withTransaction {
-            for ((from, into) in pairs) {
-                if (from == into) continue
-                val a = db.trackDao().getById(from) ?: continue
-                val b = db.trackDao().getById(into) ?: continue
-                mergeTracksInternal(from, into)
-                log(Type.MERGE, "TRACK", from, a.title, b.title, extra = into.toString())
-            }
+        // Une transaction PAR paire : un échec n'annule pas les autres fusions
+        val errors = ArrayList<String>()
+        for ((from, into) in pairs) {
+            if (from == into) continue
+            val a = db.trackDao().getById(from) ?: continue
+            val b = db.trackDao().getById(into) ?: continue
+            runCatching { db.withTransaction { mergeTracksInternal(from, into); log(Type.MERGE, "TRACK", from, a.title, b.title, extra = into.toString()) } }
+                .onFailure { errors += "${a.title} : ${it.message ?: it.javaClass.simpleName}" }
         }
+        if (errors.isNotEmpty()) error("${pairs.size - errors.size} fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
     }
 
     private suspend fun mergeTracksInternal(from: Long, into: Long) {
+        val source = db.trackDao().getById(from)
+        var target = db.trackDao().getById(into) ?: error("Titre cible introuvable")
+        // Liens de versions : si la cible était une version du doublon, elle devient racine ; les versions du doublon suivent
+        if (target.originalTrackId == from) { db.trackDao().detachRoot(into); target = target.copy(originalTrackId = null) }
+        db.trackDao().repointVersions(from, target.originalTrackId ?: into)
+        // Même écoute journalisée deux fois (même instant) → une seule, puis transfert (UNIQUE track_id + started_at)
+        db.scrobbleDao().dropClashing(from, into)
         db.scrobbleDao().moveTrack(from, into)
         // Les artistes du doublon (featurings) rejoignent la cible
-        val target = db.trackDao().getById(into)
-        db.trackLinkDao().artistIdsForTrack(from).forEach { db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = into, artistId = it, isPrimary = it == target?.artistId)) }
+        db.trackLinkDao().artistIdsForTrack(from).forEach { db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = into, artistId = it, isPrimary = it == target.artistId)) }
         db.trackLinkDao().clearTrackArtists(from)
         db.trackLinkDao().clearTrackAlbums(from)
+        if (source != null) {
+            if (target.coverUrl == null && source.coverUrl != null) db.trackDao().update(target.copy(coverUrl = source.coverUrl, coverSource = source.coverSource))
+            // Mémorisé : la prochaine écoute arrivant sous l'ancien libellé retombe sur la cible (sinon le doublon renaît)
+            if (source.title != target.title) saveCorrection(source.title, target.title, "TITLE")
+            if (source.titleRaw != source.title && source.titleRaw != target.title) saveCorrection(source.titleRaw, target.title, "TITLE")
+        }
         db.trackDao().delete(from)
     }
 

@@ -53,6 +53,8 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             db.trackDao().recomputeDiscoveryRanks()
             db.artistDao().recomputeAggregates()
             db.albumDao().recomputeAggregates()
+            // Les titres portent la pochette de leur album (après fusions, déplacements, albums partagés) — sauf pochette perso
+            db.albumDao().alignTrackCovers()
         }
 
         onProgress("Écoutes quotidiennes…")

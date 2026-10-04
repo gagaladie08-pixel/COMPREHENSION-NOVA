@@ -166,6 +166,8 @@ interface ScrobbleDao {
     @Query("UPDATE scrobbles SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
     @Query("UPDATE scrobbles SET album_id = :into WHERE album_id = :from") suspend fun moveAlbum(from: Long, into: Long)
     @Query("UPDATE scrobbles SET track_id = :into WHERE track_id = :from") suspend fun moveTrack(from: Long, into: Long)
+    /** Fusion : une écoute de [from] au même instant qu'une écoute de [into] est la même écoute journalisée deux fois → supprimée. */
+    @Query("DELETE FROM scrobbles WHERE track_id = :from AND started_at IN (SELECT started_at FROM scrobbles WHERE track_id = :into)") suspend fun dropClashing(from: Long, into: Long)
     @Query("UPDATE scrobbles SET artist_id = :artistId WHERE track_id = :trackId") suspend fun setArtistForTrack(trackId: Long, artistId: Long)
     @Query("UPDATE scrobbles SET album_id = :albumId WHERE track_id = :trackId") suspend fun setAlbumForTrack(trackId: Long, albumId: Long?)
     @Query("SELECT * FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at DESC LIMIT :limit OFFSET :offset") suspend fun page(limit: Int, offset: Int): List<ScrobbleEntity>
