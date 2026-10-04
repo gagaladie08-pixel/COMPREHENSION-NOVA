@@ -79,7 +79,7 @@ class RecordMathExtensionTest {
     }
 
     @Test
-    fun `catalogue : 30 records, Most Records exclu de lui-meme via les groupes`() {
+    fun `catalogue 30 records et groupes`() {
         assertEquals(30, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertEquals(RecordGroup.PALMARES, RecordCatalog.groupOf["MOST_RECORDS"])
         assertEquals(RecordGroup.PALMARES, RecordGroup.entries.first())
