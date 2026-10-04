@@ -721,6 +721,29 @@ private fun ServicePage() {
                 detection.log.forEach { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
             }
         }
+        SectionTitle("🧯 Plantages")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                var journal by remember { mutableStateOf(com.novastats.app.util.CrashJournal.read(context)) }
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                Text(
+                    "Si l'app se ferme toute seule, la trace est enregistrée ici. Copie-la et colle-la dans la discussion pour que je corrige.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                if (journal.isBlank()) Text("Aucun plantage enregistré ✅", color = theme.text)
+                else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(journal)) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = theme.primary, contentColor = theme.background)) { Text("📋 Copier") }
+                        Button(onClick = { com.novastats.app.util.CrashJournal.clear(context); journal = "" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)) { Text("🗑️ Effacer") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(journal.take(6000), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -866,6 +889,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.3" to listOf(
+        "🎵 Popup artiste (Stats) : toutes ses chansons de la période avec leur position dans le classement titres (même hors Top 300), Top 5 puis « Voir plus » +5",
+        "🧯 Journal des plantages (Réglages → Service & diagnostic) : copie la trace en cas de fermeture de l'app",
+        "🛡️ Popups artiste / album : chargement défensif, une requête en échec ne ferme plus l'app"
+    ),
     "0.10.2" to listOf(
         "🧐 Fiche record : accroche-portrait unique par élément (écoutes, découverte, rang général, certification / Panthéon, série, fraîcheur) + formulations variées",
         "⚡ Fastest Certification / Panthéon affichés en jours, heures et minutes",

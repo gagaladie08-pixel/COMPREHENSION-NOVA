@@ -39,6 +39,7 @@ class NovaStatsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.novastats.app.util.CrashJournal.install(this)
         createNotificationChannels()
         com.novastats.app.data.api.EnrichmentState.attach(this)
         EnrichmentWorker.schedulePeriodic(this)

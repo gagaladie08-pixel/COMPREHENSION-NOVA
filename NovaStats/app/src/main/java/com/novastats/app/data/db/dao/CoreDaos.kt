@@ -36,6 +36,15 @@ data class RankedAlbum(
     @androidx.room.ColumnInfo(name = "period_duration_ms") val periodDurationMs: Long
 )
 
+/** Titre d'un artiste sur une période avec sa POSITION dans le classement titres de la période (même au-delà du Top 300). */
+data class RankedTrackPos(
+    @Embedded val track: TrackEntity,
+    @androidx.room.ColumnInfo(name = "album_title") val albumTitle: String?,
+    @androidx.room.ColumnInfo(name = "period_plays") val periodPlays: Int,
+    @androidx.room.ColumnInfo(name = "period_duration_ms") val periodDurationMs: Long,
+    @androidx.room.ColumnInfo(name = "period_rank") val periodRank: Int
+)
+
 /** Agrégats d'une entité (titre / artiste / album) sur une période [from, to] — popups de détail « période choisie ». */
 data class PeriodEntityStats(
     val plays: Int,
@@ -208,6 +217,40 @@ interface TrackDao {
         """
     )
     suspend fun topOfArtistForPeriod(artistId: Long, from: String, to: String, limit: Int = 5): List<RankedTrack>
+
+    /**
+     * TOUS les titres d'un artiste (main + featuring) écoutés sur la période, avec leur position dans le classement
+     * titres de la période (même tri que Stats : écoutes puis temps), sans limite de Top 300.
+     */
+    @Query(
+        """
+        SELECT t.*, al.title AS album_title, x.p AS period_plays, x.d AS period_duration_ms,
+               (SELECT COUNT(*) + 1 FROM (SELECT track_id, SUM(play_count) AS p, SUM(total_duration_ms) AS d FROM daily_plays
+                                          WHERE date BETWEEN :from AND :to GROUP BY track_id) y
+                WHERE y.p > x.p OR (y.p = x.p AND y.d > x.d)) AS period_rank
+        FROM (SELECT d.track_id AS track_id, SUM(d.play_count) AS p, SUM(d.total_duration_ms) AS d
+              FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id
+              WHERE ta.artist_id = :artistId AND d.date BETWEEN :from AND :to GROUP BY d.track_id) x
+        JOIN tracks t ON t.track_id = x.track_id
+        LEFT JOIN albums al ON al.album_id = t.album_id
+        ORDER BY x.p DESC, x.d DESC
+        """
+    )
+    suspend fun allOfArtistForPeriod(artistId: Long, from: String, to: String): List<RankedTrackPos>
+
+    /** Idem all time (cumul `tracks.play_count`, position dans le classement général). */
+    @Query(
+        """
+        SELECT t.*, al.title AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms,
+               (SELECT COUNT(*) + 1 FROM tracks y WHERE y.play_count > t.play_count OR (y.play_count = t.play_count AND y.total_duration_ms > t.total_duration_ms)) AS period_rank
+        FROM tracks t JOIN track_artists ta ON ta.track_id = t.track_id
+        LEFT JOIN albums al ON al.album_id = t.album_id
+        WHERE ta.artist_id = :artistId AND t.play_count > 0
+        GROUP BY t.track_id
+        ORDER BY t.play_count DESC, t.total_duration_ms DESC
+        """
+    )
+    suspend fun allOfArtistAllTime(artistId: Long): List<RankedTrackPos>
 
     /** Titres d'un album écoutés sur une période, les plus écoutés d'abord. */
     @Query(

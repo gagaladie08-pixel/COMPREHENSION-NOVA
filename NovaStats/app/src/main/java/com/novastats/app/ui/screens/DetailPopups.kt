@@ -50,6 +50,9 @@ import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.dao.ArtistCertRow
 import com.novastats.app.data.db.dao.PeriodEntityStats
 import com.novastats.app.data.db.dao.RankedTrack
+import com.novastats.app.data.db.dao.RankedTrackPos
+import com.novastats.app.util.CrashJournal
+import androidx.compose.runtime.mutableIntStateOf
 import com.novastats.app.data.db.entity.AlbumEntity
 import com.novastats.app.data.db.entity.ArtistEntity
 import com.novastats.app.data.repository.UserImages
@@ -274,7 +277,10 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     val range = remember(period) { Dates.statsRangeFor(period) }
     var ps by remember { mutableStateOf<PeriodEntityStats?>(null) }
     var artist by remember { mutableStateOf<ArtistEntity?>(null) }
-    var topTracks by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
+    /** Toutes les chansons de l'artiste sur la période, avec leur position dans le classement titres. */
+    var songs by remember { mutableStateOf<List<RankedTrackPos>>(emptyList()) }
+    var songsShown by remember(artistId, period) { mutableIntStateOf(5) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     /** Albums (titre, écoutes) — all time ou sur la période. */
     var albums by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
     var totalAllTime by remember { mutableStateOf(0) }
@@ -285,24 +291,28 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
 
     val imgVersion by UserImages.version.collectAsStateWithLifecycle()
+    val ctx = LocalContext.current
     LaunchedEffect(artistId, period, imgVersion) {
-        artist = db.artistDao().getById(artistId)
-        history = db.pantheonDao().history(artistId)
-        hof = db.hallOfFameDao().ofEntity(artistId, EntityType.ARTIST)
-        if (scoped) {
-            ps = db.artistDao().periodStats(artistId, range.fromIso, range.toIso)
-            topTracks = db.trackDao().topOfArtistForPeriod(artistId, range.fromIso, range.toIso, 5)
-            albums = db.albumDao().ofArtistForPeriod(artistId, range.fromIso, range.toIso).map { it.album.title to it.periodPlays }
-        } else {
-            topTracks = db.trackDao().topOfArtist(artistId, 5)
-            albums = db.albumDao().ofArtist(artistId).map { it.title to it.playCount }
+        // Chaque bloc est isolé : une requête en échec n'empêche ni l'affichage du reste, ni ne ferme l'app (trace dans le journal des plantages)
+        suspend fun safe(tag: String, block: suspend () -> Unit) {
+            try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { loadError = "$tag : ${e.message ?: e.javaClass.simpleName}"; CrashJournal.note(ctx, "ArtistPopup/$tag (${period.dbName})", e) }
         }
-        totalAllTime = db.scrobbleDao().countConfirmed()
+        safe("artiste") { artist = db.artistDao().getById(artistId) }
+        safe("panthéon") { history = db.pantheonDao().history(artistId) }
+        safe("hall of fame") { hof = db.hallOfFameDao().ofEntity(artistId, EntityType.ARTIST) }
+        if (scoped) {
+            safe("stats période") { ps = db.artistDao().periodStats(artistId, range.fromIso, range.toIso) }
+            safe("chansons") { songs = db.trackDao().allOfArtistForPeriod(artistId, range.fromIso, range.toIso) }
+            safe("albums") { albums = db.albumDao().ofArtistForPeriod(artistId, range.fromIso, range.toIso).map { it.album.title to it.periodPlays } }
+        } else {
+            safe("chansons") { songs = db.trackDao().allOfArtistAllTime(artistId) }
+            safe("albums") { albums = db.albumDao().ofArtist(artistId).map { it.title to it.playCount } }
+        }
+        safe("total") { totalAllTime = db.scrobbleDao().countConfirmed() }
         // Part d'écoute : sur la période choisie (ou 7 derniers jours en Global)
         val share = if (scoped) range else Dates.statsRangeFor(Period.WEEKLY)
-        periodPlays = db.artistDao().playsForPeriod(artistId, share.fromIso, share.toIso)
-        periodTotal = db.dailyPlayDao().playsBetween(share.fromIso, share.toIso)
-        ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) }
+        safe("part") { periodPlays = db.artistDao().playsForPeriod(artistId, share.fromIso, share.toIso); periodTotal = db.dailyPlayDao().playsBetween(share.fromIso, share.toIso) }
+        safe("positions") { ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) } }
     }
     val a = artist
     val status = PantheonStatus.fromDb(a?.pantheonStatus)
@@ -342,9 +352,18 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         }
         PopupSection("📊 Positions par période", theme.glowSecondary)
         PositionsTable(ranks)
-        PopupSection(if (scoped) "🎵 Top chansons ${periodWord(period)}" else "🎵 Top chansons", theme.glowSecondary)
-        if (topTracks.isEmpty()) Text("—", color = theme.textSecondary)
-        topTracks.forEachIndexed { i, t -> PopupInfoRow("${i + 1}. ${t.track.title}", "${formatCount(t.periodPlays)} ▶") }
+        loadError?.let { Text("⚠️ Données partielles — $it", color = NovaColors.Gold, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(vertical = 4.dp)) }
+        PopupSection(if (scoped) "🎵 Chansons ${periodWord(period)} (${songs.size})" else "🎵 Chansons all time (${songs.size})", theme.glowSecondary)
+        Text(
+            if (scoped) "Position dans le classement titres ${periodWord(period)} — même au-delà du Top 300." else "Position dans le classement général des titres.",
+            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+        )
+        if (songs.isEmpty()) Text("—", color = theme.textSecondary)
+        songs.take(songsShown).forEach { s -> ArtistSongRow(s, theme.glowSecondary) }
+        if (songs.size > 5) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            if (songs.size > songsShown) TextButton(onClick = { songsShown += 5 }) { Text("Voir plus (+${minOf(5, songs.size - songsShown)}) · ${songs.size - songsShown} restantes", color = theme.glowSecondary, fontWeight = FontWeight.Bold) }
+            if (songsShown > 5) TextButton(onClick = { songsShown = 5 }) { Text("Réduire", color = theme.textSecondary) }
+        }
         PopupSection(if (scoped) "💿 Albums écoutés ${periodWord(period)}" else "💿 Albums en bibliothèque", theme.glowSecondary)
         if (albums.isEmpty()) Text(if (scoped) "Aucun album crédité sur la période" else "Aucun album crédité (titres en featuring uniquement)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         albums.forEach { (title, plays) -> PopupInfoRow(title, "${formatCount(plays)} ▶") }
@@ -357,6 +376,22 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         PopupInfoRow("Première écoute all time", formatDate(a.firstPlayedAt))
         PopupInfoRow("Part All Time", if (totalAllTime > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * a.playCount / totalAllTime) else "—")
         PopupInfoRow(if (scoped) "Part ${periodWord(period)}" else "Part 7 derniers jours", if (periodTotal > 0) String.format(Locale.FRANCE, "%.1f %%", 100.0 * periodPlays / periodTotal) else "—")
+    }
+}
+
+/** Ligne « position · titre (album) · écoutes » du popup artiste. Hors Top 300 = position grisée. */
+@Composable
+private fun ArtistSongRow(s: RankedTrackPos, color: Color) {
+    val theme = Nova.theme
+    val r = s.periodRank
+    val posColor = when { r == 1 -> NovaColors.Gold; r == 2 -> NovaColors.Silver; r == 3 -> Color(0xFFCD7F32); r <= 10 -> color; r <= 300 -> theme.text; else -> theme.textSecondary.copy(alpha = 0.7f) }
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(positionLabel(r, Int.MAX_VALUE), color = posColor, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(62.dp))
+        Column(Modifier.weight(1f)) {
+            Text(s.track.title, color = theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            s.albumTitle?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+        Text("${formatCount(s.periodPlays)} ▶", color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -503,7 +538,8 @@ private fun ImagePickerBar(
 
 @Composable
 private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
-    val app = LocalContext.current.applicationContext as NovaStatsApp
+    val ctx = LocalContext.current
+    val app = ctx.applicationContext as NovaStatsApp
     val db = app.database
     val theme = Nova.theme
     val scoped = period != Period.GLOBAL
@@ -517,14 +553,17 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
 
     val imgVersion by UserImages.version.collectAsStateWithLifecycle()
     LaunchedEffect(albumId, period, imgVersion) {
+        suspend fun safe(tag: String, block: suspend () -> Unit) {
+            try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { CrashJournal.note(ctx, "AlbumPopup/$tag (${period.dbName})", e) }
+        }
         val al = db.albumDao().getById(albumId) ?: return@LaunchedEffect
         album = al
-        artistName = db.artistDao().getById(al.artistId)?.name ?: ""
+        safe("artiste") { artistName = db.artistDao().getById(al.artistId)?.name ?: "" }
         if (scoped) {
-            ps = db.albumDao().periodStats(albumId, range.fromIso, range.toIso)
-            tracks = db.trackDao().ofAlbumForPeriod(albumId, range.fromIso, range.toIso)
-        } else tracks = db.trackDao().ofAlbum(albumId)
-        ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.albumDao().rankForPeriod(albumId, r.fromIso, r.toIso) }
+            safe("stats période") { ps = db.albumDao().periodStats(albumId, range.fromIso, range.toIso) }
+            safe("chansons") { tracks = db.trackDao().ofAlbumForPeriod(albumId, range.fromIso, range.toIso) }
+        } else safe("chansons") { tracks = db.trackDao().ofAlbum(albumId) }
+        safe("positions") { ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.albumDao().rankForPeriod(albumId, r.fromIso, r.toIso) } }
     }
     val al = album
     NovaPopupCard(
