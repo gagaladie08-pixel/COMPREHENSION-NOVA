@@ -347,6 +347,7 @@ interface TrackDao {
 
     @Query("UPDATE tracks SET title = :title WHERE track_id = :trackId")
     suspend fun setTitle(trackId: Long, title: String)
+    @Query("SELECT * FROM tracks WHERE album_id = :albumId") suspend fun inAlbum(albumId: Long): List<TrackEntity>
 
     /** Roots « solo » sans aucune écoute confirmée propre mais avec des versions liées : la version solo n'existe pas → à replier. */
     @Query(
@@ -520,6 +521,14 @@ interface AlbumDao {
 
     @Query("SELECT * FROM albums WHERE title = :title AND artist_id = :artistId LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artistId: Long): AlbumEntity?
+    /** Album partagé (sans propriétaire) portant ce titre. */
+    @Query("SELECT * FROM albums WHERE title = :title AND artist_id IS NULL LIMIT 1")
+    suspend fun findShared(title: String): AlbumEntity?
+    @Query("SELECT * FROM albums WHERE artist_id IS NULL")
+    suspend fun allShared(): List<AlbumEntity>
+    @Query("SELECT COUNT(DISTINCT ta.artist_id) FROM track_artists ta JOIN tracks t ON t.track_id = ta.track_id WHERE t.album_id = :albumId")
+    suspend fun distinctArtistCount(albumId: Long): Int
+    @Query("UPDATE albums SET cover_url = :url, cover_source = :source WHERE album_id = :id AND cover_url IS NULL") suspend fun fillCover(id: Long, url: String?, source: String?)
 
     @Query(
         """
@@ -657,6 +666,11 @@ interface TrackLinkDao {
     suspend fun copyArtistLinks(from: Long, into: Long)
     @Query("INSERT OR IGNORE INTO track_albums (track_id, album_id) SELECT :into, album_id FROM track_albums WHERE track_id = :from")
     suspend fun copyAlbumLinks(from: Long, into: Long)
+    /** Fusion d'albums : les liens titre↔album de `from` passent sur `into`. */
+    @Query("INSERT OR IGNORE INTO track_albums (track_id, album_id) SELECT track_id, :into FROM track_albums WHERE album_id = :from")
+    suspend fun retargetAlbumLinks(from: Long, into: Long)
+    @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
+    @Query("DELETE FROM track_albums WHERE track_id = :trackId AND album_id = :albumId") suspend fun unlinkTrackAlbum(trackId: Long, albumId: Long)
     @Query("DELETE FROM track_albums WHERE track_id = :trackId") suspend fun clearTrackAlbums(trackId: Long)
     @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
 }

@@ -110,7 +110,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         val guestKeys = guestIds.map { "#$it" }.toSet()
         // Album crédité uniquement s'il s'agit d'un album de l'artiste principal ; jamais pour une compilation
         val albumId = rawAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
-            ?.let { resolveAlbum(it, primaryArtistId) }
+            ?.let { resolveAlbum(it, primaryArtistId, albumArtist) }
 
         // ---- 1. Remix / version AVEC artiste featuring (« Song (Remix) feat. Drake ») → titre distinct « Song (feat. Drake) », lié à l'original
         val isRemixFeat = normalized.isVersion && titleOnlyGuests.isNotEmpty()
@@ -200,6 +200,9 @@ class LibraryRepository(private val db: NovaDatabase) {
     }
 
     companion object {
+        /** Type de correction (`user_corrections`) : titre d'album normalisé → « 1 » (partagé) / « 0 » (normal). */
+        const val CORRECTION_ALBUM_SHARED = "ALBUM_SHARED"
+
         /** Comparaison des jeux d'invités (clé « #artistId » ou toute clé stable). */
         /**
          * La notion de « version » n'existe que face à une version SOLO (sans invité) du même titre :
@@ -227,12 +230,29 @@ class LibraryRepository(private val db: NovaDatabase) {
         return id
     }
 
-    suspend fun resolveAlbum(rawTitle: String, artistId: Long): Long {
+    /** Correction manuelle « album partagé » (« 1 ») / « album normal » (« 0 ») pour ce titre d'album, sinon null. */
+    suspend fun sharedOverride(normalizedTitle: String): String? =
+        corrections()[CORRECTION_ALBUM_SHARED]?.get(TitleNormalizer.normalizeKey(normalizedTitle))?.correctedValue
+
+    suspend fun isSharedAlbum(normalizedTitle: String, albumArtist: String?): Boolean =
+        TitleNormalizer.sharedAlbumDecision(sharedOverride(normalizedTitle), normalizedTitle, albumArtist)
+
+    /**
+     * Album : clé (titre normalisé, artiste principal) — ou titre seul pour un album PARTAGÉ (BO, « Various Artists »,
+     * marquage manuel) : un seul album sans propriétaire (`artist_id` NULL) auquel tous les titres se rattachent.
+     */
+    suspend fun resolveAlbum(rawTitle: String, artistId: Long, albumArtist: String? = null, forceShared: Boolean? = null): Long {
         val title = TitleNormalizer.normalizeAlbumTitle(rawTitle) // Deluxe / Expanded / Japan Edition… fusionnés
-        val key = TitleNormalizer.normalizeKey(title) + "|" + artistId
+        val shared = forceShared ?: isSharedAlbum(title, albumArtist)
+        val key = TitleNormalizer.normalizeKey(title) + "|" + (if (shared) "shared" else artistId.toString())
         albumCache[key]?.let { return it }
-        val id = db.albumDao().findByTitleAndArtist(title, artistId)?.albumId
-            ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = artistId))
+        val id = if (shared) {
+            db.albumDao().findShared(title)?.albumId
+                ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = null))
+        } else {
+            db.albumDao().findByTitleAndArtist(title, artistId)?.albumId
+                ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = artistId))
+        }
         albumCache[key] = id
         return id
     }

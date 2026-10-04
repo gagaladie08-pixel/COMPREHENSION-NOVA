@@ -47,7 +47,7 @@ object AlbumSharing {
                     db.albumDao().fillCover(newAlbum, al.coverUrl, al.coverSource)
                 }
                 db.trackLinkDao().clearAlbumLinks(al.albumId)
-                db.albumDao().deleteAlbum(al.albumId)
+                db.albumDao().delete(al.albumId)
                 split++
             }
         }
@@ -68,6 +68,6 @@ object AlbumSharing {
         db.trackLinkDao().retargetAlbumLinks(from, into)
         db.trackLinkDao().clearAlbumLinks(from)
         db.albumDao().fillCover(into, src.coverUrl, src.coverSource)
-        db.albumDao().deleteAlbum(from)
+        db.albumDao().delete(from)
     }
 }

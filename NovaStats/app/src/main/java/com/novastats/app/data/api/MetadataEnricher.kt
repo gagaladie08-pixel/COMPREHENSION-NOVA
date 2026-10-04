@@ -316,7 +316,8 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         EntityType.ALBUM -> {
             db.apiCacheDao().clearEntity(EntityType.ALBUM, target.id, DataType.COVER)
             val al = db.albumDao().getById(target.id)
-            val artist = al?.let { db.artistDao().getById(it.artistId)?.name }
+            val artist = al?.let { a -> a.artistId?.let { db.artistDao().getById(it)?.name }
+                ?: db.trackDao().inAlbum(a.albumId).maxByOrNull { it.playCount }?.let { t -> db.artistDao().getById(t.artistId)?.name } }
             if (al == null || artist == null) false else { EnrichmentState.current("💿 ${al.title}"); enrichAlbum(al, artist, overwriteTracks = true) }
         }
         else -> {

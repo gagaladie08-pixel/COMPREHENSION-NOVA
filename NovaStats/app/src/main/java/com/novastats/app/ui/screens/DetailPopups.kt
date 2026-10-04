@@ -779,7 +779,7 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
         var name: String? = null; var subtitle: String? = null; var image: String? = null; var plays = 0
         when (entityType) {
             EntityType.ARTIST -> db.artistDao().getById(entityId)?.let { name = it.name; image = it.photoUrl; plays = it.playCount }
-            EntityType.ALBUM -> db.albumDao().getById(entityId)?.let { name = it.title; subtitle = db.artistDao().getById(it.artistId)?.name; image = it.coverUrl; plays = it.playCount }
+            EntityType.ALBUM -> db.albumDao().getById(entityId)?.let { name = it.title; subtitle = it.artistId?.let { id -> db.artistDao().getById(id)?.name } ?: TitleNormalizer.SHARED_ALBUM_LABEL; image = it.coverUrl; plays = it.playCount }
             else -> db.trackDao().getById(entityId)?.let { name = it.title; subtitle = db.artistDao().getById(it.artistId)?.name; image = it.coverUrl; plays = it.playCount }
         }
         // Historique Billboard complet — la période du chart = celle de l'entrée la plus prestigieuse (Global → hebdo)
