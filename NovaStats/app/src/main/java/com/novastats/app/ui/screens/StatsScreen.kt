@@ -188,20 +188,20 @@ fun StatsScreen() {
                 }
             }
         } else when (tab) {
-            0 -> itemsIndexed(filteredTracks.subList(0, shown), key = { _, (_, t) -> "t" + t.track.trackId }) { _, (pos, t) ->
+            0 -> itemsIndexed(filteredTracks.take(shown), key = { _, (_, t) -> "t" + t.track.trackId }) { _, (pos, t) ->
                 RankRow(
                     pos, t.track.title, listOfNotNull(t.artistName, t.albumTitle).joinToString(" · "), t.periodPlays, t.periodDurationMs, t.track.coverUrl,
                     onLongClick = { detail = DetailTarget.Track(t.track.trackId, period) }
                 )
             }
-            1 -> itemsIndexed(filteredArtists.subList(0, shown), key = { _, (_, a) -> "a" + a.artist.artistId }) { _, (pos, a) ->
+            1 -> itemsIndexed(filteredArtists.take(shown), key = { _, (_, a) -> "a" + a.artist.artistId }) { _, (pos, a) ->
                 val sub = PantheonStatus.fromDb(a.artist.pantheonStatus)?.let { "${it.emoji} ${it.label.uppercase()}" }
                 RankRow(
                     pos, a.artist.name, sub, a.periodPlays, a.periodDurationMs, a.artist.photoUrl, circle = true,
                     onLongClick = { detail = DetailTarget.Artist(a.artist.artistId, period) }
                 )
             }
-            else -> itemsIndexed(filteredAlbums.subList(0, shown), key = { _, (_, al) -> "al" + al.album.albumId }) { _, (pos, al) ->
+            else -> itemsIndexed(filteredAlbums.take(shown), key = { _, (_, al) -> "al" + al.album.albumId }) { _, (pos, al) ->
                 RankRow(
                     pos, al.album.title, al.artistName, al.periodPlays, al.periodDurationMs, al.album.coverUrl,
                     onLongClick = { detail = DetailTarget.Album(al.album.albumId, period) }

@@ -222,7 +222,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
             }
 
             val realShown = minOf(shown, rows.size)
-            items(rows.subList(0, realShown), key = { it.entityId }) { item ->
+            items(rows.take(realShown), key = { it.entityId }) { item ->
                 ChartRow(item, state.period, onLongPress = { vm.openHistory(item) })
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }

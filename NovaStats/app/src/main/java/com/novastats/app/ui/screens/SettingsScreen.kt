@@ -889,6 +889,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.10.4" to listOf(
+        "🐛 Stats : plus de fermeture de l'app en passant en Daily sur Artistes / Albums (liste tronquée pendant le rechargement — IndexOutOfBounds)",
+        "🐛 Billboard : même protection sur le bouton « Voir plus »"
+    ),
     "0.10.3" to listOf(
         "🎵 Popup artiste (Stats) : toutes ses chansons de la période avec leur position dans le classement titres (même hors Top 300), Top 5 puis « Voir plus » +5",
         "🧯 Journal des plantages (Réglages → Service & diagnostic) : copie la trace en cas de fermeture de l'app",
