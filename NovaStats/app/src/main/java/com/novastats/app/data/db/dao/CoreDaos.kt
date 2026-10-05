@@ -60,6 +60,10 @@ data class PeriodEntityStats(
 
 @Dao
 interface TrackDao {
+
+    /** Résolution d'un lot d'identifiants (Year-End Charts). */
+    @Query("SELECT * FROM tracks WHERE track_id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<TrackEntity>
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(track: TrackEntity): Long
 
@@ -395,6 +399,10 @@ interface TrackDao {
 
 @Dao
 interface ArtistDao {
+
+    /** Résolution d'un lot d'identifiants (Year-End Charts). */
+    @Query("SELECT * FROM artists WHERE artist_id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<ArtistEntity>
     /** 🔍 Recherche globale. */
     @Query("SELECT * FROM artists WHERE is_merged = 0 AND LOWER(name) LIKE '%' || LOWER(:q) || '%' ORDER BY play_count DESC LIMIT :limit")
     suspend fun search(q: String, limit: Int = 15): List<ArtistEntity>
@@ -522,6 +530,10 @@ interface ArtistDao {
 
 @Dao
 interface AlbumDao {
+
+    /** Résolution d'un lot d'identifiants (Year-End Charts). */
+    @Query("SELECT * FROM albums WHERE album_id IN (:ids)")
+    suspend fun byIds(ids: List<Long>): List<AlbumEntity>
     /** 🔍 Recherche globale. */
     @Query("SELECT * FROM albums WHERE LOWER(title) LIKE '%' || LOWER(:q) || '%' ORDER BY play_count DESC LIMIT :limit")
     suspend fun search(q: String, limit: Int = 15): List<AlbumEntity>

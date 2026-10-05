@@ -957,6 +957,13 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.0" to listOf(
+        "\ud83c\udfc6 **Year-End Charts : le moteur exact du Billboard.** Les classements annuels ne sont plus calcul\u00e9s \u00e0 part : ils utilisent d\u00e9sormais les m\u00eames requ\u00eates, le m\u00eame ordre et les m\u00eames limites que tes charts Billboard.",
+        "\ud83c\udfb5 **Titres — Nova Hot 100** : regroup\u00e9s par titre racine, donc **un remix compte pour son original** (et non plus comme une entr\u00e9e s\u00e9par\u00e9e). Classement : \u00e9coutes puis dur\u00e9e.",
+        "\ud83c\udfa4 **Artistes — Nova Artist 50** : **chaque artiste cr\u00e9dit\u00e9** re\u00e7oit l'\u00e9coute (featurings et duos inclus), artistes fusionn\u00e9s exclus. Le nombre de titres distincts est affich\u00e9 en sous-titre.",
+        "\ud83d\udcbf **Albums — Nova 75 Albums** : **compilations exclues**, et les albums partag\u00e9s s'affichent « Artistes vari\u00e9s » (r\u00e8gle §12).",
+        "\ud83d\udcca Synth\u00e8se de l'ann\u00e9e align\u00e9e aussi : titres distincts compt\u00e9s par racine, artistes par cr\u00e9dit, albums hors compilations. Badge **EN COURS** sur l'ann\u00e9e en cours (le Billboard, lui, ne publie que des p\u00e9riodes closes)."
+    ),
     "0.21.0" to listOf(
         "\ud83c\udfc6 **Year-End Charts** (Billboard → 🏆 Year-End Charts) : le bilan complet de chaque **ann\u00e9e civile** (1\u1d52\u1d49 janvier → 31 d\u00e9cembre), calcul\u00e9 avec les m\u00eames r\u00e8gles que tes charts hebdomadaires.",
         "\ud83d\udcc5 **S\u00e9lecteur d'ann\u00e9e** : toutes tes ann\u00e9es d'\u00e9coute sont l\u00e0, en pastilles, du plus r\u00e9cent au plus ancien.",

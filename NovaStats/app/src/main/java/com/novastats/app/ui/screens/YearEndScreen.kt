@@ -45,8 +45,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.novastats.app.NovaStatsApp
-import com.novastats.app.data.db.dao.YearEndRow
+import com.novastats.app.data.repository.YearEndRow
 import com.novastats.app.data.repository.YearEndData
+import com.novastats.app.domain.Chart
 import com.novastats.app.data.repository.YearEndRepository
 import com.novastats.app.ui.theme.Nova
 import kotlinx.coroutines.flow.first
@@ -56,8 +57,6 @@ import java.util.Locale
 /* ==================================================================== */
 /*  🏆 Year-End Charts — le bilan de chaque année civile                  */
 /* ==================================================================== */
-
-private const val YE_LIMIT = 100
 
 private val YE_TABS = listOf("🎵 Titres", "🎤 Artistes", "💿 Albums")
 private val YE_MEDALS = listOf("🥇", "🥈", "🥉")
@@ -83,7 +82,7 @@ fun YearEndScreen(onBack: () -> Unit) {
     }
     LaunchedEffect(year) {
         val y = year ?: return@LaunchedEffect
-        data = runCatching { repo.load(y, YE_LIMIT) }.getOrNull()
+        data = runCatching { repo.load(y) }.getOrNull()
     }
 
     val artUrl by produceState<String?>(null, data?.topTrack?.imageUrl) {
@@ -155,6 +154,16 @@ fun YearEndScreen(onBack: () -> Unit) {
                             "Ton année musicale, du 1er janvier au 31 décembre ${d.year}",
                             color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
                         )
+                        if (d.inProgress) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                Modifier.clip(CircleShape).background(theme.primary.copy(alpha = 0.22f))
+                                    .border(1.dp, theme.primary.copy(alpha = 0.6f), CircleShape)
+                                    .padding(horizontal = 14.dp, vertical = 5.dp)
+                            ) {
+                                Text("EN COURS", color = theme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                            }
+                        }
                     }
                 }
 
@@ -233,7 +242,7 @@ fun YearEndScreen(onBack: () -> Unit) {
                 if (rows.size >= 3) {
                     Appear(delay = 210) {
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            SectionTitle("🥇 Podium")
+                            SectionTitle("🥇 Podium — ${chartLabel(tab)}")
                             rows.take(3).forEachIndexed { i, r ->
                                 PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1)
                                 Spacer(Modifier.height(10.dp))
@@ -246,7 +255,7 @@ fun YearEndScreen(onBack: () -> Unit) {
                 if (rows.size > 3) {
                     Appear(delay = 250) {
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                            SectionTitle("📋 Classement — top ${rows.size}")
+                            SectionTitle("📋 ${chartLabel(tab)} — top ${rows.size}")
                             GlassCard {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     rows.drop(3).forEachIndexed { i, r ->
@@ -260,8 +269,9 @@ fun YearEndScreen(onBack: () -> Unit) {
 
                 Appear(delay = 290) {
                     Text(
-                        "Classements calculés sur l'année civile complète, avec les mêmes règles que tes charts hebdomadaires. " +
-                            "Les remix sont rattachés à leur original et les versions avec invité comptent pour le titre principal.",
+                        "Moteur et règles du Billboard : un remix compte pour son original, chaque artiste crédité reçoit " +
+                            "l'écoute, les compilations sont exclues et les albums partagés s'affichent « Artistes variés ». " +
+                            "Limites officielles : ${Chart.HOT_100.label} · ${Chart.ARTIST_50.label} · ${Chart.ALBUMS_75.label}.",
                         color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 12.dp)
                     )
@@ -368,6 +378,12 @@ private fun YeRow(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
             Box(Modifier.fillMaxWidth(share.coerceIn(0.02f, 1f)).height(4.dp).clip(CircleShape).background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.9f), theme.secondary.copy(alpha = 0.5f)))))
         }
     }
+}
+
+private fun chartLabel(tab: Int): String = when (tab) {
+    0 -> Chart.HOT_100.label
+    1 -> Chart.ARTIST_50.label
+    else -> Chart.ALBUMS_75.label
 }
 
 private fun prettyDay(iso: String): String = runCatching {
