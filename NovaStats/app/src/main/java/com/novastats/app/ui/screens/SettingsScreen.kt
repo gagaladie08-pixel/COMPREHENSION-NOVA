@@ -920,6 +920,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.18.0" to listOf(
+        "\u2694\ufe0f **Le duel passe \u00e0 20 crit\u00e8res** (au lieu de 8), r\u00e9partis en 4 familles de difficult\u00e9 croissante : 🥉 Les bases, 🥈 La r\u00e9gularit\u00e9, 🌙 Les moments, 💎 L'endurance. Chaque famille d\u00e9signe son vainqueur, ce qui laisse \u00e0 chaque camp une vraie chance de gagner.",
+        "\ud83e\udd49 **Les bases** : \u00e9coutes, temps d'\u00e9coute, jours actifs, moyenne par jour actif, certification.\n🥈 **La r\u00e9gularit\u00e9** : s\u00e9rie max de jours cons\u00e9cutifs, mois actifs, record sur une journ\u00e9e, jours \u00e0 3 \u00e9coutes et plus, \u00e9coutes par mois.",
+        "\ud83c\udf19 **Les moments** : soir\u00e9es (18 h – 23 h), nuits blanches (0 h – 5 h), matin\u00e9es, apr\u00e8s-midis, week-ends.\n💎 **L'endurance** : pic horaire, \u00e9coute la plus longue, vitesse de croissance (\u00e9coutes par jour depuis la premi\u00e8re), anciennet\u00e9, fra\u00eecheur.",
+        "\ud83c\udfc6 **Pr\u00e9sentation repens\u00e9e** : grand score anim\u00e9 « 11 — 9 » avec d\u00e9signation du vainqueur et mention « Photo-finish ! » quand un seul crit\u00e8re s\u00e9pare les deux, barres de chaque crit\u00e8re color\u00e9es par famille, apparition en cascade, r\u00e9capitulatif par famille."
+    ),
     "0.17.0" to listOf(
         "\u2694\ufe0f **Mode comparaison** (Stats → « Comparer deux titres ou artistes ») : deux pochettes face \u00e0 face autour d'un badge **VS**, et un duel crit\u00e8re par crit\u00e8re avec barres anim\u00e9es.",
         "\ud83c\udfc6 **8 crit\u00e8res** : \u00e9coutes, temps d'\u00e9coute, jours actifs, moyenne par jour actif, certification, derni\u00e8re \u00e9coute (fra\u00eecheur), anciennet\u00e9 et heure de pr\u00e9dilection. Chaque crit\u00e8re d\u00e9signe son vainqueur d'une m\u00e9daille.",
