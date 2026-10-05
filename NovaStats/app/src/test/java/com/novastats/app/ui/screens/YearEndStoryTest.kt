@@ -32,7 +32,7 @@ class YearEndStoryTest {
         val story = yearEndStory(entry)
 
         assertTrue(story.anecdote.contains("rang #51"))
-        assertTrue(story.anecdote.contains("rang protégé #50"))
+        assertTrue(story.anecdote.contains("seuil protégé #50"))
         assertTrue(story.achievement.contains("20 semaines"))
         assertTrue(story.achievement.contains("Top 50"))
         assertTrue(story.achievement.contains("#2"))
