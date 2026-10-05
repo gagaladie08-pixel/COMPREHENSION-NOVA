@@ -54,6 +54,8 @@ import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import java.time.format.DateTimeFormatter
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import java.util.Locale
 
 /* Couleurs du cahier des charges */
@@ -98,6 +100,7 @@ private fun badgeColor(type: String) = when (type) {
 fun HallOfFameScreen() {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
     var period by rememberSaveable { mutableStateOf(Period.WEEKLY.dbName) }
     var category by rememberSaveable { mutableStateOf(EntityType.TRACK) }
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
@@ -115,6 +118,12 @@ fun HallOfFameScreen() {
     }
     val isGlobal = period == Period.GLOBAL.dbName
 
+    // 🎨 Art du titre le plus écouté (all time) en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching { db.trackDao().topAllTime(1).first().firstOrNull()?.track?.coverUrl }.getOrNull()
+    }
+
+    ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -163,6 +172,8 @@ fun HallOfFameScreen() {
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+    }
+
     DetailPopupHost(detail) { detail = null }
 }
 

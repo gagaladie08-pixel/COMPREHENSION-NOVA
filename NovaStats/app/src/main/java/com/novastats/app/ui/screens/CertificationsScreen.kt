@@ -80,6 +80,9 @@ import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.drawNovaCurve
 import com.novastats.app.ui.theme.rememberCurveAnim
 import java.time.format.DateTimeFormatter
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
+import androidx.compose.foundation.layout.offset
 import java.util.Locale
 
 /* Couleurs du cahier des charges */
@@ -140,6 +143,12 @@ fun CertificationsScreen() {
     }
     val allMax = candidates.isNotEmpty() && candidates.all { it.level == CertLevel.DIAMOND.dbName }
 
+    // 🎨 Art du titre le plus écouté (all time) en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching { db.trackDao().topAllTime(1).first().firstOrNull()?.track?.coverUrl }.getOrNull()
+    }
+
+    ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -190,6 +199,8 @@ fun CertificationsScreen() {
             Spacer(Modifier.height(24.dp))
         }
     }
+    }
+
     detail?.let { (t, id) -> CertificationPopup(t, id) { detail = null } }
 }
 
@@ -235,7 +246,11 @@ private fun CertRow(c: CertCandidate, album: Boolean, onOpen: () -> Unit) {
             .combinedClickableCompat(onOpen).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.shadow(if (cert.level == CertLevel.DIAMOND) 10.dp else 0.dp, RoundedCornerShape(8.dp), ambientColor = color, spotColor = color)) { CoverArt(c.imageUrl, c.name, size = 52) }
+        Box(contentAlignment = Alignment.BottomEnd) {
+            Box(Modifier.shadow(if (cert.level == CertLevel.DIAMOND) 10.dp else 0.dp, RoundedCornerShape(8.dp), ambientColor = color, spotColor = color)) { CoverArt(c.imageUrl, c.name, size = 52) }
+            // Médaille du niveau, posée sur le coin de la pochette
+            MedalBadge(cert.level, cert.multiplier, size = 26.dp, modifier = Modifier.offset(x = 6.dp, y = 6.dp))
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(c.name, color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)

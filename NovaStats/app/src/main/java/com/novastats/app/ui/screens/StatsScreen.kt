@@ -51,6 +51,8 @@ import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.TitleNormalizer
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import com.novastats.app.ui.theme.Nova
 
 private val statsTabs = listOf("Titres", "Artistes", "Albums")
@@ -112,6 +114,13 @@ fun StatsScreen() {
     // Changement de période : on remonte en haut pour revoir le bandeau
     LaunchedEffect(period) { listState.scrollToItem(0) }
 
+    // 🎨 Photo de ton artiste n°1 sur la période, en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null, period) {
+        val r = Dates.statsRangeFor(period)
+        value = runCatching { db.artistDao().topForPeriod(r.fromIso, r.toIso, 1).first().firstOrNull()?.artist?.photoUrl }.getOrNull()
+    }
+
+    ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
         /* ---------- En-tête défilant : périodes → bandeau → légende ---------- */
         item(key = "header") {
@@ -211,6 +220,8 @@ fun StatsScreen() {
         if (total > shown) item(key = "more") { LoadMoreButton(total - shown) { visible += TOP_STEP } }
         item(key = "bottom") { Box(Modifier.height(24.dp)) }
     }
+    }
+
 }
 
 private fun elapsedDays(range: com.novastats.app.domain.DateRange): Int {

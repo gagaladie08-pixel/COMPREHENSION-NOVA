@@ -80,6 +80,8 @@ import com.novastats.app.ui.theme.prideStripe
 import com.novastats.app.ui.theme.prideWash
 import com.novastats.app.ui.theme.NovaColors
 import java.time.Instant
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import java.time.ZoneOffset
 
 private val Bronze = Color(0xFFCD7F32)
@@ -110,6 +112,10 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val listState = rememberLazyListState()
     LaunchedEffect(state.period, state.anchor) { listState.scrollToItem(0) }
 
+    // 🎨 Pochette du n°1 du chart affiché, en fond d'écran
+    val artUrl = state.items.firstOrNull()?.coverUrl
+
+    ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
         /* ---------- En-tête défilant : périodes → navigation → bandeau ---------- */
         item(key = "header") {
@@ -240,6 +246,8 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
             item(key = "bottom") { Spacer(Modifier.height(24.dp)) }
         }
     }
+    }
+
 
     if (showPicker) {
         val pickerState = rememberDatePickerState(

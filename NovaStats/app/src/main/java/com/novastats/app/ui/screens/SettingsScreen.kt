@@ -904,6 +904,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.15.0" to listOf(
+        "\ud83c\udf0c **Tous les onglets** (Stats, Billboard, Certifications, Records, Panth\u00e9on, Nova Awards, Hall of Fame) ont d\u00e9sormais un **fond artistique** : pochette ou photo mise en avant, flout\u00e9e, tr\u00e8s assombrie, avec les particules qui montent. Stats suit ta p\u00e9riode (l'artiste n\u00b01 du moment), Billboard suit le n\u00b01 du chart affich\u00e9.",
+        "\ud83e\udea1 **Certifications** : chaque ligne porte maintenant une **m\u00e9daille m\u00e9tallique** (Argent / Or / Platine / Diamant) pos\u00e9e sur le coin de la pochette, avec le multiplicateur \u00d7n quand il y en a un.",
+        "\ud83d\udee0\ufe0f Nouvelle brique partag\u00e9e `ScreenBackdrop` (fond d'onglet) dans `PremiumUi.kt` : un seul endroit pour r\u00e9gler l'intensit\u00e9 du flou, du voile et des particules de tout ce qui n'est pas un popup."
+    ),
     "0.14.0" to listOf(
         "\ud83c\udfa8 Le langage visuel du Rewind s'\u00e9tend \u00e0 toute l'app. **Accueil** : fond artistique plein \u00e9cran (photo de ton artiste du moment des 7 derniers jours, flout\u00e9e et tr\u00e8s assombrie) + particules + bloc \u00ab Aujourd'hui \u00bb en verre avec le compteur du jour en tr\u00e8s gros.",
         "\ud83e\udea1 **Popups de fiche** (titre / artiste / album) : les statistiques passent en carte de verre avec le nombre d'\u00e9coutes en tr\u00e8s gros et d\u00e9filant, le parcours hebdomadaire et la pr\u00e9vision sont encapsul\u00e9s dans le verre.",

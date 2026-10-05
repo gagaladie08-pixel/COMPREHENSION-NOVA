@@ -62,6 +62,8 @@ import com.novastats.app.ui.theme.prideOnFlag
 import com.novastats.app.ui.theme.prideFlagFor
 import com.novastats.app.ui.theme.prideChip
 import com.novastats.app.ui.theme.isPride
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import com.novastats.app.ui.theme.NovaColors
 
 /**
@@ -74,6 +76,7 @@ import com.novastats.app.ui.theme.NovaColors
 fun RecordsScreen() {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
     val dao = remember { app.database.recordDao() }
     val count by dao.countFlow().collectAsStateWithLifecycle(initialValue = 0)
     val lastCalc by dao.lastCalculated().collectAsStateWithLifecycle(initialValue = null)
@@ -233,6 +236,12 @@ private fun RecordSearchResults(query: String, onOpen: (RecordEntryRef) -> Unit)
     LaunchedEffect(query) {
         rows = if (query.trim().length < 2) emptyList() else runCatching { app.database.recordDao().search(query.trim()) }.getOrDefault(emptyList())
     }
+    // 🎨 Art du titre le plus écouté (all time) en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching { db.trackDao().topAllTime(1).first().firstOrNull()?.track?.coverUrl }.getOrNull()
+    }
+
+    ScreenBackdrop(artUrl) {
     Column(Modifier.padding(horizontal = 16.dp)) {
         when {
             query.trim().length < 2 -> Text("Tape au moins 2 lettres.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
@@ -264,6 +273,8 @@ private fun RecordSearchResults(query: String, onOpen: (RecordEntryRef) -> Unit)
             }
         }
     }
+    }
+
 }
 
 /* ================================ 📄 Page d'un record (ex-popup 90 %) ================================ */

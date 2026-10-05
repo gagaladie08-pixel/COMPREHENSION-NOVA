@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -470,5 +471,19 @@ fun MedalBadge(level: com.novastats.app.domain.CertLevel?, multiplier: Int = 1, 
                     .border(1.dp, colors.first(), CircleShape).padding(horizontal = 7.dp, vertical = 3.dp)
             ) { Text("×$multiplier", color = theme.text, style = MaterialTheme.typography.labelSmall) }
         }
+    }
+}
+
+/**
+ * Fond d'onglet : art du moment flouté (très discret) + particules, derrière le contenu.
+ * [artUrl] : pochette ou photo mise en avant ; null = simple dégradé du thème.
+ */
+@Composable
+fun ScreenBackdrop(artUrl: String?, content: @Composable BoxScope.() -> Unit) {
+    val theme = Nova.theme
+    Box(Modifier.fillMaxSize()) {
+        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.30f, scrim = 1.28f)
+        RewindParticles(theme, Modifier.fillMaxSize())
+        content()
     }
 }

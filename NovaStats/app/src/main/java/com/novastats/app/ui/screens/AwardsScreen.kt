@@ -65,6 +65,8 @@ import com.novastats.app.ui.theme.Nova
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import java.util.Locale
 
 private fun hex(h: String) = Color(android.graphics.Color.parseColor(h))
@@ -116,6 +118,12 @@ fun AwardsScreen() {
         app.settings.markAwardsRevealed(year)
     }
 
+    // 🎨 Art du titre le plus écouté (all time) en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching { db.trackDao().topAllTime(1).first().firstOrNull()?.track?.coverUrl }.getOrNull()
+    }
+
+    ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -150,6 +158,8 @@ fun AwardsScreen() {
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+    }
+
     DetailPopupHost(detail) { detail = null }
 }
 

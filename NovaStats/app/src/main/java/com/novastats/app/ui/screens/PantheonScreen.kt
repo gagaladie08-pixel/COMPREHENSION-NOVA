@@ -59,6 +59,8 @@ import com.novastats.app.domain.Certification
 import com.novastats.app.domain.PantheonRules
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.ui.theme.Nova
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.flow.first
 import com.novastats.app.ui.theme.NovaColors
 
 /** Couleur d'un statut (Mythique = dégradé holographique animé, on renvoie la base). */
@@ -111,6 +113,7 @@ fun summaryOf(rows: List<ArtistCertRow>): ArtistCertSummary {
 fun PantheonScreen() {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
     var query by rememberSaveable { mutableStateOf("") }
     var statusFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
@@ -134,6 +137,12 @@ fun PantheonScreen() {
     }
     val counts = remember(rows) { rows.groupingBy { it.s.currentStatus }.eachCount() }
 
+    // 🎨 Photo de l'artiste le plus écouté (all time) en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching { db.artistDao().topAllTime(1).first().firstOrNull()?.artist?.photoUrl }.getOrNull()
+    }
+
+    ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -193,6 +202,8 @@ fun PantheonScreen() {
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+    }
+
     DetailPopupHost(detail) { detail = null }
 }
 
