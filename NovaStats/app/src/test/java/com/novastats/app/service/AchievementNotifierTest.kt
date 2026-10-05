@@ -72,6 +72,7 @@ class AchievementNotifierTest {
         assertEquals(SettingsRepository.Notif.HOF, hallOfFame?.third)
         assertNull(AchievementNotifier.describe(achievement(kind = "UNKNOWN", level = "x", name = "?")))
         assertNull(AchievementNotifier.describe(achievement(kind = "PANTHEON", level = "NOT_A_STATUS", name = "?")))
+        assertNull(AchievementNotifier.describe(achievement(kind = "CERTIFICATION", level = "NOT_A_LEVEL:1", name = "?")))
     }
 
     @Test
