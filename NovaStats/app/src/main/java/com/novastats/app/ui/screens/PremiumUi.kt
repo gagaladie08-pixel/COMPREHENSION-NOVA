@@ -142,19 +142,15 @@ fun RewindBackdrop(
 }
 
 /** Sature et éclaircit la pochette du fond : sinon une pochette sombre reste une tache grise à l'écran. */
-@Composable
 private fun rememberArtBoost(): ColorMatrix = remember {
-    val sat = ColorMatrix().apply { setToSaturation(1.45f) }
-    val gain = ColorMatrix(
+    ColorMatrix(
         floatArrayOf(
-            1.30f, 0f, 0f, 0f, 0.05f,
-            0f, 1.30f, 0f, 0f, 0.05f,
-            0f, 0f, 1.30f, 0f, 0.05f,
+            1.760f, -0.418f, -0.042f, 0f, 0.050f,
+            -0.125f, 1.467f, -0.042f, 0f, 0.050f,
+            -0.125f, -0.418f, 1.843f, 0f, 0.050f,
             0f, 0f, 0f, 1f, 0f
         )
     )
-    sat.setToConcat(gain, sat)
-    sat
 }
 
 /** Particules qui montent lentement. */
