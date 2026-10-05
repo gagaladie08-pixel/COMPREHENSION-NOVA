@@ -45,17 +45,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.novastats.app.NovaStatsApp
-import com.novastats.app.data.repository.YearEndRow
 import com.novastats.app.data.repository.YearEndData
-import com.novastats.app.domain.Chart
 import com.novastats.app.data.repository.YearEndRepository
+import com.novastats.app.data.repository.YearEndRow
+import com.novastats.app.domain.Chart
 import com.novastats.app.ui.theme.Nova
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 /* ==================================================================== */
-/*  🏆 Year-End Charts — le bilan de chaque année civile                  */
+/*  🏆 Year-End Charts — règles du Billboard américain (points hebdo)    */
 /* ==================================================================== */
 
 private val YE_TABS = listOf("🎵 Titres", "🎤 Artistes", "💿 Albums")
@@ -75,14 +75,20 @@ fun YearEndScreen(onBack: () -> Unit) {
     var year by remember { mutableStateOf<Int?>(null) }
     var data by remember { mutableStateOf<YearEndData?>(null) }
     var tab by remember { mutableIntStateOf(0) }
+    // false = année de référence Billboard (déc. → nov.), true = année civile
+    var calendarYear by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         years = runCatching { repo.years() }.getOrDefault(emptyList())
         if (year == null) year = years.firstOrNull()
     }
-    LaunchedEffect(year) {
+    LaunchedEffect(year, calendarYear) {
         val y = year ?: return@LaunchedEffect
-        data = runCatching { repo.load(y) }.getOrNull()
+        loading = true
+        data = null
+        data = runCatching { repo.load(y, calendarYear) }.getOrNull()
+        loading = false
     }
 
     val artUrl by produceState<String?>(null, data?.topTrack?.imageUrl) {
@@ -122,159 +128,259 @@ fun YearEndScreen(onBack: () -> Unit) {
                 }
             }
 
-            val d = data
-            if (d == null || d.summary.playCount == 0) {
-                Appear(delay = 60) {
-                    Column(Modifier.padding(horizontal = 30.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🏆", fontSize = 46.sp)
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            if (years.isEmpty()) "Pas encore d'écoutes enregistrées : les classements de fin d'année se construisent avec tes écoutes."
-                            else "Aucune écoute enregistrée sur ${year ?: ""}.",
-                            color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center
-                        )
-                    }
+            /* ---------- Bascule année Billboard / année civile ---------- */
+            Appear(delay = 20) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    YeToggle("🏆 Année Billboard", !calendarYear, Modifier.weight(1f)) { calendarYear = false }
+                    YeToggle("📅 Année civile", calendarYear, Modifier.weight(1f)) { calendarYear = true }
                 }
-            } else {
-                /* ---------- Héros : l'année ---------- */
-                Appear(delay = 40) {
-                    Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        StaggerTitle(
-                            "${d.year}",
-                            MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black, fontSize = 74.sp, letterSpacing = (-4).sp),
-                            theme.text
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            "YEAR-END CHARTS", color = theme.primary,
-                            style = MaterialTheme.typography.labelLarge, letterSpacing = 6.sp, fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "Ton année musicale, du 1er janvier au 31 décembre ${d.year}",
-                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
-                        )
-                        if (d.inProgress) {
-                            Spacer(Modifier.height(8.dp))
-                            Box(
-                                Modifier.clip(CircleShape).background(theme.primary.copy(alpha = 0.22f))
-                                    .border(1.dp, theme.primary.copy(alpha = 0.6f), CircleShape)
-                                    .padding(horizontal = 14.dp, vertical = 5.dp)
-                            ) {
-                                Text("EN COURS", color = theme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                            }
-                        }
-                    }
-                }
+            }
 
-                /* ---------- Chiffres de l'année ---------- */
-                Appear(delay = 90) {
-                    Column(Modifier.padding(horizontal = 16.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            YeValue("Écoutes", formatCount(d.summary.playCount), theme.primary, Modifier.weight(1f))
-                            YeValue("Temps", formatDuration(d.summary.totalDurationMs), theme.secondary, Modifier.weight(1f))
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            YeValue("Titres", formatCount(d.summary.distinctTracks), theme.accent, Modifier.weight(1f))
-                            YeValue("Artistes", formatCount(d.summary.distinctArtists), theme.glowSecondary, Modifier.weight(1f))
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            YeValue("Jours actifs", formatCount(d.summary.activeDays), theme.primary, Modifier.weight(1f))
-                            YeValue("Moyenne / jour", String.format(Locale.FRANCE, "%.1f", d.avgPerDay), theme.secondary, Modifier.weight(1f))
-                        }
-                        if (d.previous.playCount > 0) {
-                            Spacer(Modifier.height(10.dp))
-                            val sign = if (d.playsDelta >= 0) "+" else ""
+            when {
+                loading || (data == null && years.isNotEmpty()) -> {
+                    Appear(delay = 40) {
+                        Column(
+                            Modifier.padding(vertical = 48.dp).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("🏆", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
                             Text(
-                                "$sign${formatCount(d.playsDelta)} écoutes (${if (d.playsDelta >= 0) "+" else ""}${d.playsDeltaPct} %) par rapport à ${d.year - 1}",
-                                color = if (d.playsDelta >= 0) Color(0xFF4ADE80) else Color(0xFFFF6B6B),
-                                style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center
+                                "Calcul des points semaine par semaine…",
+                                color = theme.textSecondary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Barème Billboard : 100 pts pour la 1ʳᵉ place, 99 pour la 2ᵉ…",
+                                color = theme.textSecondary.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
                 }
-
-                /* ---------- Faits marquants ---------- */
-                Appear(delay = 140) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                        SectionTitle("✨ L'année en bref")
-                        GlassCard {
-                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                d.topTrack?.let { YeFact("🏆", "Titre de l'année", it.name, it.subtitle, "${formatCount(it.plays)} écoutes") }
-                                d.topArtist?.let { YeFact("👑", "Artiste de l'année", it.name, null, "${formatCount(it.plays)} écoutes") }
-                                d.topAlbum?.let { YeFact("💿", "Album de l'année", it.name, it.subtitle, "${formatCount(it.plays)} écoutes") }
-                                d.bestDay?.let { YeFact("🔥", "Meilleure journée", prettyDay(it.date), null, "${formatCount(it.playCount)} écoutes") }
-                                YeFact("✨", "Artistes découverts", "${d.newArtists}", null, "première écoute en ${d.year}")
-                                YeFact("📊", "Albums distincts", "${d.summary.distinctAlbums}", null, "sur l'année")
-                            }
+                data == null || data!!.summary.playCount == 0 -> {
+                    Appear(delay = 60) {
+                        Column(Modifier.padding(horizontal = 30.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("🏆", fontSize = 46.sp)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                if (years.isEmpty()) "Pas encore d'écoutes enregistrées : les classements de fin d'année se construisent avec tes charts hebdomadaires."
+                                else "Aucune écoute enregistrée sur ${year ?: ""}.",
+                                color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center
+                            )
                         }
                     }
                 }
+                else -> {
+                    val d = data!!
 
-                /* ---------- Onglets ---------- */
-                Appear(delay = 180) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        YE_TABS.forEachIndexed { i, label ->
-                            val selected = tab == i
-                            Box(
-                                Modifier.weight(1f).clip(CircleShape)
-                                    .background(if (selected) Brush.horizontalGradient(listOf(theme.primary, theme.secondary)) else Brush.horizontalGradient(listOf(theme.surface.copy(alpha = 0.9f), theme.surface.copy(alpha = 0.7f))))
-                                    .clickable { tab = i }
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(label, color = if (selected) theme.background else theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    /* ---------- Héros : l'année ---------- */
+                    Appear(delay = 40) {
+                        Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            StaggerTitle(
+                                "${d.year}",
+                                MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black, fontSize = 74.sp, letterSpacing = (-4).sp),
+                                theme.text
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "YEAR-END CHARTS", color = theme.primary,
+                                style = MaterialTheme.typography.labelLarge, letterSpacing = 6.sp, fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                d.windowLabel + if (d.calendarYear) " · année civile" else " · année de référence Billboard",
+                                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "${d.weeksCounted} semaines de charts · points cumulés",
+                                color = theme.textSecondary.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.labelSmall,
+                                textAlign = TextAlign.Center
+                            )
+                            if (d.inProgress) {
+                                Spacer(Modifier.height(8.dp))
+                                Box(
+                                    Modifier.clip(CircleShape).background(theme.primary.copy(alpha = 0.22f))
+                                        .border(1.dp, theme.primary.copy(alpha = 0.6f), CircleShape)
+                                        .padding(horizontal = 14.dp, vertical = 5.dp)
+                                ) {
+                                    Text("EN COURS", color = theme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                                }
                             }
                         }
                     }
-                }
 
-                val rows = when (tab) { 0 -> d.tracks; 1 -> d.artists; else -> d.albums }
-                val top = rows.firstOrNull()?.plays ?: 1
-
-                /* ---------- Podium ---------- */
-                if (rows.size >= 3) {
-                    Appear(delay = 210) {
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            SectionTitle("🥇 Podium — ${chartLabel(tab)}")
-                            rows.take(3).forEachIndexed { i, r ->
-                                PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1)
+                    /* ---------- Chiffres de l'année ---------- */
+                    Appear(delay = 90) {
+                        Column(Modifier.padding(horizontal = 16.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                YeValue("Écoutes", formatCount(d.summary.playCount), theme.primary, Modifier.weight(1f))
+                                YeValue("Temps", formatDuration(d.summary.totalDurationMs), theme.secondary, Modifier.weight(1f))
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                YeValue("Titres", formatCount(d.summary.distinctTracks), theme.accent, Modifier.weight(1f))
+                                YeValue("Artistes", formatCount(d.summary.distinctArtists), theme.glowSecondary, Modifier.weight(1f))
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                YeValue("Jours actifs", formatCount(d.summary.activeDays), theme.primary, Modifier.weight(1f))
+                                YeValue("Moyenne / jour", String.format(Locale.FRANCE, "%.1f", d.avgPerDay), theme.secondary, Modifier.weight(1f))
+                            }
+                            if (d.previous.playCount > 0) {
                                 Spacer(Modifier.height(10.dp))
+                                val sign = if (d.playsDelta >= 0) "+" else ""
+                                Text(
+                                    "$sign${formatCount(d.playsDelta)} écoutes (${if (d.playsDelta >= 0) "+" else ""}${d.playsDeltaPct} %) par rapport à ${d.year - 1}",
+                                    color = if (d.playsDelta >= 0) Color(0xFF4ADE80) else Color(0xFFFF6B6B),
+                                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center
+                                )
                             }
                         }
                     }
-                }
 
-                /* ---------- Le reste du classement ---------- */
-                if (rows.size > 3) {
-                    Appear(delay = 250) {
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                            SectionTitle("📋 ${chartLabel(tab)} — top ${rows.size}")
-                            GlassCard {
-                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    rows.drop(3).forEachIndexed { i, r ->
-                                        YeRow(rank = i + 4, row = r, top = top, circle = tab == 1)
+                    /* ---------- Barème Billboard ---------- */
+                    Appear(delay = 120) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            GlassCard(glow = theme.accent) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("🏆 Règles du Billboard américain", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        "Classement construit à partir de tes charts hebdomadaires : ${d.weeksCounted} semaines comptées. " +
+                                            "100 points pour la 1ʳᵉ place, 99 pour la 2ᵉ… 1 point pour la 100ᵉ. " +
+                                            "On n'additionne pas les écoutes — on cumule les points gagnés semaine après semaine.",
+                                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        "Règle des récurrents : un titre présent depuis 20 semaines et retombé au-delà de la 50ᵉ place sort du classement. " +
+                                            "Remix rattachés à l'original, chaque artiste crédité reçoit l'écoute, compilations exclues.",
+                                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                                    )
+                                    if (!d.calendarYear) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            "Année de référence Billboard : début décembre ${d.year - 1} → fin novembre ${d.year} (comme le vrai Billboard).",
+                                            color = theme.primary.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold
+                                        )
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                Appear(delay = 290) {
-                    Text(
-                        "Moteur et règles du Billboard : un remix compte pour son original, chaque artiste crédité reçoit " +
-                            "l'écoute, les compilations sont exclues et les albums partagés s'affichent « Artistes variés ». " +
-                            "Limites officielles : ${Chart.HOT_100.label} · ${Chart.ARTIST_50.label} · ${Chart.ALBUMS_75.label}.",
-                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 12.dp)
-                    )
+                    /* ---------- Faits marquants ---------- */
+                    Appear(delay = 140) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                            SectionTitle("✨ L'année en bref")
+                            GlassCard {
+                                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    d.topTrack?.let {
+                                        YeFact("🏆", "Titre de l'année", it.name, it.subtitle,
+                                            "${formatCount(it.points)} pts · ${it.weeks} sem.")
+                                    }
+                                    d.topArtist?.let {
+                                        YeFact("👑", "Artiste de l'année", it.name, it.subtitle,
+                                            "${formatCount(it.points)} pts · ${it.weeks} sem.")
+                                    }
+                                    d.topAlbum?.let {
+                                        YeFact("💿", "Album de l'année", it.name, it.subtitle,
+                                            "${formatCount(it.points)} pts · ${it.weeks} sem.")
+                                    }
+                                    d.bestDay?.let {
+                                        YeFact("🔥", "Meilleure journée", prettyDay(it.date), null,
+                                            "${formatCount(it.playCount)} écoutes")
+                                    }
+                                    YeFact("✨", "Artistes découverts", "${d.newArtists}", null, "première écoute en ${d.year}")
+                                    YeFact("📊", "Albums distincts", "${d.summary.distinctAlbums}", null, "sur la période")
+                                }
+                            }
+                        }
+                    }
+
+                    /* ---------- Onglets ---------- */
+                    Appear(delay = 180) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            YE_TABS.forEachIndexed { i, label ->
+                                val selected = tab == i
+                                Box(
+                                    Modifier.weight(1f).clip(CircleShape)
+                                        .background(if (selected) Brush.horizontalGradient(listOf(theme.primary, theme.secondary)) else Brush.horizontalGradient(listOf(theme.surface.copy(alpha = 0.9f), theme.surface.copy(alpha = 0.7f))))
+                                        .clickable { tab = i }
+                                        .padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(label, color = if (selected) theme.background else theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
+
+                    val rows = when (tab) { 0 -> d.tracks; 1 -> d.artists; else -> d.albums }
+                    val top = rows.firstOrNull()?.points ?: 1
+
+                    /* ---------- Podium ---------- */
+                    if (rows.size >= 3) {
+                        Appear(delay = 210) {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                SectionTitle("🥇 Podium — ${chartLabel(tab)}")
+                                rows.take(3).forEachIndexed { i, r ->
+                                    PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1)
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                            }
+                        }
+                    } else if (rows.isNotEmpty()) {
+                        Appear(delay = 210) {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                SectionTitle("🥇 Podium — ${chartLabel(tab)}")
+                                rows.forEachIndexed { i, r ->
+                                    PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1)
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    /* ---------- Le reste du classement ---------- */
+                    if (rows.size > 3) {
+                        Appear(delay = 250) {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                SectionTitle("📋 ${chartLabel(tab)} — top ${rows.size}")
+                                GlassCard {
+                                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        rows.drop(3).forEachIndexed { i, r ->
+                                            YeRow(rank = i + 4, row = r, top = top, circle = tab == 1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Appear(delay = 290) {
+                        Text(
+                            "Barème et règles du Billboard américain : points cumulés sur ${d.weeksCounted} semaines de charts " +
+                                "hebdomadaires (100 pts = 1ʳᵉ place), règle des récurrents (20 semaines / 50ᵉ place), remix rattachés " +
+                                "à l'original, artistes crédités, compilations exclues. " +
+                                "Limites : ${Chart.HOT_100.label} · ${Chart.ARTIST_50.label} · ${Chart.ALBUMS_75.label}.",
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 12.dp)
+                        )
+                    }
                 }
             }
         }
@@ -282,6 +388,30 @@ fun YearEndScreen(onBack: () -> Unit) {
 }
 
 /* ============================== briques ============================== */
+
+@Composable
+private fun YeToggle(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val theme = Nova.theme
+    Box(
+        modifier
+            .clip(CircleShape)
+            .background(
+                if (selected) Brush.horizontalGradient(listOf(theme.primary, theme.secondary))
+                else Brush.horizontalGradient(listOf(theme.surface.copy(alpha = 0.9f), theme.surface.copy(alpha = 0.7f)))
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            color = if (selected) theme.background else theme.text,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.Center
+        )
+    }
+}
 
 @Composable
 private fun YeValue(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
@@ -315,7 +445,7 @@ private fun PodiumCard(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
     val theme = Nova.theme
     val shape = RoundedCornerShape(if (circle) 50.dp else 16.dp)
     val glow = when (rank) { 1 -> Color(0xFFFFD700); 2 -> Color(0xFFC0C0C0); else -> Color(0xFFCD7F32) }
-    val share by animateFloatAsState(row.plays.toFloat() / top.coerceAtLeast(1), tween(900, easing = FastOutSlowInEasing), label = "pod")
+    val share by animateFloatAsState(row.points.toFloat() / top.coerceAtLeast(1), tween(900, easing = FastOutSlowInEasing), label = "pod")
     GlassCard(glow = glow) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -336,9 +466,15 @@ private fun PodiumCard(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
                     if (!row.subtitle.isNullOrBlank()) Text(row.subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(formatCount(row.plays), color = theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
-                    Text("écoutes", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                    Text(formatDuration(row.durationMs), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text(formatCount(row.points), color = theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                    Text("points", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text("${formatCount(row.plays)} écoutes · ${row.weeks} sem.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    if (row.peak > 0) {
+                        Text(
+                            "pic n°${row.peak}" + if (row.weeksAt1 > 0) " · ${row.weeksAt1}× n°1" else "",
+                            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -352,7 +488,7 @@ private fun PodiumCard(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
 @Composable
 private fun YeRow(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
     val theme = Nova.theme
-    val share by animateFloatAsState(row.plays.toFloat() / top.coerceAtLeast(1), tween(900, easing = FastOutSlowInEasing), label = "yerow")
+    val share by animateFloatAsState(row.points.toFloat() / top.coerceAtLeast(1), tween(900, easing = FastOutSlowInEasing), label = "yerow")
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("$rank", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(30.dp))
@@ -369,8 +505,11 @@ private fun YeRow(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
                 if (!row.subtitle.isNullOrBlank()) Text(row.subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(formatCount(row.plays), color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                Text(formatDuration(row.durationMs), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Text(formatCount(row.points), color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (row.peak > 0) "${row.weeks} sem. · pic n°${row.peak}" else "${row.weeks} sem.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
             }
         }
         Spacer(Modifier.height(6.dp))
