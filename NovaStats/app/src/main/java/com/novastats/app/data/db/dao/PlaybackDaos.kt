@@ -40,6 +40,11 @@ data class DailyEntityRow(@androidx.room.ColumnInfo(name = "track_id") val track
 data class IdCount(val id: Long, val plays: Int, @androidx.room.ColumnInfo(name = "duration_ms") val durationMs: Long)
 data class ArtistMonths(@androidx.room.ColumnInfo(name = "artist_id") val artistId: Long, val months: Int, val plays: Int)
 
+data class SourceCount(
+    @androidx.room.ColumnInfo(name = "name") val name: String?,
+    @androidx.room.ColumnInfo(name = "plays") val plays: Int
+)
+
 data class BestTrackDay(
     @Embedded val daily: DailyPlayEntity,
     @androidx.room.ColumnInfo(name = "title") val title: String
@@ -232,6 +237,19 @@ interface ScrobbleDao {
 
     @Query("SELECT MIN(started_at) FROM scrobbles WHERE status = 'CONFIRMED'")
     suspend fun firstPlayTime(): Long?
+
+    /* ---------- Santé de la détection ---------- */
+
+    @Query("SELECT COUNT(*) FROM scrobbles WHERE status = 'CONFIRMED' AND started_at >= :from")
+    fun countSince(from: Long): Flow<Int>
+
+    @Query("SELECT MAX(started_at) FROM scrobbles WHERE status = 'CONFIRMED'")
+    fun lastPlayAt(): Flow<Long?>
+
+    @Query("""SELECT source_app AS name, COUNT(*) AS plays FROM scrobbles
+             WHERE source_app IS NOT NULL AND source_app <> ''
+             GROUP BY source_app ORDER BY plays DESC LIMIT 10""")
+    fun sourceCounts(): Flow<List<SourceCount>>
 
     @Query("SELECT DISTINCT date(started_at / 1000, 'unixepoch', 'localtime') AS d FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY d")
     suspend fun activeDates(): List<String>

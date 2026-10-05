@@ -83,6 +83,7 @@ enum class SettingsPage(val emoji: String, val title: String, val subtitle: Stri
     DATA("🗄️", "Données", "Export / import JSON, sauvegarde auto, suppression"),
     EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
     SERVICE("🛡️", "Service & diagnostic", "État du service, batterie, journal"),
+    HEALTH("🩺", "Santé de la détection", "Score /100, 6 vérifications, plan HiOS"),
     GUIDE("📱", "Guide constructeur", "Samsung, Xiaomi, Huawei, Oppo, Pixel — libérer NovaStats"),
     APIS("🌐", "APIs & enrichissement", "Pochettes, photos — 9 sources"),
     ABOUT("ℹ️", "À propos", "Version, nouveautés, crédits")
@@ -114,7 +115,8 @@ fun SettingsScreen() {
             SettingsPage.NOTIFICATIONS -> NotificationsPage()
             SettingsPage.DATA -> DataPage()
             SettingsPage.EDITOR -> DataEditorScreen(startOnReview = editorReview, focusTrackId = editorFocus)
-            SettingsPage.SERVICE -> ServicePage()
+            SettingsPage.SERVICE -> ServicePage(onOpenHealth = { page = SettingsPage.HEALTH })
+            SettingsPage.HEALTH -> DetectionHealthScreen { page = null }
             SettingsPage.GUIDE -> com.novastats.app.ui.onboarding.GuideStepScreen(com.novastats.app.ui.onboarding.rememberObAudio(), Nova.theme, embedded = true)
             SettingsPage.APIS -> ApisPage()
             SettingsPage.ABOUT -> AboutPage()
@@ -660,7 +662,7 @@ private fun DataPage() {
 /* ================================ SERVICE ================================ */
 
 @Composable
-private fun ServicePage() {
+private fun ServicePage(onOpenHealth: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as NovaStatsApp
     val settings = app.settings
@@ -710,6 +712,20 @@ private fun ServicePage() {
                     onClick = { com.novastats.app.service.Watchdog.revive(context, "manuel") }, modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
                 ) { Text("🐕 Relancer le service maintenant") }
+            }
+        }
+        SectionTitle("🩺 Santé de la détection")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "Le diagnostic complet : un score sur 100, les 6 vérifications à passer, un test en direct de 60 s et le plan d'action pour ton téléphone.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onOpenHealth, modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary, contentColor = theme.background)
+                ) { Text("🩺 Ouvrir la Santé de la détection") }
             }
         }
         SectionTitle("🔎 Diagnostic détection")
@@ -904,6 +920,15 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.16.0" to listOf(
+        "\ud83e\ude7a **Nouvel écran « Santé de la détection »** (Réglages → 🩺 Santé de la détection) : un **score sur 100** affich\u00e9 sur un cadran anim\u00e9, avec un verdict (Excellente / Correcte / Fragile / Bloqu\u00e9e) et le nombre de points \u00e0 corriger.",
+        "\ud83d\udd0d **Les 6 v\u00e9rifications** pass\u00e9es en revue une par une : acc\u00e8s aux notifications, service connect\u00e9, MediaSession, signe de vie du service, optimisation batterie, activit\u00e9 sur 7 jours. Chaque point rouge propose le bouton qui ouvre directement le bon écran.",
+        "\ud83d\udcc8 **Signes vitaux** : \u00e9coutes sur 24 h, derni\u00e8re \u00e9coute capt\u00e9e, \u00e9coutes sur 7 jours et dernier battement de c\u0153ur du service, en cartes de verre.",
+        "\ud83c\udfaf **Test en direct de 60 s** : lance un titre, appuie, et NovaStats compte en direct tout ce qu'il d\u00e9tecte pendant une minute — verdict imm\u00e9diat \u00e0 la fin.",
+        "\ud83d\udcf1 **Plan d'action HiOS / Phone Master** : d\u00e8tection automatique du constructeur. Sur Tecno / Infinix / Itel, les 6 étapes HiOS (d\u00e9marrage automatique, Phone Master, applications prot\u00e9g\u00e9es, verrouillage dans les r\u00e9cents, nettoyage automatique) avec un bouton « Ouvrir » \u00e0 chaque étape. Plan g\u00e9n\u00e9rique sur les autres marques.",
+        "\ud83d\udce1 **Applications sources** : d'où viennent tes écoutes enregistrées (Spotify, YouTube Music, Boomplay…), avec le nombre d'écoutes pour chacune.",
+        "\ud83e\uddfa Le score se recalcule tout seul : corrige un point, il monte immédiatement. Journal du service copiable."
+    ),
     "0.15.2" to listOf(
         "\ud83c\udfa8 **Fonds artistiques encore renforc\u00e9s** : l'image flout\u00e9e monte \u00e0 98 % d'opacit\u00e9 et le voile est encore all\u00e9g\u00e9 en haut d'\u00e9cran (seul le bas reste sombre pour la lisibilit\u00e9 des listes).",
         "\ud83c\udf0c **Nouveau traitement de la pochette** : saturation x1,45 et l\u00e9ger gain de luminosit\u00e9, pour qu'une pochette sombre donne enfin une vraie couleur \u00e0 l'\u00e9cran au lieu d'une tache grise.",
