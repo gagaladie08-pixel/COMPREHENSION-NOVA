@@ -114,7 +114,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         // Fond plein écran, très assombri pour garder la liste lisible
-        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.74f, scrim = 0.92f)
+        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 1f, scrim = 0.70f)
         RewindParticles(theme, Modifier.fillMaxSize())
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         /* ---------- 0. Nova Rewind ---------- */

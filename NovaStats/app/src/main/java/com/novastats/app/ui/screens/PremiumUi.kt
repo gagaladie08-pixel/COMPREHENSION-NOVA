@@ -49,6 +49,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -89,9 +91,9 @@ fun RewindBackdrop(
     theme: NovaTheme,
     modifier: Modifier = Modifier,
     /** Opacité de l'image floutée. */
-    artAlpha: Float = 0.78f,
+    artAlpha: Float = 0.95f,
     /** Force du voile sombre par-dessus (1 = cinéma, >1 = encore plus sombre, <1 = plus clair). */
-    scrim: Float = 0.85f,
+    scrim: Float = 0.82f,
     /** Nappes de couleur qui dérivent. */
     aurora: Boolean = true
 ) {
@@ -107,6 +109,7 @@ fun RewindBackdrop(
                 model = ImageRequest.Builder(ctx).data(url).size(96).crossfade(700).allowHardware(false).build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                colorFilter = ColorFilter.colorMatrix(rememberArtBoost()),
                 modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = ken; scaleY = ken; alpha = artAlpha }
             )
         }
@@ -115,9 +118,9 @@ fun RewindBackdrop(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
                     listOf(
-                        theme.background.copy(alpha = (0.46f * scrim).coerceIn(0f, 1f)),
-                        theme.background.copy(alpha = (0.74f * scrim).coerceIn(0f, 1f)),
-                        Color.Black.copy(alpha = (0.93f * scrim).coerceIn(0f, 1f))
+                        theme.background.copy(alpha = (0.40f * scrim).coerceIn(0f, 1f)),
+                        theme.background.copy(alpha = (0.62f * scrim).coerceIn(0f, 1f)),
+                        Color.Black.copy(alpha = (0.88f * scrim).coerceIn(0f, 1f))
                     )
                 )
             )
@@ -130,12 +133,28 @@ fun RewindBackdrop(
                 val cy = size.height * (0.34f + 0.30f * sin(a * 0.8f + i))
                 val r = size.width * (0.58f + 0.14f * sin(a * 1.3f))
                 drawCircle(
-                    brush = Brush.radialGradient(listOf(c.copy(alpha = 0.30f), Color.Transparent), center = Offset(cx, cy), radius = r),
+                    brush = Brush.radialGradient(listOf(c.copy(alpha = 0.36f), Color.Transparent), center = Offset(cx, cy), radius = r),
                     radius = r, center = Offset(cx, cy)
                 )
             }
         }
     }
+}
+
+/** Sature et éclaircit la pochette du fond : sinon une pochette sombre reste une tache grise à l'écran. */
+@Composable
+private fun rememberArtBoost(): ColorMatrix = remember {
+    val sat = ColorMatrix().apply { setToSaturation(1.45f) }
+    val gain = ColorMatrix(
+        floatArrayOf(
+            1.30f, 0f, 0f, 0f, 0.05f,
+            0f, 1.30f, 0f, 0f, 0.05f,
+            0f, 0f, 1.30f, 0f, 0.05f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    )
+    sat.setToConcat(gain, sat)
+    sat
 }
 
 /** Particules qui montent lentement. */
@@ -482,7 +501,7 @@ fun MedalBadge(level: com.novastats.app.domain.CertLevel?, multiplier: Int = 1, 
 fun ScreenBackdrop(artUrl: String?, content: @Composable BoxScope.() -> Unit) {
     val theme = Nova.theme
     Box(Modifier.fillMaxSize()) {
-        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.70f, scrim = 0.95f)
+        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.98f, scrim = 0.76f)
         RewindParticles(theme, Modifier.fillMaxSize())
         content()
     }

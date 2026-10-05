@@ -904,6 +904,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.15.2" to listOf(
+        "\ud83c\udfa8 **Fonds artistiques encore renforc\u00e9s** : l'image flout\u00e9e monte \u00e0 98 % d'opacit\u00e9 et le voile est encore all\u00e9g\u00e9 en haut d'\u00e9cran (seul le bas reste sombre pour la lisibilit\u00e9 des listes).",
+        "\ud83c\udf0c **Nouveau traitement de la pochette** : saturation x1,45 et l\u00e9ger gain de luminosit\u00e9, pour qu'une pochette sombre donne enfin une vraie couleur \u00e0 l'\u00e9cran au lieu d'une tache grise.",
+        "\ud83c\udf1f Nappes de couleur \u00e0 36 % d'opacit\u00e9 (au lieu de 30 %)."
+    ),
     "0.15.1" to listOf(
         "\ud83d\udd0a **Les fonds artistiques \u00e9taient trop discrets** (quasiment invisibles) : l'opacit\u00e9 de l'image et la force du voile se multipliaient. Nouveau dosage : l'art flout\u00e9 est nettement pr\u00e9sent en haut de l'\u00e9cran et s'efface vers le bas pour garder les listes lisibles.",
         "\ud83c\udf1f Nappes de couleur plus larges et plus lumineuses, particules plus visibles, image de fond en meilleure d\u00e9finition (96 px au lieu de 64 px avant \u00e9tirement)."
