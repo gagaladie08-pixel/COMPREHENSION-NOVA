@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.novastats.app.domain.NotificationPreferenceRules
 import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.ui.theme.NovaThemes
 import kotlinx.coroutines.flow.Flow
@@ -146,9 +147,20 @@ class SettingsRepository(private val context: Context) {
     /* ---- Notifications ---- */
     /** Notifications désactivées (toutes actives par défaut). */
     val disabledNotifications: Flow<Set<String>> = context.dataStore.data.map { it[Keys.NOTIF_DISABLED] ?: emptySet() }
+
     suspend fun setNotificationEnabled(key: String, enabled: Boolean) = context.dataStore.edit {
-        val cur = it[Keys.NOTIF_DISABLED] ?: emptySet()
-        it[Keys.NOTIF_DISABLED] = if (enabled) cur - key else cur + key
+        val disabled = NotificationPreferenceRules.setEnabled(it[Keys.NOTIF_DISABLED] ?: emptySet(), key, enabled)
+        if (disabled.isEmpty()) it.remove(Keys.NOTIF_DISABLED) else it[Keys.NOTIF_DISABLED] = disabled
+    }
+
+    /** Met à jour les catégories en une seule transaction DataStore (évite 15 écritures sur « Tout activer »). */
+    suspend fun setAllNotificationsEnabled(enabled: Boolean) = context.dataStore.edit {
+        val disabled = NotificationPreferenceRules.setAllEnabled(
+            it[Keys.NOTIF_DISABLED] ?: emptySet(),
+            Notif.ALL,
+            enabled
+        )
+        if (disabled.isEmpty()) it.remove(Keys.NOTIF_DISABLED) else it[Keys.NOTIF_DISABLED] = disabled
     }
 
     /* ---- Premium / avancé ---- */

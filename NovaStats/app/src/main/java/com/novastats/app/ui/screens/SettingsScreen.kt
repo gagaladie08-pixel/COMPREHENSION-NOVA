@@ -62,6 +62,7 @@ import com.novastats.app.data.api.EnrichmentState
 import com.novastats.app.data.importer.BackupExporter
 import com.novastats.app.data.importer.LegacyBackupImporter
 import com.novastats.app.data.repository.SettingsRepository
+import com.novastats.app.domain.NotificationPreferenceRules
 import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.service.BackupWorker
 import com.novastats.app.service.DetectionState
@@ -519,9 +520,9 @@ private fun NotificationsPage() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                val allOn = disabled.isEmpty()
+                val allOn = NotificationPreferenceRules.areAllEnabled(disabled, SettingsRepository.Notif.ALL)
                 ToggleRow("Tout activer", "Interrupteur général des ${SettingsRepository.Notif.ALL.size} notifications", allOn) { on ->
-                    scope.launch { SettingsRepository.Notif.ALL.forEach { settings.setNotificationEnabled(it, on) } }
+                    scope.launch { settings.setAllNotificationsEnabled(on) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Text("Notifications système", color = theme.text, fontWeight = FontWeight.SemiBold)
