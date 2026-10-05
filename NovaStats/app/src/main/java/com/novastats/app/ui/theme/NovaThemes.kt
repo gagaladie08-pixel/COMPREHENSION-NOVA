@@ -410,3 +410,37 @@ data class CustomThemeSpec(
         )
     }
 }
+
+/** Couleurs transverses (indépendantes du thème). */
+object NovaColors {
+    val Gold = Color(0xFFFFD700)
+    val Silver = Color(0xFFC0C0C0)
+    val Platinum = Color(0xFFE5E4E2)
+    val Diamond = Color(0xFF00FFFF)
+    val Up = Color(0xFF2ECC71)
+    val Down = Color(0xFFE74C3C)
+    val Neutral = Color(0xFF95A5A6)
+    val DirectDebut = Color(0xFF7B2FBE)
+    /** Arc-en-ciel pride (Survivor / Rainbow Pop). */
+    val Rainbow = listOf(Color(0xFFE40303), Color(0xFFFF8C00), Color(0xFFFFED00), Color(0xFF008026), Color(0xFF004DFF), Color(0xFF750787))
+    /** Drapeau trans (bleu ciel, rose, blanc). */
+    val Trans = listOf(Color(0xFF5BCEFA), Color(0xFFF5A9B8), Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA))
+    /** Drapeau bi (magenta, lavande, bleu). */
+    val Bi = listOf(Color(0xFFD60270), Color(0xFF9B4F96), Color(0xFF0038A8))
+    /** Drapeau gay (hommes) — verts, blanc, bleus, indigo. */
+    val Gay = listOf(Color(0xFF078D70), Color(0xFF26CEAA), Color(0xFF98E8C1), Color(0xFFFFFFFF), Color(0xFF7BADE2), Color(0xFF5049CC), Color(0xFF3D1A78))
+    /** Drapeau lesbien (oranges, blanc, roses). */
+    val Lesbian = listOf(Color(0xFFD52D00), Color(0xFFFF9A56), Color(0xFFFFFFFF), Color(0xFFD362A4), Color(0xFFA30262))
+    /** Drapeau pan. */
+    val Pan = listOf(Color(0xFFFF218C), Color(0xFFFFD800), Color(0xFF21B1FF))
+    /** Drapeau non-binaire. */
+    val NonBinary = listOf(Color(0xFFFCF434), Color(0xFFFFFFFF), Color(0xFF9C59D1), Color(0xFF2C2C2C))
+    /** Chevron du drapeau Progress (blanc, rose, bleu, marron, noir). */
+    val Progress = listOf(Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA), Color(0xFF613915), Color(0xFF000000))
+    /** Tous les drapeaux du thème Survivor, dans l'ordre d'affichage. */
+    val PrideFlags: List<List<Color>> = listOf(Rainbow, Trans, Bi, Gay, Lesbian, Pan, NonBinary)
+    /** Palette qui tourne (texte secondaire / courbes Survivor) : arc-en-ciel → trans → bi → gay. */
+    val PrideCycle: List<Color> = Rainbow + listOf(Color(0xFF5BCEFA), Color(0xFFF5A9B8), Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA)) + Bi + listOf(Color(0xFF078D70), Color(0xFF26CEAA), Color(0xFF7BADE2), Color(0xFF5049CC))
+    /** Confettis Survivor : toutes les couleurs de tous les drapeaux. */
+    val PrideConfetti: List<Color> = PrideFlags.flatten().distinct()
+}
