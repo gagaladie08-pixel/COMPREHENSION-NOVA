@@ -143,7 +143,7 @@ fun PantheonScreen() {
     }
 
     ScreenBackdrop(artUrl) {
-    LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
+    LazyColumn(Modifier.fillMaxSize()) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text("👑 Panthéon", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)

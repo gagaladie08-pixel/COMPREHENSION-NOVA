@@ -102,10 +102,16 @@ fun RecordsScreen() {
         }
     }
 
+    // 🎨 Art du titre le plus écouté (all time) en fond d'écran
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching { db.trackDao().topAllTime(1).first().firstOrNull()?.track?.coverUrl }.getOrNull()
+    }
+
     when {
         entry != null -> RecordEntryPage(entry, onBack = { entryStack = entryStack.dropLast(1) }, onEntity = { detail = it }, onEntry = { entryStack = entryStack + it })
         page != null -> RecordPage(page!!, pageState!!, onBack = { page = null }, onEntry = { entryStack = listOf(it) })
-        else -> LazyColumn(Modifier.fillMaxSize().background(theme.background), state = mainList) {
+        else -> ScreenBackdrop(artUrl) {
+        LazyColumn(Modifier.fillMaxSize(), state = mainList) {
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -169,6 +175,8 @@ fun RecordsScreen() {
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+        }
+
     }
 
     DetailPopupHost(detail) { detail = null }
@@ -232,6 +240,7 @@ private fun Tag(text: String) {
 private fun RecordSearchResults(query: String, onOpen: (RecordEntryRef) -> Unit) {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
     var rows by remember { mutableStateOf<List<RecordRow>>(emptyList()) }
     LaunchedEffect(query) {
         rows = if (query.trim().length < 2) emptyList() else runCatching { app.database.recordDao().search(query.trim()) }.getOrDefault(emptyList())

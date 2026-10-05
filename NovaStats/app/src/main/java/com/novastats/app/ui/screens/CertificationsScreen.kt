@@ -150,7 +150,7 @@ fun CertificationsScreen() {
     }
 
     ScreenBackdrop(artUrl) {
-    LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
+    LazyColumn(Modifier.fillMaxSize()) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text("🏅 Certifications", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)

@@ -124,7 +124,7 @@ fun HallOfFameScreen() {
     }
 
     ScreenBackdrop(artUrl) {
-    LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
+    LazyColumn(Modifier.fillMaxSize()) {
         item {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text("🏛️ Hall of Fame", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)
