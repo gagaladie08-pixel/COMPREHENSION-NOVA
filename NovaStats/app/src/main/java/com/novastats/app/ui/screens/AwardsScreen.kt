@@ -83,6 +83,7 @@ fun AwardsScreen() {
     val theme = Nova.theme
     val ctx = LocalContext.current
     val app = ctx.applicationContext as NovaStatsApp
+    val db = app.database
     val scope = rememberCoroutineScope()
     val today = Dates.today()
 

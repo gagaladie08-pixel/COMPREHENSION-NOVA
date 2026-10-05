@@ -118,6 +118,7 @@ private fun CertCandidate.cert(): Certification? = level?.let { l -> CertLevel.e
 fun CertificationsScreen() {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
+    val db = app.database
     var tab by rememberSaveable { mutableStateOf(0) }
     var levelFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
