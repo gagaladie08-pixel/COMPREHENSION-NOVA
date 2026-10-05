@@ -109,7 +109,7 @@ fun RewindBackdrop(
                 model = ImageRequest.Builder(ctx).data(url).size(96).crossfade(700).allowHardware(false).build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                colorFilter = ColorFilter.colorMatrix(rememberArtBoost()),
+                colorFilter = ColorFilter.colorMatrix(remember { artBoost() }),
                 modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = ken; scaleY = ken; alpha = artAlpha }
             )
         }
@@ -142,16 +142,14 @@ fun RewindBackdrop(
 }
 
 /** Sature et éclaircit la pochette du fond : sinon une pochette sombre reste une tache grise à l'écran. */
-private fun rememberArtBoost(): ColorMatrix = remember {
-    ColorMatrix(
-        floatArrayOf(
-            1.760f, -0.418f, -0.042f, 0f, 0.050f,
-            -0.125f, 1.467f, -0.042f, 0f, 0.050f,
-            -0.125f, -0.418f, 1.843f, 0f, 0.050f,
-            0f, 0f, 0f, 1f, 0f
-        )
+private fun artBoost(): ColorMatrix = ColorMatrix(
+    floatArrayOf(
+        1.760f, -0.418f, -0.042f, 0f, 0.050f,
+        -0.125f, 1.467f, -0.042f, 0f, 0.050f,
+        -0.125f, -0.418f, 1.843f, 0f, 0.050f,
+        0f, 0f, 0f, 1f, 0f
     )
-}
+)
 
 /** Particules qui montent lentement. */
 @Composable
