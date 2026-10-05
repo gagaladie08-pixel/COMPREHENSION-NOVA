@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.novastats.app.NovaStatsApp
+import com.novastats.app.service.AchievementNotifier
 import com.novastats.app.data.db.dao.BillboardDao
 import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.domain.BillboardDates
@@ -170,7 +171,12 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         // Publie les snapshots manquants (nouveau jour / nouvelle semaine) — la période en cours n'a pas de snapshot
-        viewModelScope.launch(Dispatchers.IO) { runCatching { app.billboard.refreshCurrent() } }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val newInductions = app.billboard.refreshCurrent(collectNewInductions = true)
+                if (newInductions.isNotEmpty()) AchievementNotifier.notify(app, newInductions)
+            }
+        }
     }
 
     /* ------------------------------ actions ------------------------------ */

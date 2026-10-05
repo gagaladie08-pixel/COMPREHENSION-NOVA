@@ -67,6 +67,7 @@ import com.novastats.app.service.BackupWorker
 import com.novastats.app.service.DetectionState
 import com.novastats.app.service.EnrichmentWorker
 import com.novastats.app.service.NovaListenerService
+import com.novastats.app.service.NotificationAccess
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaThemes
 import kotlinx.coroutines.Dispatchers
@@ -79,7 +80,7 @@ import java.util.Locale
 enum class SettingsPage(val emoji: String, val title: String, val subtitle: String) {
     DETECTION("🎵", "Détection", "Seuil, apps sources, blacklist, filtres"),
     APPEARANCE("🎨", "Apparence", "15 thèmes néon · taille du texte · retour haptique"),
-    NOTIFICATIONS("🔔", "Notifications", "Certifications, Panthéon, Hall of Fame"),
+    NOTIFICATIONS("🔔", "Notifications", "Récompenses, vérifications, Awards et charts"),
     DATA("🗄️", "Données", "Export / import JSON, sauvegarde auto, suppression"),
     EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
     SERVICE("🛡️", "Service & diagnostic", "État du service, batterie, journal"),
@@ -102,8 +103,12 @@ fun SettingsScreen() {
     val pending by com.novastats.app.ui.navigation.PendingNav.target.collectAsStateWithLifecycle()
     LaunchedEffect(pending) {
         val t = pending ?: return@LaunchedEffect
-        if (t.name == com.novastats.app.ui.navigation.PendingNav.TARGET_REVIEW) { editorReview = true; editorFocus = t.trackId; page = SettingsPage.EDITOR }
-        com.novastats.app.ui.navigation.PendingNav.consume()
+        if (t.name == com.novastats.app.ui.navigation.PendingNav.TARGET_REVIEW) {
+            editorReview = true
+            editorFocus = t.trackId
+            page = SettingsPage.EDITOR
+            com.novastats.app.ui.navigation.PendingNav.consume()
+        }
     }
     BackHandler(enabled = page != null) { page = null; editorReview = false; editorFocus = null }
     val current = page
@@ -482,21 +487,33 @@ private fun NotificationsPage() {
     val theme = Nova.theme
     val disabled by settings.disabledNotifications.collectAsStateWithLifecycle(initialValue = emptySet())
     val feed by app.database.notificationFeedDao().recent(10).collectAsStateWithLifecycle(initialValue = emptyList())
+    var systemAllowed by remember { mutableStateOf(NotificationAccess.canPost(context)) }
+    var permissionAsked by rememberSaveable { mutableStateOf(false) }
+    val postPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permissionAsked = true
+        systemAllowed = granted && NotificationAccess.canPost(context)
+    }
+    LifecycleResumeEffect(Unit) {
+        systemAllowed = NotificationAccess.canPost(context)
+        onPauseOrDispose { }
+    }
 
     val groups = listOf(
-        "📊 Charts" to listOf(
-            SettingsRepository.Notif.WEEKLY_CHARTS to "Cette semaine dans tes charts — chaque lundi vers 9 h"
-        ),
+        "📊 Charts" to listOf(SettingsRepository.Notif.WEEKLY_CHARTS to "Cette semaine dans tes charts — chaque lundi vers 9 h"),
         "🏆 Certifications" to listOf(
-            SettingsRepository.Notif.CERT_SILVER to "🥉 Argent (25 écoutes · album 50) — son léger", SettingsRepository.Notif.CERT_GOLD to "🥈 Or (50 · 100) — son léger",
-            SettingsRepository.Notif.CERT_PLATINUM to "🥇 Platine (100 · 200) — son intermédiaire", SettingsRepository.Notif.CERT_DIAMOND to "💎 Diamant (350 · 700) — son épique + vibration",
-            SettingsRepository.Notif.CERT_MULTIPLIERS to "✖️ Multi-Diamant (2x, 3x…) — son épique + vibration"
+            SettingsRepository.Notif.CERT_SILVER to "🥉 Argent — carillon délicat", SettingsRepository.Notif.CERT_GOLD to "🥈 Or — accord doré",
+            SettingsRepository.Notif.CERT_PLATINUM to "🥇 Platine — montée lumineuse", SettingsRepository.Notif.CERT_DIAMOND to "💎 Diamant — fanfare cristalline",
+            SettingsRepository.Notif.CERT_MULTIPLIERS to "✖️ Multiplicateurs — signature ascendante à chaque palier"
         ),
         "👑 Panthéon" to listOf(
-            SettingsRepository.Notif.P_STAR to "⭐ Star", SettingsRepository.Notif.P_SUPERSTAR to "🌟 Superstar", SettingsRepository.Notif.P_MEGASTAR to "💫 Megastar",
-            SettingsRepository.Notif.P_LEGENDE to "👑 Légende", SettingsRepository.Notif.P_MYTHIQUE to "🔱 Mythique"
+            SettingsRepository.Notif.P_STAR to "⭐ Star — carillon léger", SettingsRepository.Notif.P_SUPERSTAR to "🌟 Superstar — motif ascendant",
+            SettingsRepository.Notif.P_MEGASTAR to "💫 Megastar — accord ample", SettingsRepository.Notif.P_LEGENDE to "👑 Légende — fanfare royale",
+            SettingsRepository.Notif.P_MYTHIQUE to "🔱 Mythique — carillon holographique"
         ),
-        "🏛️ Hall of Fame" to listOf(SettingsRepository.Notif.HOF to "Nouvelle intronisation (Direct Debut, Long Run, Triple Debut, Legendary Run)")
+        "🏛️ Hall of Fame" to listOf(SettingsRepository.Notif.HOF to "Nouvelle intronisation historique"),
+        "🏆 Nova Awards" to listOf(SettingsRepository.Notif.AWARDS_UNLOCK to "Déblocage après 60 jours d'utilisation · palmarès annuel"),
+        "✨ Premiers pas" to listOf(SettingsRepository.Notif.FIRST_SCROBBLE to "Bienvenue lors de ta première écoute enregistrée"),
+        "🟡 À vérifier" to listOf(SettingsRepository.Notif.REVIEW to "Correspondances musicales à confirmer dans l'Éditeur")
     )
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -506,10 +523,29 @@ private fun NotificationsPage() {
                 ToggleRow("Tout activer", "Interrupteur général des ${SettingsRepository.Notif.ALL.size} notifications", allOn) { on ->
                     scope.launch { SettingsRepository.Notif.ALL.forEach { settings.setNotificationEnabled(it, on) } }
                 }
+                Spacer(Modifier.height(8.dp))
+                Text("Notifications système", color = theme.text, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (systemAllowed) "Autorisées — sons et importance se règlent canal par canal dans Android."
+                    else "Bloquées par Android : les nouveautés resteront visibles dans le fil NovaStats.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                if (!systemAllowed) {
+                    OutlinedButton(
+                        onClick = {
+                            if (android.os.Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(context) && !permissionAsked) {
+                                postPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(if (!NotificationAccess.hasRuntimePermission(context) && !permissionAsked) "🔔 Autoriser les notifications" else "Ouvrir les réglages Android", color = theme.primary) }
+                }
                 Button(
                     onClick = { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) },
                     modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
-                ) { Text("🔔 Réglages Android (son, importance)") }
+                ) { Text("⚙️ Sons et importance des notifications") }
             }
         }
         groups.forEach { (title, items) ->
@@ -525,7 +561,7 @@ private fun NotificationsPage() {
         SectionTitle("🕘 Dernières notifications")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                if (feed.isEmpty()) Text("Aucune pour l'instant — elles apparaîtront ici et sur l'Accueil.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                if (feed.isEmpty()) Text("Aucune pour l'instant — les nouveautés apparaîtront ici.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 feed.forEach { n -> Text("• ${n.message}", color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
             }
         }
@@ -960,6 +996,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.7" to listOf(
+        "🔔 **Notifications réparées et enrichies** : demande Android 13+, 15 réglages indépendants, sons/canaux dédiés, notifications de première écoute, vérification, Awards après 60 jours et intronisations Hall of Fame fiables.",
+        "✨ **Récapitulatif premium** : bilans hebdomadaires plus détaillés, fil d'actualités unifié et notifications qui ouvrent directement le bon onglet."
+    ),
     "0.22.6" to listOf(
         "🔔 **Cette semaine dans tes charts** : chaque lundi vers 9 h, un récap local du top titre, artiste et album de la semaine complète précédente, avec l'évolution du n°1 par rapport à la semaine d'avant. Une option dédiée permet de le désactiver."
     ),

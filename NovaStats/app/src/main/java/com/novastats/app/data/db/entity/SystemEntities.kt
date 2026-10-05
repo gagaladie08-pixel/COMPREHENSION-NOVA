@@ -49,7 +49,7 @@ data class DailyStatsEntity(
 @Entity(tableName = "notifications_feed", indices = [Index("created_at"), Index("is_read")])
 data class NotificationFeedEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    /** CERTIFICATION / PANTHEON / HOF / RECORD / WEEKLY_CHARTS */
+    /** CERTIFICATION / PANTHEON / HALL_OF_FAME / FIRST_SCROBBLE / REVIEW / WEEKLY_CHARTS / AWARDS_UNLOCK */
     val type: String,
     @ColumnInfo(name = "entity_id") val entityId: Long,
     @ColumnInfo(name = "entity_type") val entityType: String,

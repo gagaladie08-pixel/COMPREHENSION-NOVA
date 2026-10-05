@@ -7,7 +7,6 @@ import com.novastats.app.data.db.dao.RankedEntry
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.HallOfFameBadgeEntity
 import com.novastats.app.data.db.entity.HallOfFameEntity
-import com.novastats.app.data.db.entity.NotificationFeedEntity
 import com.novastats.app.data.db.entity.SnapshotAlbumEntity
 import com.novastats.app.data.db.entity.SnapshotArtistEntity
 import com.novastats.app.data.db.entity.SnapshotEntity
@@ -50,7 +49,7 @@ class BillboardEngine(private val db: NovaDatabase) {
             val anchors = BillboardDates.allAnchors(period, first, today)
             anchors.forEachIndexed { i, anchor ->
                 if (i % 10 == 0) onProgress("Billboard ${period.label} : ${i + 1}/${anchors.size}")
-                computeSnapshot(period, anchor, today, notify = false)
+                computeSnapshot(period, anchor, today)
             }
         }
     }
@@ -59,26 +58,45 @@ class BillboardEngine(private val db: NovaDatabase) {
      * Publie les snapshots manquants jusqu'à la dernière période close (rattrape les jours sans écoute ni ouverture),
      * et re-fige la dernière publiée (une écoute confirmée juste après minuit peut encore appartenir à la veille).
      */
-    suspend fun refreshCurrent(today: LocalDate = Dates.today()) {
-        val first = db.dailyPlayDao().firstDate()?.let { Dates.parse(it) } ?: return
+    suspend fun refreshCurrent(
+        today: LocalDate = Dates.today(),
+        collectNewInductions: Boolean = false
+    ): List<StatsRebuilder.Achievement> {
+        val first = db.dailyPlayDao().firstDate()?.let { Dates.parse(it) } ?: return emptyList()
+        val previousHof = if (collectNewInductions) db.hallOfFameDao().all()
+            .mapTo(mutableSetOf()) { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }
+        else emptySet()
         for (period in listOf(Period.WEEKLY, Period.MONTHLY, Period.YEARLY, Period.GLOBAL, Period.DAILY)) {
             val latest = BillboardDates.latest(period, today)
             if (BillboardDates.range(period, latest, today).to < first) continue
             val lastPublished = db.snapshotDao().latestDate(period.dbName)?.let { Dates.parse(it) }
             val from = if (lastPublished == null || lastPublished < first) first else lastPublished
-            for (anchor in BillboardDates.allAnchors(period, from, today)) computeSnapshot(period, anchor, today, notify = true)
+            for (anchor in BillboardDates.allAnchors(period, from, today)) computeSnapshot(period, anchor, today)
         }
-        // Triple Debut : un jour dont le #1 est aussi #1 de sa semaine ET de son mois — réévalué quand semaine/mois se publient
+        // Triple Debut : un jour dont le #1 est aussi #1 de sa semaine ET de son mois — réévalué quand semaine/mois se publient.
         val week = BillboardDates.range(Period.WEEKLY, BillboardDates.latest(Period.WEEKLY, today), today)
         val month = BillboardDates.range(Period.MONTHLY, BillboardDates.latest(Period.MONTHLY, today), today)
-        for (r in listOf(week, month)) {
-            var d = r.from
-            while (!d.isAfter(r.to)) { evaluateTripleDebut(d, notify = true); d = d.plusDays(1) }
+        for (range in listOf(week, month)) {
+            var day = range.from
+            while (!day.isAfter(range.to)) { evaluateTripleDebut(day); day = day.plusDays(1) }
         }
+        if (!collectNewInductions) return emptyList()
+        val newInductions = mutableListOf<StatsRebuilder.Achievement>()
+        for (entry in db.hallOfFameDao().all()) {
+            val key = listOf(entry.entityType, entry.entityId.toString(), entry.periodType, entry.entryType)
+            if (key in previousHof) continue
+            val name = when (entry.entityType) {
+                EntityType.ALBUM -> db.albumDao().getById(entry.entityId)?.title
+                EntityType.ARTIST -> db.artistDao().getById(entry.entityId)?.name
+                else -> db.trackDao().getById(entry.entityId)?.title
+            }
+            newInductions += StatsRebuilder.Achievement("HALL_OF_FAME", entry.entityType, entry.entityId, entry.entryType, name ?: "—")
+        }
+        return newInductions
     }
 
     /** Calcule (ou recalcule) les 3 charts d'un snapshot. */
-    suspend fun computeSnapshot(period: Period, anchor: LocalDate, today: LocalDate = Dates.today(), notify: Boolean) {
+    suspend fun computeSnapshot(period: Period, anchor: LocalDate, today: LocalDate = Dates.today()) {
         val iso = anchor.format(Dates.ISO)
         val range = BillboardDates.range(period, anchor, today)
         val prevIso = BillboardDates.previous(period, anchor).format(Dates.ISO)
@@ -117,9 +135,9 @@ class BillboardEngine(private val db: NovaDatabase) {
 
             // ---- Hall of Fame (périodes closes uniquement)
             if (BillboardDates.isClosed(period, anchor, today)) {
-                evaluateHallOfFame(period, anchor, EntityType.TRACK, trackRows.firstOrNull(), notify)
-                evaluateHallOfFame(period, anchor, EntityType.ARTIST, artistRows.firstOrNull(), notify)
-                evaluateHallOfFame(period, anchor, EntityType.ALBUM, albumRows.firstOrNull(), notify)
+                evaluateHallOfFame(period, anchor, EntityType.TRACK, trackRows.firstOrNull())
+                evaluateHallOfFame(period, anchor, EntityType.ARTIST, artistRows.firstOrNull())
+                evaluateHallOfFame(period, anchor, EntityType.ALBUM, albumRows.firstOrNull())
             }
         }
     }
@@ -205,37 +223,37 @@ class BillboardEngine(private val db: NovaDatabase) {
 
     /* ------------------------------ Hall of Fame ------------------------------ */
 
-    private suspend fun evaluateHallOfFame(period: Period, anchor: LocalDate, entityType: String, top: Computed?, notify: Boolean) {
+    private suspend fun evaluateHallOfFame(period: Period, anchor: LocalDate, entityType: String, top: Computed?) {
         top ?: return
         val iso = anchor.format(Dates.ISO)
         val id = top.entry.entityId
-        // Série #1 : les périodes précédentes consécutives (si la précédente était bien #1) + celle-ci
+        // Série #1 : les périodes précédentes consécutives (si la précédente était bien #1) + celle-ci.
         val runAt1 = if (top.previousPosition == 1) top.stats.currentRunAt1 + 1 else 1
         val totalAt1 = countAt1(period, entityType, id, iso) + 1
 
         suspend fun induct(entryType: String, periodType: String, reignStart: String?) =
-            induct(id, entityType, entryType, periodType, iso, reignStart, if (period == Period.WEEKLY) totalAt1 else 0, top.entry.plays, notify)
+            induct(id, entityType, entryType, periodType, iso, reignStart, if (period == Period.WEEKLY) totalAt1 else 0, top.entry.plays)
 
         if (HallOfFameRules.isDirectDebut(period, top.position, top.isNew)) induct(HallOfFameRules.DIRECT_DEBUT, period.dbName, iso)
         if (HallOfFameRules.isLongRun(period, runAt1)) induct(HallOfFameRules.LONG_RUN, period.dbName, reignStartIso(period, anchor, runAt1))
         if (HallOfFameRules.isLegendaryRun(period, totalAt1)) induct(HallOfFameRules.LEGENDARY_RUN, Period.GLOBAL.dbName, null)
 
-        if (period == Period.DAILY) evaluateTripleDebut(anchor, notify)
+        if (period == Period.DAILY) evaluateTripleDebut(anchor)
     }
 
     /** Triple Debut (Global) : même #1 le jour [day], sa semaine et son mois — pour chaque type d'entité. */
-    private suspend fun evaluateTripleDebut(day: LocalDate, notify: Boolean) {
+    private suspend fun evaluateTripleDebut(day: LocalDate) {
         val iso = day.format(Dates.ISO)
         val week = BillboardDates.anchor(Period.WEEKLY, day).format(Dates.ISO)
         val month = BillboardDates.anchor(Period.MONTHLY, day).format(Dates.ISO)
         for (entityType in listOf(EntityType.TRACK, EntityType.ARTIST, EntityType.ALBUM)) {
             val daily = numberOne(Period.DAILY, iso, entityType) ?: continue
             if (numberOne(Period.WEEKLY, week, entityType) != daily || numberOne(Period.MONTHLY, month, entityType) != daily) continue
-            induct(daily, entityType, HallOfFameRules.TRIPLE_DEBUT, Period.GLOBAL.dbName, iso, iso, 0, 0, notify)
+            induct(daily, entityType, HallOfFameRules.TRIPLE_DEBUT, Period.GLOBAL.dbName, iso, iso, 0, 0)
         }
     }
 
-    private suspend fun induct(id: Long, entityType: String, entryType: String, periodType: String, iso: String, reignStart: String?, weeksAt1: Int, plays: Int, notify: Boolean) {
+    private suspend fun induct(id: Long, entityType: String, entryType: String, periodType: String, iso: String, reignStart: String?, weeksAt1: Int, plays: Int) {
         if (db.hallOfFameDao().exists(id, entityType, periodType, entryType) > 0) return
         val hofId = db.hallOfFameDao().insert(
             HallOfFameEntity(
@@ -244,9 +262,6 @@ class BillboardEngine(private val db: NovaDatabase) {
             )
         )
         db.hallOfFameDao().insertBadge(HallOfFameBadgeEntity(hofId = hofId, badgeType = entryType, badgeDate = iso))
-        if (notify) db.notificationFeedDao().insert(
-            NotificationFeedEntity(type = "HOF", entityId = id, entityType = entityType, message = "🏛️ Nouvelle entrée au Hall of Fame : ${entryType.replace('_', ' ')}")
-        )
     }
 
     private fun reignStartIso(period: Period, anchor: LocalDate, run: Int): String {

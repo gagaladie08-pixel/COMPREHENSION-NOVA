@@ -1,5 +1,6 @@
 package com.novastats.app.ui.onboarding
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -8,6 +9,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -59,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.novastats.app.service.BootReceiver
 import com.novastats.app.service.NovaListenerService
+import com.novastats.app.service.NotificationAccess
 import com.novastats.app.ui.theme.NovaTheme
 import kotlinx.coroutines.delay
 
@@ -116,6 +120,13 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
     var batteryTries by rememberSaveable { mutableIntStateOf(0) }
     var batteryUnavailable by rememberSaveable { mutableStateOf(false) }
     var batteryManualOpened by rememberSaveable { mutableStateOf(false) }
+    var appNotifications by remember { mutableStateOf(NotificationAccess.canPost(ctx)) }
+    var appNotificationPrompted by rememberSaveable { mutableStateOf(false) }
+    val appNotificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        appNotificationPrompted = true
+        appNotifications = granted && NotificationAccess.canPost(ctx)
+        if (appNotifications) { audio.tick(); audio.success() }
+    }
     val beats = rememberBeats(4, startMs = 150, stepMs = 140)
     val accent = theme.primary
 
@@ -128,6 +139,7 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
         }
         waitingFor = null
         perms = now
+        appNotifications = NotificationAccess.canPost(ctx)
         onPauseOrDispose { }
     }
 
@@ -185,6 +197,20 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
                             icon = Icons.Rounded.RestartAlt, color = Color(0xFF0A84FF), title = "Relance au redémarrage", required = false, done = perms.boot,
                             subtitle = "NovaStats se remet à l'écoute après un redémarrage.", help = null, buttonLabel = "Activer"
                         ) { PermissionChecks.setBoot(ctx, true); perms = perms.copy(boot = true); audio.tick(); audio.success() }
+                        ObDivider()
+                        PermRow(
+                            icon = Icons.Rounded.Notifications, color = Color(0xFF7C6CFF), title = "Notifications NovaStats", required = false, done = appNotifications,
+                            subtitle = "Reçois les certifications, premières écoutes et bilans même quand l'app est fermée.",
+                            help = if (!appNotifications && (appNotificationPrompted || NotificationAccess.hasRuntimePermission(ctx))) "Paramètres → Applications → NovaStats → Notifications → Autoriser." else null,
+                            buttonLabel = if (Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(ctx) && !appNotificationPrompted) "Autoriser" else "Ouvrir"
+                        ) {
+                            audio.tap()
+                            if (Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(ctx) && !appNotificationPrompted) {
+                                appNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                runCatching { ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)) }
+                            }
+                        }
                     }
                 }
                 Spacer(Modifier.height(16.dp))

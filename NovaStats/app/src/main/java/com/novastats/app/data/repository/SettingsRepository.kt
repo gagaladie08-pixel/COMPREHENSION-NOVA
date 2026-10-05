@@ -42,16 +42,25 @@ class SettingsRepository(private val context: Context) {
         val DYNAMIC_ICON = booleanPreferencesKey("dynamic_icon")
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
+        val AWARDS_UNLOCK_NOTIFIED = booleanPreferencesKey("awards_unlock_notified")
+        val FIRST_SCROBBLE_NOTIFIED = booleanPreferencesKey("first_scrobble_notified")
     }
 
-    /** Clés des 12 notifications (toutes actives par défaut, chacune désactivable séparément). */
+    /** Clés des notifications réelles de l'app (toutes actives par défaut, chacune désactivable séparément). */
     object Notif {
         const val CERT_SILVER = "CERT_SILVER"; const val CERT_GOLD = "CERT_GOLD"; const val CERT_PLATINUM = "CERT_PLATINUM"; const val CERT_DIAMOND = "CERT_DIAMOND"
         const val CERT_MULTIPLIERS = "CERT_MULTIPLIERS"
         const val P_STAR = "P_STAR"; const val P_SUPERSTAR = "P_SUPERSTAR"; const val P_MEGASTAR = "P_MEGASTAR"; const val P_LEGENDE = "P_LEGENDE"; const val P_MYTHIQUE = "P_MYTHIQUE"
         const val HOF = "HOF"
         const val WEEKLY_CHARTS = "WEEKLY_CHARTS"
-        val ALL = listOf(CERT_SILVER, CERT_GOLD, CERT_PLATINUM, CERT_DIAMOND, CERT_MULTIPLIERS, P_STAR, P_SUPERSTAR, P_MEGASTAR, P_LEGENDE, P_MYTHIQUE, HOF, WEEKLY_CHARTS)
+        const val FIRST_SCROBBLE = "FIRST_SCROBBLE"
+        const val REVIEW = "REVIEW"
+        const val AWARDS_UNLOCK = "AWARDS_UNLOCK"
+        val ALL = listOf(
+            CERT_SILVER, CERT_GOLD, CERT_PLATINUM, CERT_DIAMOND, CERT_MULTIPLIERS,
+            P_STAR, P_SUPERSTAR, P_MEGASTAR, P_LEGENDE, P_MYTHIQUE, HOF,
+            WEEKLY_CHARTS, FIRST_SCROBBLE, REVIEW, AWARDS_UNLOCK
+        )
     }
 
     /**
@@ -108,6 +117,31 @@ class SettingsRepository(private val context: Context) {
     /** Années dont la cérémonie de révélation (cartes une par une) a déjà été jouée. */
     val awardsRevealedYears: Flow<Set<String>> = context.dataStore.data.map { it[Keys.AWARDS_REVEALED] ?: emptySet() }
     suspend fun markAwardsRevealed(year: Int) = context.dataStore.edit { it[Keys.AWARDS_REVEALED] = (it[Keys.AWARDS_REVEALED] ?: emptySet()) + year.toString() }
+    val awardsUnlockNotified: Flow<Boolean> = context.dataStore.data.map { it[Keys.AWARDS_UNLOCK_NOTIFIED] ?: false }
+    suspend fun markAwardsUnlockNotified() = context.dataStore.edit { it[Keys.AWARDS_UNLOCK_NOTIFIED] = true }
+
+    /** Réservation atomique : le même déblocage ne peut pas être annoncé deux fois après un redémarrage. */
+    suspend fun claimAwardsUnlockNotification(): Boolean {
+        var claimed = false
+        context.dataStore.edit { prefs ->
+            if (prefs[Keys.AWARDS_UNLOCK_NOTIFIED] != true) {
+                prefs[Keys.AWARDS_UNLOCK_NOTIFIED] = true
+                claimed = true
+            }
+        }
+        return claimed
+    }
+
+    suspend fun claimFirstScrobbleNotification(): Boolean {
+        var claimed = false
+        context.dataStore.edit { prefs ->
+            if (prefs[Keys.FIRST_SCROBBLE_NOTIFIED] != true) {
+                prefs[Keys.FIRST_SCROBBLE_NOTIFIED] = true
+                claimed = true
+            }
+        }
+        return claimed
+    }
 
     /* ---- Notifications ---- */
     /** Notifications désactivées (toutes actives par défaut). */

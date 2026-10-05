@@ -114,7 +114,7 @@ object EnrichmentState {
 class MetadataEnricher(private val db: NovaDatabase, private val settings: SettingsRepository) {
 
     /** 🟡 Correspondance acceptée avec flag (70-89) → notification discrète (branché par NovaStatsApp). */
-    var onTrackFlagged: ((trackId: Long, title: String, artist: String, proposal: String, score: Int) -> Unit)? = null
+    var onTrackFlagged: (suspend (trackId: Long, title: String, artist: String, proposal: String, score: Int) -> Unit)? = null
 
     private val musicBrainz = MusicBrainzApi()
     private val apis: Map<ApiSource, MusicApi> = listOf(
@@ -464,7 +464,15 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         }
         positiveCache(EntityType.TRACK, t.trackId, DataType.COVER, best)
         EnrichmentState.log("✅ ${t.title} → pochette ${c.source.label} (${best.score})${libraryNote(best)}")
-        if (best.score < MetadataMatching.TRUSTED) runCatching { onTrackFlagged?.invoke(t.trackId, t.title, artistName, "${c.name}${c.artist?.let { " — $it" } ?: ""} · ${c.source.label}", best.score) }
+        if (best.score < MetadataMatching.TRUSTED) {
+            try {
+                onTrackFlagged?.invoke(t.trackId, t.title, artistName, "${c.name}${c.artist?.let { " — $it" } ?: ""} · ${c.source.label}", best.score)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                EnrichmentState.log("⚠️ Notification « À vérifier » impossible : ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
         return true
     }
 

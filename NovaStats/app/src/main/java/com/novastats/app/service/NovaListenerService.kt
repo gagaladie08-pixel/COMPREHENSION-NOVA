@@ -408,7 +408,10 @@ class NovaListenerService : NotificationListenerService() {
         if (ended) {
             DetectionState.log("💾 Enregistré (${listened / 1000}s) : ${s.key.display}")
             // 🎉 Micro-événement : toute première écoute → mission « Premier Scrobble » accomplie
-            if (app.database.scrobbleDao().countConfirmed() == 1) runCatching { AchievementNotifier.firstScrobble(this, s.key.display) }
+            if (app.database.scrobbleDao().countConfirmed() == 1) {
+                runCatching { AchievementNotifier.firstScrobble(this, s.key.display) }
+                runCatching { NovaAwardsUnlockWorker.schedule(this@NovaListenerService, s.startedAt) }
+            }
             scheduleRebuild()
         }
     }

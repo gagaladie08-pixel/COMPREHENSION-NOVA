@@ -1,21 +1,15 @@
 package com.novastats.app.service
 
-import android.Manifest
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import com.novastats.app.MainActivity
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.R
 import com.novastats.app.data.db.dao.RankedEntry
@@ -27,6 +21,8 @@ import com.novastats.app.domain.WeeklyChartHighlight
 import com.novastats.app.domain.WeeklyChartsDigest
 import com.novastats.app.domain.WeeklyChartsDigestBuilder
 import com.novastats.app.domain.WeeklyChartsSchedule
+import com.novastats.app.ui.navigation.NovaTab
+import com.novastats.app.ui.navigation.PendingNav
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import java.time.Duration
@@ -50,21 +46,24 @@ class WeeklyChartsWorker(context: Context, params: WorkerParameters) : Coroutine
         runCatching { scheduleAfter(applicationContext, scheduledMonday) }
 
         return try {
-            if (SettingsRepository.Notif.WEEKLY_CHARTS in app.settings.disabledNotifications.first()) return Result.success()
-
             val week = WeeklyChartsSchedule.previousClosedWeek(scheduledMonday)
             val previousWeek = DateRange(week.from.minusWeeks(1), week.to.minusWeeks(1))
             val digest = buildDigest(app, week, previousWeek) ?: return Result.success()
 
-            app.database.notificationFeedDao().insert(
-                NotificationFeedEntity(
-                    type = TYPE,
-                    entityId = 0,
-                    entityType = "CHARTS",
-                    message = "${digest.title} — ${digest.body}"
+            val feed = app.database.notificationFeedDao()
+            val eventId = scheduledMonday.toEpochDay()
+            if (!feed.existsEvent(TYPE, eventId)) {
+                feed.insert(
+                    NotificationFeedEntity(
+                        type = TYPE,
+                        entityId = eventId,
+                        entityType = "CHARTS",
+                        message = "${digest.title} — ${digest.body}"
+                    )
                 )
-            )
-            if (canPostNotifications()) postNotification(digest)
+            }
+            val disabled = app.settings.disabledNotifications.first()
+            if (SettingsRepository.Notif.WEEKLY_CHARTS !in disabled && NotificationAccess.canPost(applicationContext)) postNotification(digest)
             Result.success()
         } catch (e: CancellationException) {
             throw e
@@ -119,24 +118,22 @@ class WeeklyChartsWorker(context: Context, params: WorkerParameters) : Coroutine
         )
     }
 
-    private fun canPostNotifications(): Boolean = Build.VERSION.SDK_INT < 33 ||
-        ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-
     private fun postNotification(digest: WeeklyChartsDigest) {
-        val intent = Intent(applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
         val pendingIntent = PendingIntent.getActivity(
             applicationContext,
             PENDING_INTENT_REQUEST,
-            intent,
+            PendingNav.tabIntent(applicationContext, NovaTab.BILLBOARD.route),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = NotificationCompat.Builder(applicationContext, NovaStatsApp.CHANNEL_WEEKLY_CHARTS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(digest.title)
             .setContentText(digest.summary)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(digest.body))
+            .setStyle(NotificationCompat.BigTextStyle().setBigContentTitle(digest.title).bigText(digest.body))
+            .setSubText("NovaStats · semaine complète précédente")
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setColor(0xFF00D4FF.toInt())
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)

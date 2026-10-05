@@ -1,78 +1,208 @@
 package com.novastats.app.service
 
-import android.Manifest
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
-import com.novastats.app.MainActivity
 import com.novastats.app.NovaStatsApp
+import com.novastats.app.R
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.NotificationFeedEntity
 import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.data.repository.StatsRebuilder
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.PantheonStatus
+import com.novastats.app.ui.navigation.NovaTab
+import com.novastats.app.ui.navigation.PendingNav
 import kotlinx.coroutines.flow.first
 
-/**
- * 🔔 Notifications de succès : certifications (par niveau + multiplicateurs), statuts Panthéon, intronisations
- * Hall of Fame — chacune désactivable dans ⚙️ Paramètres → Notifications. Toute nouveauté est aussi
- * consignée dans `notifications_feed` (fil de l'Accueil), notification système ou pas.
- */
+/** Notifications dédiées aux certifications, au Panthéon et au Hall of Fame. */
 object AchievementNotifier {
+    private const val GROUP = "com.novastats.app.ACHIEVEMENTS"
+    private const val SUMMARY_ID = 70_006
+    private const val SUMMARY_REQUEST = 70_006
+    private const val FIRST_SCROBBLE_ID = 7_777
 
+    private data class PostedAchievement(
+        val title: String,
+        val text: String,
+        val route: String
+    )
+
+    /** Toute nouveauté rejoint le fil local ; les alertes système respectent permission, canal et interrupteur. */
     suspend fun notify(context: Context, news: List<StatsRebuilder.Achievement>) {
         if (news.isEmpty()) return
         val app = context.applicationContext as NovaStatsApp
         val disabled = app.settings.disabledNotifications.first()
-        val canPost = Build.VERSION.SDK_INT < 33 ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val canPost = NotificationAccess.canPost(context)
+        val manager = NotificationManagerCompat.from(context)
+        val posted = mutableListOf<PostedAchievement>()
 
-        for ((i, a) in news.withIndex()) {
-            val (title, text, key) = describe(a) ?: continue
-            app.database.notificationFeedDao().insert(NotificationFeedEntity(type = a.kind, entityId = a.entityId, entityType = a.entityType, message = "$title — $text"))
-            if (!canPost || key in disabled) continue
-            val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
-            val pi = PendingIntent.getActivity(context, a.entityId.toInt(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val channel = when (key) {
-                SettingsRepository.Notif.CERT_SILVER, SettingsRepository.Notif.CERT_GOLD -> NovaStatsApp.CHANNEL_CERT_LIGHT
-                SettingsRepository.Notif.CERT_PLATINUM -> NovaStatsApp.CHANNEL_CERT_MID
-                SettingsRepository.Notif.CERT_DIAMOND, SettingsRepository.Notif.CERT_MULTIPLIERS -> NovaStatsApp.CHANNEL_CERT_EPIC
-                else -> NovaStatsApp.CHANNEL_ACHIEVEMENTS
-            }
-            val n = NotificationCompat.Builder(context, channel)
-                .setSmallIcon(com.novastats.app.R.drawable.ic_notification)
+        news.forEach { achievement ->
+            val (title, text, key) = describe(achievement) ?: return@forEach
+            val message = "$title — $text"
+            val feed = app.database.notificationFeedDao()
+            val duplicate = feed.existsRecentMessage(
+                achievement.kind,
+                achievement.entityId,
+                message,
+                System.currentTimeMillis() - 60L * 60 * 1_000
+            )
+            if (duplicate) return@forEach
+            feed.insert(
+                NotificationFeedEntity(
+                    type = achievement.kind,
+                    entityId = achievement.entityId,
+                    entityType = achievement.entityType,
+                    message = message
+                )
+            )
+            if (!canPost || key in disabled) return@forEach
+
+            val route = routeFor(key)
+            val id = notificationId(achievement)
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                id,
+                PendingNav.tabIntent(context, route),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notification = NotificationCompat.Builder(context, channelFor(key))
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(text)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-                .setContentIntent(pi)
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$text\n\nAppuie pour retrouver ce palier dans NovaStats."))
+                .setSubText("NovaStats · nouvelle récompense")
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setColor(colorFor(key))
+                .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
+                .setGroup(GROUP)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build()
-            runCatching { NotificationManagerCompat.from(context).notify((System.currentTimeMillis() % 100_000).toInt() + i, n) }
+            runCatching { manager.notify(id, notification) }
+            posted += PostedAchievement(title, text, route)
         }
-        // Effet signature « déblocage de palier » (confettis Survivor…) si l'app est à l'écran
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { com.novastats.app.ui.theme.ThemeEvents.unlocked() }
+
+        if (posted.size > 1) postGroupSummary(context, posted)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            com.novastats.app.ui.theme.ThemeEvents.unlocked()
+        }
     }
 
-    /** 🎉 Première écoute de l'histoire : notification spéciale + entrée dans le fil. */
+    /** Première écoute : annoncée une fois, même si Android ou le réglage utilisateur bloque la bannière. */
     suspend fun firstScrobble(context: Context, display: String) {
         val app = context.applicationContext as NovaStatsApp
-        app.database.notificationFeedDao().insert(NotificationFeedEntity(type = "FIRST", entityId = 0, entityType = "TRACK", message = "🎉 Ta première écoute ! $display — Ton histoire commence maintenant. 🏆 Premier Scrobble débloqué !"))
-        val canPost = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        if (!canPost) return
-        val intent = Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP }
-        val pi = PendingIntent.getActivity(context, 7_777, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val n = NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_CERT_EPIC)
-            .setSmallIcon(com.novastats.app.R.drawable.ic_notification).setContentTitle("🎉 Ta première écoute !")
-            .setContentText("$display — Ton histoire commence maintenant")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$display\nTon histoire commence maintenant.\n🏆 Premier Scrobble débloqué ! Ton premier jour. Le début d'une ère."))
-            .setContentIntent(pi).setAutoCancel(true).build()
-        runCatching { NotificationManagerCompat.from(context).notify(7_777, n) }
+        if (!app.settings.claimFirstScrobbleNotification()) return
+
+        val title = "🎉 Ta première écoute !"
+        val body = "$display — ton histoire musicale commence maintenant."
+        app.database.notificationFeedDao().insert(
+            NotificationFeedEntity(
+                type = "FIRST_SCROBBLE",
+                entityId = 0,
+                entityType = "TRACK",
+                message = "$title $body 🏆 Premier Scrobble débloqué !"
+            )
+        )
+        if (SettingsRepository.Notif.FIRST_SCROBBLE in app.settings.disabledNotifications.first() || !NotificationAccess.canPost(context)) return
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            FIRST_SCROBBLE_ID,
+            PendingNav.tabIntent(context, NovaTab.STATS.route),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_FIRST_SCROBBLE)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$body\n\n🏆 Premier Scrobble débloqué : le début de tes charts, records et récompenses."))
+            .setSubText("NovaStats · ton premier scrobble")
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setColor(0xFF7C6CFF.toInt())
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(FIRST_SCROBBLE_ID, notification) }
+    }
+
+    private fun postGroupSummary(context: Context, posted: List<PostedAchievement>) {
+        val route = posted.map { it.route }.distinct().singleOrNull() ?: NovaTab.HOME.route
+        val title = "✨ ${posted.size} nouvelles récompenses"
+        val inbox = NotificationCompat.InboxStyle().setBigContentTitle(title)
+        posted.take(6).forEach { inbox.addLine("${it.title} · ${it.text}") }
+        if (posted.size > 6) inbox.addLine("et ${posted.size - 6} autre(s)…")
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            SUMMARY_REQUEST,
+            PendingNav.tabIntent(context, route),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val summary = NotificationCompat.Builder(context, NovaStatsApp.CHANNEL_ACHIEVEMENTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText("Certifications, statuts et intronisations : ton écoute a marqué l'histoire.")
+            .setStyle(inbox)
+            .setSubText("NovaStats · récapitulatif")
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setColor(0xFF00D4FF.toInt())
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setGroup(GROUP)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(SUMMARY_ID, summary) }
+    }
+
+    private fun notificationId(a: StatsRebuilder.Achievement): Int {
+        val hash = "${a.kind}:${a.entityType}:${a.entityId}:${a.level}".hashCode() and 0x7FFFFFFF
+        return if (hash == 0) 1 else hash
+    }
+
+    private fun channelFor(key: String): String = when (key) {
+        SettingsRepository.Notif.CERT_SILVER -> NovaStatsApp.CHANNEL_CERT_SILVER
+        SettingsRepository.Notif.CERT_GOLD -> NovaStatsApp.CHANNEL_CERT_GOLD
+        SettingsRepository.Notif.CERT_PLATINUM -> NovaStatsApp.CHANNEL_CERT_PLATINUM
+        SettingsRepository.Notif.CERT_DIAMOND -> NovaStatsApp.CHANNEL_CERT_DIAMOND
+        SettingsRepository.Notif.CERT_MULTIPLIERS -> NovaStatsApp.CHANNEL_CERT_MULTIPLIERS
+        SettingsRepository.Notif.P_STAR -> NovaStatsApp.CHANNEL_PANTHEON_STAR
+        SettingsRepository.Notif.P_SUPERSTAR -> NovaStatsApp.CHANNEL_PANTHEON_SUPERSTAR
+        SettingsRepository.Notif.P_MEGASTAR -> NovaStatsApp.CHANNEL_PANTHEON_MEGASTAR
+        SettingsRepository.Notif.P_LEGENDE -> NovaStatsApp.CHANNEL_PANTHEON_LEGENDE
+        SettingsRepository.Notif.P_MYTHIQUE -> NovaStatsApp.CHANNEL_PANTHEON_MYTHIQUE
+        SettingsRepository.Notif.HOF -> NovaStatsApp.CHANNEL_HALL_OF_FAME
+        else -> NovaStatsApp.CHANNEL_ACHIEVEMENTS
+    }
+
+    private fun routeFor(key: String): String = when (key) {
+        SettingsRepository.Notif.CERT_SILVER, SettingsRepository.Notif.CERT_GOLD,
+        SettingsRepository.Notif.CERT_PLATINUM, SettingsRepository.Notif.CERT_DIAMOND,
+        SettingsRepository.Notif.CERT_MULTIPLIERS -> NovaTab.CERTIFICATIONS.route
+        SettingsRepository.Notif.P_STAR, SettingsRepository.Notif.P_SUPERSTAR,
+        SettingsRepository.Notif.P_MEGASTAR, SettingsRepository.Notif.P_LEGENDE,
+        SettingsRepository.Notif.P_MYTHIQUE -> NovaTab.PANTHEON.route
+        SettingsRepository.Notif.HOF -> NovaTab.HALL_OF_FAME.route
+        else -> NovaTab.HOME.route
+    }
+
+    private fun colorFor(key: String): Int = when (key) {
+        SettingsRepository.Notif.HOF -> 0xFF00D4FF.toInt()
+        SettingsRepository.Notif.P_STAR, SettingsRepository.Notif.P_SUPERSTAR,
+        SettingsRepository.Notif.P_MEGASTAR, SettingsRepository.Notif.P_LEGENDE,
+        SettingsRepository.Notif.P_MYTHIQUE -> 0xFFB68CFF.toInt()
+        else -> 0xFFFFD166.toInt()
     }
 
     /** (titre, texte, clé de réglage) ou null si inconnu. */
@@ -90,20 +220,24 @@ object AchievementNotifier {
                 else -> SettingsRepository.Notif.CERT_DIAMOND
             }
             val label = if (multiplier > 1) "${multiplier}x ${level.emoji} ${level.label}" else "${level.emoji} ${level.label}"
-            Triple("$label — nouvelle certification", "$kind « ${a.name} » vient d'être certifié $label !", key)
+            Triple("$label — nouvelle certification", "$kind « ${a.name} » vient d'atteindre le palier $label !", key)
         }
         "PANTHEON" -> {
-            val st = PantheonStatus.fromDb(a.level) ?: return null
-            val key = when (st) {
+            val status = PantheonStatus.fromDb(a.level) ?: return null
+            val key = when (status) {
                 PantheonStatus.STAR -> SettingsRepository.Notif.P_STAR
                 PantheonStatus.SUPERSTAR -> SettingsRepository.Notif.P_SUPERSTAR
                 PantheonStatus.MEGASTAR -> SettingsRepository.Notif.P_MEGASTAR
                 PantheonStatus.LEGENDE -> SettingsRepository.Notif.P_LEGENDE
                 PantheonStatus.MYTHIQUE -> SettingsRepository.Notif.P_MYTHIQUE
             }
-            Triple("${st.emoji} ${a.name} entre au Panthéon", "Nouveau statut : ${st.label.uppercase()}", key)
+            Triple("${status.emoji} ${a.name} entre au Panthéon", "Nouveau statut : ${status.label.uppercase()} — ta fidélité est récompensée.", key)
         }
-        "HALL_OF_FAME" -> Triple("🏛️ Hall of Fame — nouvelle intronisation", "« ${a.name} » · ${a.level.lowercase().replace('_', ' ')}", SettingsRepository.Notif.HOF)
+        "HALL_OF_FAME" -> Triple(
+            "🏛️ Hall of Fame — nouvelle intronisation",
+            "« ${a.name} » rejoint le Hall of Fame · ${a.level.lowercase().replace('_', ' ')}.",
+            SettingsRepository.Notif.HOF
+        )
         else -> null
     }
 }

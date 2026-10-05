@@ -90,13 +90,21 @@ fun NovaApp() {
     val backStack by navController.currentBackStackEntryAsState()
     val currentDestination = backStack?.destination
     val theme = Nova.theme
-    // Navigation différée (notification « 🟡 À vérifier ») → onglet Réglages (SettingsScreen ouvre l'Éditeur)
+    // Navigation différée : 🟡 À vérifier ouvre l'Éditeur ; récompenses, Awards et charts ouvrent leur onglet.
     val pending by PendingNav.target.collectAsStateWithLifecycle()
     LaunchedEffect(pending) {
-        if (pending != null) navController.navigate(NovaTab.SETTINGS.route) {
-            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-            launchSingleTop = true; restoreState = true
+        val target = pending ?: return@LaunchedEffect
+        val route = when (target.name) {
+            PendingNav.TARGET_REVIEW -> NovaTab.SETTINGS.route
+            PendingNav.TARGET_TAB -> NovaTab.entries.firstOrNull { it.route == target.tabRoute }?.route
+            else -> null
         }
+        if (route != null) navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+        if (target.name != PendingNav.TARGET_REVIEW || route == null) PendingNav.consume()
     }
 
     var globalSearch by remember { mutableStateOf(false) }

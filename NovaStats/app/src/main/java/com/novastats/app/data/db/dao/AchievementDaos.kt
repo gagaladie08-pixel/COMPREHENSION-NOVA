@@ -296,6 +296,12 @@ interface NovaAwardDao {
 interface NotificationFeedDao {
     @Insert suspend fun insert(item: NotificationFeedEntity): Long
     @Query("SELECT * FROM notifications_feed ORDER BY created_at DESC LIMIT :limit") fun recent(limit: Int = 10): Flow<List<NotificationFeedEntity>>
+    @Query("SELECT * FROM notifications_feed WHERE type NOT IN ('CERTIFICATION', 'PANTHEON', 'HALL_OF_FAME') ORDER BY created_at DESC LIMIT :limit")
+    fun recentEvents(limit: Int = 20): Flow<List<NotificationFeedEntity>>
+    @Query("SELECT EXISTS(SELECT 1 FROM notifications_feed WHERE type = :type AND entity_id = :entityId AND message = :message AND created_at >= :since)")
+    suspend fun existsRecentMessage(type: String, entityId: Long, message: String, since: Long): Boolean
+    @Query("SELECT EXISTS(SELECT 1 FROM notifications_feed WHERE type = :type AND entity_id = :entityId)")
+    suspend fun existsEvent(type: String, entityId: Long): Boolean
     @Query("UPDATE notifications_feed SET is_read = 1 WHERE id = :id") suspend fun markRead(id: Long)
     @Query("DELETE FROM notifications_feed") suspend fun clear()
 }

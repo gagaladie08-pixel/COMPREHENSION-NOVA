@@ -81,6 +81,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     val certNews by db.certificationDao().latestHistory(10).collectAsStateWithLifecycle(initialValue = emptyList())
     val pantheonNews by db.pantheonDao().latestHistory(10).collectAsStateWithLifecycle(initialValue = emptyList())
     val hofNews by db.hallOfFameDao().latest(10).collectAsStateWithLifecycle(initialValue = emptyList())
+    val notificationEvents by db.notificationFeedDao().recentEvents(20).collectAsStateWithLifecycle(initialValue = emptyList())
     val mostPlayedTracks by db.trackDao().mostPlayed(200).collectAsStateWithLifecycle(initialValue = emptyList())
     val mostPlayedAlbums by db.albumDao().mostPlayed(100).collectAsStateWithLifecycle(initialValue = emptyList())
     val bestDay by db.dailyStatsDao().bestDay().collectAsStateWithLifecycle(initialValue = null)
@@ -226,7 +227,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         item {
             SectionTitle("Dernières actualités")
             val now = System.currentTimeMillis()
-            val news = remember(certNews, pantheonNews, hofNews) {
+            val news = remember(certNews, pantheonNews, hofNews, notificationEvents) {
                 buildList {
                     certNews.forEach { n ->
                         val lvl = CertLevel.entries.firstOrNull { it.dbName == n.h.level }
@@ -242,14 +243,37 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                         val target = when (n.h.entityType) { "ARTIST" -> DetailTarget.Artist(n.h.entityId); "ALBUM" -> DetailTarget.Album(n.h.entityId); else -> DetailTarget.Track(n.h.entityId) }
                         add(NewsItem(n.h.createdAt, "🏆", "Hall of Fame · ${hofEntryLabel(n.h.entryType)} (${n.h.periodType.lowercase()})", n.name ?: "—", target, NovaTab.HALL_OF_FAME))
                     }
+                    notificationEvents.forEach { event ->
+                        val content = event.message.substringAfter("—", event.message).replace('\n', ' ').trim()
+                        val item = when (event.type) {
+                            "FIRST_SCROBBLE" -> NewsItem(event.createdAt, "✨", "Première écoute", event.message.substringAfter("!").replace('\n', ' ').trim(), null, NovaTab.STATS)
+                            "AWARDS_UNLOCK" -> NewsItem(event.createdAt, "🏆", "Nova Awards · palmarès débloqué", content, null, NovaTab.AWARDS)
+                            "WEEKLY_CHARTS" -> NewsItem(event.createdAt, "📊", "Charts · récapitulatif hebdomadaire", content, null, NovaTab.BILLBOARD)
+                            "REVIEW" -> NewsItem(event.createdAt, "🟡", "Correspondance à vérifier", event.message.substringAfter(":").replace('\n', ' ').trim(), null, NovaTab.SETTINGS, event.entityId)
+                            else -> null
+                        }
+                        if (item != null) add(item)
+                    }
                 }.sortedByDescending { it.at }.take(8)
             }
             NovaCard {
                 Column(Modifier.padding(vertical = 6.dp)) {
-                    if (news.isEmpty()) Text("Aucune actualité pour l'instant — certifications, Panthéon et Hall of Fame apparaîtront ici.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+                    if (news.isEmpty()) Text("Aucune actualité pour l'instant — récompenses, charts et nouveautés apparaîtront ici.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
                     news.forEach { n ->
                         Row(
-                            Modifier.fillMaxWidth().clickable { detail = n.target }.padding(horizontal = 16.dp, vertical = 8.dp),
+                            Modifier.fillMaxWidth().clickable {
+                                when {
+                                    n.reviewTrackId != null -> {
+                                        com.novastats.app.ui.navigation.PendingNav.target.value = com.novastats.app.ui.navigation.PendingNav.Target(
+                                            com.novastats.app.ui.navigation.PendingNav.TARGET_REVIEW,
+                                            trackId = n.reviewTrackId
+                                        )
+                                        onOpenTab(NovaTab.SETTINGS)
+                                    }
+                                    n.target != null -> detail = n.target
+                                    else -> onOpenTab(n.tab)
+                                }
+                            }.padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(n.emoji, fontSize = 22.sp)
@@ -379,7 +403,15 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
 
 /* ---------- Modèles d'affichage ---------- */
 
-private data class NewsItem(val at: Long, val emoji: String, val headline: String, val subject: String, val target: DetailTarget, val tab: NovaTab)
+private data class NewsItem(
+    val at: Long,
+    val emoji: String,
+    val headline: String,
+    val subject: String,
+    val target: DetailTarget?,
+    val tab: NovaTab,
+    val reviewTrackId: Long? = null
+)
 
 private data class Upcoming(
     val title: String, val kind: String, val next: Certification, val plays: Int, val need: Int, val base: Int,
