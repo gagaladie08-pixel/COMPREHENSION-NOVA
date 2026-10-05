@@ -957,15 +957,20 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.2" to listOf(
+        "🏆 **Year-End Nova renforcé** : paliers titres 20/50, 26/25 et 52/10, comptés dans la fenêtre annuelle ; les points acquis restent conservés.",
+        "ⓘ **Deux pop-ups** : explication complète du calcul et fiche détaillée au toucher de chaque entrée du classement.",
+        "🎯 **Transparence** : le bilan est clairement présenté comme un classement personnel inspiré de Billboard, calculé à partir de tes écoutes locales — pas comme le chart officiel américain."
+    ),
     "0.22.1" to listOf(
-        "\ud83c\udfc6 **Year-End Charts : les vraies r\u00e8gles du Billboard am\u00e9ricain.** Le classement de fin d'ann\u00e9e n'additionne plus les \u00e9coutes : il cumule les **points gagn\u00e9s semaine apr\u00e8s semaine** sur tes charts hebdomadaires.",
+        "🏆 **Year-End Nova inspiré du Billboard.** Il cumule des points calculés à partir de tes classements hebdomadaires d'écoutes locales, pas les métriques US officielles.",
         "\ud83d\udcca **Bar\u00e8me invers\u00e9** : 100 points pour la 1\u02b3\u1d49 place, 99 pour la 2\u1d49\u2026 1 point pour la 100\u1d49 (Hot 100). Artist 50 \u2192 50 pts max. 75 Albums \u2192 75 pts max. D\u00e9partages : points, puis \u00e9coutes, puis semaines.",
-        "\ud83d\udcc5 **Ann\u00e9e de r\u00e9f\u00e9rence Billboard** : d\u00e9but d\u00e9cembre N-1 \u2192 fin novembre N (comme le vrai Billboard). Bascule possible vers l'ann\u00e9e civile.",
+        "📅 **Fenêtre locale** : décembre N−1 → novembre N par défaut, ou année civile. Les semaines chevauchantes sont comptées en entier.",
         "\u23f1\ufe0f **R\u00e8gle des r\u00e9currents** (Hot 100) : un titre pr\u00e9sent depuis 20 semaines et retomb\u00e9 au-del\u00e0 de la 50\u1d49 place sort du classement et n'accumule plus de points.",
         "\ud83c\udfb5 M\u00eames r\u00e8gles d'entit\u00e9s : remix \u2192 original, chaque artiste cr\u00e9dit\u00e9 re\u00e7oit l'\u00e9coute, compilations exclues, albums partag\u00e9s \u00ab Artistes vari\u00e9s \u00bb. Affichage : points, semaines, pic, semaines n\u00b01."
     ),
     "0.22.0" to listOf(
-        "\ud83c\udfc6 **Year-End Charts : le moteur exact du Billboard.** Les classements annuels ne sont plus calcul\u00e9s \u00e0 part : ils utilisent d\u00e9sormais les m\u00eames requ\u00eates, le m\u00eame ordre et les m\u00eames limites que tes charts Billboard.",
+        "🏆 **Year-End Charts : moteur des charts Nova.** Les classements annuels reprennent les règles d'entités et les limites de tes charts hebdomadaires personnels.",
         "\ud83c\udfb5 **Titres — Nova Hot 100** : regroup\u00e9s par titre racine, donc **un remix compte pour son original** (et non plus comme une entr\u00e9e s\u00e9par\u00e9e). Classement : \u00e9coutes puis dur\u00e9e.",
         "\ud83c\udfa4 **Artistes — Nova Artist 50** : **chaque artiste cr\u00e9dit\u00e9** re\u00e7oit l'\u00e9coute (featurings et duos inclus), artistes fusionn\u00e9s exclus. Le nombre de titres distincts est affich\u00e9 en sous-titre.",
         "\ud83d\udcbf **Albums — Nova 75 Albums** : **compilations exclues**, et les albums partag\u00e9s s'affichent « Artistes vari\u00e9s » (r\u00e8gle §12).",

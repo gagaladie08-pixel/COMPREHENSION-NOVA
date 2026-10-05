@@ -49,13 +49,14 @@ import com.novastats.app.data.repository.YearEndData
 import com.novastats.app.data.repository.YearEndRepository
 import com.novastats.app.data.repository.YearEndRow
 import com.novastats.app.domain.Chart
+import com.novastats.app.domain.YearEndRules
 import com.novastats.app.ui.theme.Nova
 import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 /* ==================================================================== */
-/*  🏆 Year-End Charts — règles du Billboard américain (points hebdo)    */
+/*  🏆 Year-End Nova — classement personnel inspiré des charts US        */
 /* ==================================================================== */
 
 private val YE_TABS = listOf("🎵 Titres", "🎤 Artistes", "💿 Albums")
@@ -63,6 +64,14 @@ private val YE_MEDALS = listOf("🥇", "🥈", "🥉")
 
 private val YE_MONTH_FMT = SimpleDateFormat("dd MMMM", Locale.FRANCE)
 private val YE_ISO_FMT = SimpleDateFormat("yyyy-MM-dd", Locale.FRANCE)
+
+private data class YearEndPopupEntry(
+    val chart: Chart,
+    val rank: Int,
+    val row: YearEndRow,
+    val windowLabel: String,
+    val weeksCounted: Int
+)
 
 @Composable
 fun YearEndScreen(onBack: () -> Unit) {
@@ -75,9 +84,11 @@ fun YearEndScreen(onBack: () -> Unit) {
     var year by remember { mutableStateOf<Int?>(null) }
     var data by remember { mutableStateOf<YearEndData?>(null) }
     var tab by remember { mutableIntStateOf(0) }
-    // false = année de référence Billboard (déc. → nov.), true = année civile
+    // false = fenêtre locale déc. → nov., true = année civile
     var calendarYear by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
+    var showRulesPopup by remember { mutableStateOf(false) }
+    var selectedEntry by remember { mutableStateOf<YearEndPopupEntry?>(null) }
 
     LaunchedEffect(Unit) {
         years = runCatching { repo.years() }.getOrDefault(emptyList())
@@ -102,8 +113,17 @@ fun YearEndScreen(onBack: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("‹ Billboard", color = theme.primary, fontWeight = FontWeight.Bold) }
                 Spacer(Modifier.weight(1f))
-                Text("🏆 Year-End Charts", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.width(12.dp))
+                Text("🏆 Year-End", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier.size(38.dp).clip(CircleShape)
+                        .background(theme.surface.copy(alpha = 0.86f))
+                        .border(1.dp, theme.primary.copy(alpha = 0.45f), CircleShape)
+                        .clickable { showRulesPopup = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("ⓘ", color = theme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                }
             }
 
             /* ---------- Sélecteur d'année ---------- */
@@ -134,7 +154,7 @@ fun YearEndScreen(onBack: () -> Unit) {
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    YeToggle("🏆 Année Billboard", !calendarYear, Modifier.weight(1f)) { calendarYear = false }
+                    YeToggle("📆 Fenêtre déc.–nov.", !calendarYear, Modifier.weight(1f)) { calendarYear = false }
                     YeToggle("📅 Année civile", calendarYear, Modifier.weight(1f)) { calendarYear = true }
                 }
             }
@@ -156,7 +176,7 @@ fun YearEndScreen(onBack: () -> Unit) {
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Barème Billboard : 100 pts pour la 1ʳᵉ place, 99 pour la 2ᵉ…",
+                                "Barème Nova : points cumulés selon le rang de chaque semaine.",
                                 color = theme.textSecondary.copy(alpha = 0.7f),
                                 style = MaterialTheme.typography.bodySmall,
                                 textAlign = TextAlign.Center
@@ -195,7 +215,7 @@ fun YearEndScreen(onBack: () -> Unit) {
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                d.windowLabel + if (d.calendarYear) " · année civile" else " · année de référence Billboard",
+                                d.windowLabel + if (d.calendarYear) " · année civile" else " · fenêtre Nova déc.–nov.",
                                 color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
                             )
                             Spacer(Modifier.height(4.dp))
@@ -248,33 +268,30 @@ fun YearEndScreen(onBack: () -> Unit) {
                         }
                     }
 
-                    /* ---------- Barème Billboard ---------- */
+                    /* ---------- Méthode Year-End Nova ---------- */
                     Appear(delay = 120) {
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                             GlassCard(glow = theme.accent) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Text("🏆 Règles du Billboard américain", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        "Classement construit à partir de tes charts hebdomadaires : ${d.weeksCounted} semaines comptées. " +
-                                            "100 points pour la 1ʳᵉ place, 99 pour la 2ᵉ… 1 point pour la 100ᵉ. " +
-                                            "On n'additionne pas les écoutes — on cumule les points gagnés semaine après semaine.",
-                                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
-                                    )
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        "Règle des récurrents : un titre présent depuis 20 semaines et retombé au-delà de la 50ᵉ place sort du classement. " +
-                                            "Remix rattachés à l'original, chaque artiste crédité reçoit l'écoute, compilations exclues.",
-                                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
-                                    )
-                                    if (!d.calendarYear) {
-                                        Spacer(Modifier.height(6.dp))
-                                        Text(
-                                            "Année de référence Billboard : début décembre ${d.year - 1} → fin novembre ${d.year} (comme le vrai Billboard).",
-                                            color = theme.primary.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold
-                                        )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("🏆 Méthode Year-End Nova", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("Inspirée des charts Billboard · calculée sur tes écoutes", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    TextButton(onClick = { showRulesPopup = true }) {
+                                        Text("RÈGLES ⓘ", color = theme.primary, fontWeight = FontWeight.Bold)
                                     }
                                 }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Les rangs hebdomadaires deviennent des points cumulés. Des seuils progressifs arrêtent le cumul des titres très présents qui redescendent.",
+                                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Classement personnel Nova — il n'utilise pas les données américaines de ventes, radio et streaming de Billboard.",
+                                    color = theme.accent, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }
@@ -331,6 +348,7 @@ fun YearEndScreen(onBack: () -> Unit) {
 
                     val rows = when (tab) { 0 -> d.tracks; 1 -> d.artists; else -> d.albums }
                     val top = rows.firstOrNull()?.points ?: 1
+                    val chart = when (tab) { 0 -> Chart.HOT_100; 1 -> Chart.ARTIST_50; else -> Chart.ALBUMS_75 }
 
                     /* ---------- Podium ---------- */
                     if (rows.size >= 3) {
@@ -338,7 +356,9 @@ fun YearEndScreen(onBack: () -> Unit) {
                             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                                 SectionTitle("🥇 Podium — ${chartLabel(tab)}")
                                 rows.take(3).forEachIndexed { i, r ->
-                                    PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1)
+                                    PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1) {
+                                        selectedEntry = YearEndPopupEntry(chart, i + 1, r, d.windowLabel, d.weeksCounted)
+                                    }
                                     Spacer(Modifier.height(10.dp))
                                 }
                             }
@@ -348,7 +368,9 @@ fun YearEndScreen(onBack: () -> Unit) {
                             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                                 SectionTitle("🥇 Podium — ${chartLabel(tab)}")
                                 rows.forEachIndexed { i, r ->
-                                    PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1)
+                                    PodiumCard(rank = i + 1, row = r, top = top, circle = tab == 1) {
+                                        selectedEntry = YearEndPopupEntry(chart, i + 1, r, d.windowLabel, d.weeksCounted)
+                                    }
                                     Spacer(Modifier.height(10.dp))
                                 }
                             }
@@ -363,7 +385,9 @@ fun YearEndScreen(onBack: () -> Unit) {
                                 GlassCard {
                                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                         rows.drop(3).forEachIndexed { i, r ->
-                                            YeRow(rank = i + 4, row = r, top = top, circle = tab == 1)
+                                            YeRow(rank = i + 4, row = r, top = top, circle = tab == 1) {
+                                                selectedEntry = YearEndPopupEntry(chart, i + 4, r, d.windowLabel, d.weeksCounted)
+                                            }
                                         }
                                     }
                                 }
@@ -373,10 +397,7 @@ fun YearEndScreen(onBack: () -> Unit) {
 
                     Appear(delay = 290) {
                         Text(
-                            "Barème et règles du Billboard américain : points cumulés sur ${d.weeksCounted} semaines de charts " +
-                                "hebdomadaires (100 pts = 1ʳᵉ place), règle des récurrents (20 semaines / 50ᵉ place), remix rattachés " +
-                                "à l'original, artistes crédités, compilations exclues. " +
-                                "Limites : ${Chart.HOT_100.label} · ${Chart.ARTIST_50.label} · ${Chart.ALBUMS_75.label}.",
+                            "Classement personnel inspiré de Billboard · touche une entrée pour afficher sa fiche détaillée.",
                             color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 12.dp)
                         )
@@ -384,6 +405,15 @@ fun YearEndScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showRulesPopup) {
+        YearEndRulesPopup(windowLabel = data?.windowLabel, weeksCounted = data?.weeksCounted ?: 0) {
+            showRulesPopup = false
+        }
+    }
+    selectedEntry?.let { entry ->
+        YearEndEntryPopup(entry) { selectedEntry = null }
     }
 }
 
@@ -441,12 +471,12 @@ private fun YeFact(emoji: String, label: String, value: String, subtitle: String
 }
 
 @Composable
-private fun PodiumCard(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
+private fun PodiumCard(rank: Int, row: YearEndRow, top: Int, circle: Boolean, onClick: () -> Unit) {
     val theme = Nova.theme
     val shape = RoundedCornerShape(if (circle) 50.dp else 16.dp)
     val glow = when (rank) { 1 -> Color(0xFFFFD700); 2 -> Color(0xFFC0C0C0); else -> Color(0xFFCD7F32) }
     val share by animateFloatAsState(row.points.toFloat() / top.coerceAtLeast(1), tween(900, easing = FastOutSlowInEasing), label = "pod")
-    GlassCard(glow = glow) {
+    GlassCard(modifier = Modifier.clickable(onClick = onClick), glow = glow) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(YE_MEDALS.getOrElse(rank - 1) { "$rank" }, fontSize = 26.sp)
@@ -486,10 +516,10 @@ private fun PodiumCard(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
 }
 
 @Composable
-private fun YeRow(rank: Int, row: YearEndRow, top: Int, circle: Boolean) {
+private fun YeRow(rank: Int, row: YearEndRow, top: Int, circle: Boolean, onClick: () -> Unit) {
     val theme = Nova.theme
     val share by animateFloatAsState(row.points.toFloat() / top.coerceAtLeast(1), tween(900, easing = FastOutSlowInEasing), label = "yerow")
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("$rank", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(30.dp))
             Box(
@@ -528,3 +558,135 @@ private fun chartLabel(tab: Int): String = when (tab) {
 private fun prettyDay(iso: String): String = runCatching {
     YE_MONTH_FMT.format(YE_ISO_FMT.parse(iso)!!)
 }.getOrDefault(iso)
+
+@Composable
+private fun YearEndRulesPopup(windowLabel: String?, weeksCounted: Int, onDismiss: () -> Unit) {
+    val theme = Nova.theme
+    val gold = Color(0xFFFFD36A)
+    NovaPopupCard(
+        borderColor = gold,
+        onDismiss = onDismiss,
+        glowDp = 18,
+        banner = {
+            Box(Modifier.fillMaxWidth().height(154.dp)) {
+                BlurredBackdrop(null, gold, Modifier.fillMaxSize())
+                Column(
+                    Modifier.align(Alignment.Center).padding(horizontal = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("YEAR-END NOVA", color = gold, style = MaterialTheme.typography.labelLarge, letterSpacing = 4.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Ton année, ton classement", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(4.dp))
+                    Text("PERSONNEL · INSPIRÉ DES CHARTS US", color = Color.White.copy(alpha = 0.72f), style = MaterialTheme.typography.labelSmall, letterSpacing = 1.5.sp, textAlign = TextAlign.Center)
+                }
+            }
+        }
+    ) {
+        Text(
+            "Ce bilan est calculé à partir de tes écoutes enregistrées dans NovaStats. Il ne reproduit pas le classement officiel américain.",
+            color = theme.text, style = MaterialTheme.typography.bodyMedium
+        )
+        if (!windowLabel.isNullOrBlank()) PopupInfoRow("Fenêtre analysée", windowLabel)
+        if (weeksCounted > 0) PopupInfoRow("Semaines examinées", "$weeksCounted")
+
+        PopupSection("BARÈME HEBDOMADAIRE", gold)
+        Text(
+            "Chaque semaine, Nova classe tes écoutes locales. La position donne les points, qui s'ajoutent d'une semaine à l'autre :",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+        PopupInfoRow("Titres", "#1 = 100 · #100 = 1")
+        PopupInfoRow("Artistes", "#1 = 50 · #50 = 1")
+        PopupInfoRow("Albums", "#1 = 75 · #75 = 1")
+        Text(
+            "Les égalités finales sont départagées par les points, puis les écoutes cumulées, puis les semaines créditées.",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+
+        PopupSection("RÉCURRENCE RENFORCÉE · TITRES", gold)
+        Text(
+            "Si un titre a déjà cumulé le nombre de semaines indiqué dans cette fenêtre et redescend sous le rang protégé, il cesse de gagner des points pour le reste de l'année :",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+        YearEndRules.recurrentThresholds.forEach { threshold ->
+            PopupInfoRow(
+                "Après ${threshold.minimumWeeks} semaines",
+                "rang > ${threshold.belowPosition}",
+                valueColor = theme.accent
+            )
+        }
+        Text(
+            "Le compteur porte sur les semaines créditées dans la fenêtre Year-End choisie, pas sur toute l'histoire d'un chart Billboard. Les points déjà gagnés restent acquis. Une fenêtre annuelle ne couvrant pas 78 semaines, aucun seuil plus long n'est appliqué. Cette règle ne concerne que les titres.",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+
+        PopupSection("IDENTITÉ DES ENTRÉES", gold)
+        Text(
+            "Les remix sont regroupés avec leur titre racine, chaque artiste crédité reçoit les écoutes, et les compilations sont exclues des albums.",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+        PopupSection("PÉRIODE", gold)
+        Text(
+            "La fenêtre déc.–nov. est la convention locale de NovaStats. Les semaines sont calculées du lundi au dimanche et une semaine chevauchant une borne est prise en entier.",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun YearEndEntryPopup(entry: YearEndPopupEntry, onDismiss: () -> Unit) {
+    val theme = Nova.theme
+    val row = entry.row
+    val accent = when (entry.chart) {
+        Chart.HOT_100 -> Color(0xFFFFD36A)
+        Chart.ARTIST_50 -> theme.secondary
+        Chart.ALBUMS_75 -> theme.primary
+    }
+    NovaPopupCard(
+        borderColor = accent,
+        onDismiss = onDismiss,
+        glowDp = 16,
+        backdropUrl = row.imageUrl,
+        banner = {
+            Box(Modifier.fillMaxWidth().height(172.dp)) {
+                BlurredBackdrop(row.imageUrl, accent, Modifier.fillMaxSize())
+                Row(
+                    Modifier.fillMaxSize().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CoverArt(row.imageUrl, row.name, size = 88, circle = entry.chart == Chart.ARTIST_50, zoomable = true)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("${entry.chart.emoji} ${entry.chart.label} · YEAR-END", color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(5.dp))
+                        Text(row.name, color = Color.White, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge, maxLines = 2)
+                        if (!row.subtitle.isNullOrBlank()) Text(row.subtitle, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                    }
+                }
+            }
+        }
+    ) {
+        Text("${entry.windowLabel} · position annuelle #${entry.rank}", color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+        PopupSection("POINTS & PARCOURS", accent)
+        PopupInfoRow("Points cumulés", "${formatCount(row.points)} pts", valueColor = accent)
+        PopupInfoRow("Semaines créditées", "${row.weeks} / ${entry.weeksCounted}")
+        PopupInfoRow("Meilleur rang", if (row.peak > 0) "#${row.peak}" else "—")
+        PopupInfoRow("Semaines n°1", "${row.weeksAt1}")
+        if (row.recurrent) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "⏱ Récurrence appliquée : les points précédemment acquis sont conservés, mais le titre n'en gagne plus pour la suite de cette fenêtre.",
+                color = theme.accent, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold
+            )
+        }
+        PopupSection("ÉCOUTES NOVA", accent)
+        PopupInfoRow("Écoutes", formatCount(row.plays))
+        PopupInfoRow("Temps d'écoute", formatDuration(row.durationMs))
+        if (row.extra > 0) PopupInfoRow("Titres distincts", formatCount(row.extra))
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Le score vient des rangs hebdomadaires de tes écoutes locales — ce n'est pas une mesure de ventes, de radio ou de streaming US.",
+            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+        )
+    }
+}

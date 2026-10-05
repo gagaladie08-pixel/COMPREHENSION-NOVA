@@ -6,6 +6,7 @@ import com.novastats.app.data.db.dao.PeriodSummary
 import com.novastats.app.domain.Chart
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Period
+import com.novastats.app.domain.YearEndRules
 import kotlinx.coroutines.flow.first
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -28,6 +29,8 @@ data class YearEndRow(
     val peak: Int,
     /** Semaines passées n°1. */
     val weeksAt1: Int,
+    /** Le titre a cessé de gagner des points après avoir atteint un seuil de récurrence. */
+    val recurrent: Boolean = false,
     /** Titres distincts (affiché en sous-titre pour les artistes). */
     val extra: Int = 0
 )
@@ -35,7 +38,7 @@ data class YearEndRow(
 /** Tout ce qu'affiche l'écran 🏆 Year-End Charts. */
 data class YearEndData(
     val year: Int,
-    /** Fenêtre réellement comptée (année Billboard déc. → nov., ou année civile). */
+    /** Fenêtre locale comptée : déc. → nov., ou année civile. */
     val fromIso: String,
     val toIso: String,
     val calendarYear: Boolean,
@@ -73,19 +76,20 @@ private val MOIS = listOf(
 )
 
 /**
- * Year-End Charts — **les vraies règles du Billboard américain** :
+ * Year-End Nova, inspiré des classements annuels Billboard mais calculé uniquement avec l'historique
+ * d'écoutes local :
  *
- *  1. **On ne cumule pas les écoutes** : le classement de fin d'année additionne les **points gagnés
- *     semaine après semaine** sur les charts hebdomadaires (les mêmes que l'onglet Billboard).
- *  2. **Barème inversé** : 100 points pour la 1ʳᵉ place, 99 pour la 2ᵉ… 1 point pour la 100ᵉ
- *     (Nova Hot 100). Artist 50 → 50 points pour la 1ʳᵉ place. 75 Albums → 75 points.
- *  3. **Année de référence Billboard** : elle commence début décembre de l'année précédente et se
- *     termine fin novembre (et non au 31 décembre). Bascule possible sur l'année civile.
- *  4. **Règle des récurrents** (Hot 100) : un titre présent depuis 20 semaines et retombé au-delà
- *     de la 50ᵉ place quitte le classement et n'accumule plus de points — comme le vrai Billboard.
- *  5. Mêmes règles d'entités que le Billboard : remix rattachés à l'original (root_id), chaque
- *     artiste crédité reçoit l'écoute, compilations exclues, albums partagés « Artistes variés ».
- *  6. Départages : points, puis écoutes cumulées, puis semaines dans le classement.
+ *  1. Chaque semaine ISO (lundi → dimanche), les écoutes enregistrées dans Nova produisent un rang.
+ *  2. Le rang hebdomadaire devient un score inversé : limite points pour la 1ʳᵉ place, puis 1 point
+ *     pour la dernière position du chart (100 / 50 / 75 selon l'onglet).
+ *  3. Fenêtre locale par défaut : 1er décembre → 30 novembre, ou année civile à la demande.
+ *  4. Les titres Hot 100 utilisent des seuils de récurrence renforcés, comptés dans cette fenêtre
+ *     annuelle. Une sortie arrête les points futurs, sans effacer les points déjà acquis.
+ *  5. Identités Nova : remix rattachés à l'original (root_id), artistes crédités, compilations exclues.
+ *  6. Départages : points, puis écoutes cumulées, puis semaines créditées.
+ *
+ * Ce n'est pas le calcul officiel américain : l'application n'a pas les métriques US de ventes,
+ * streaming et radio utilisées par Billboard.
  */
 class YearEndRepository(private val db: NovaDatabase) {
 
@@ -93,7 +97,7 @@ class YearEndRepository(private val db: NovaDatabase) {
     suspend fun years(): List<Int> =
         db.dailyPlayDao().allDates().mapNotNull { it.take(4).toIntOrNull() }.distinct().sortedDescending()
 
-    /** Fenêtre comptée : année Billboard (déc. → nov.) ou année civile. */
+    /** Fenêtre locale comptée : déc. → nov. ou année civile. */
     fun window(year: Int, calendarYear: Boolean): Pair<LocalDate, LocalDate> =
         if (calendarYear) LocalDate.of(year, 1, 1) to LocalDate.of(year, 12, 31)
         else LocalDate.of(year - 1, 12, 1) to LocalDate.of(year, 11, 30)
@@ -107,7 +111,7 @@ class YearEndRepository(private val db: NovaDatabase) {
         val today = Dates.today()
         val lastWeekStart = winTo.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
-        /* ---------- 1. Les semaines de l'année Billboard ---------- */
+        /* ---------- 1. Les semaines de la fenêtre Year-End locale ---------- */
         val weeks = mutableListOf<Pair<String, String>>()
         var monday = winFrom.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         while (!monday.isAfter(lastWeekStart)) {
@@ -126,10 +130,13 @@ class YearEndRepository(private val db: NovaDatabase) {
             rankedTracks.forEachIndexed { i, e ->
                 val position = i + 1
                 val acc = accTracks.getOrPut(e.entityId) { Acc() }
-                // Règle des récurrents : 20 semaines ou plus et retombé au-delà de la 50e place → sort du chart
-                if (acc.weeks >= RECURRENT_WEEKS && position > RECURRENT_POSITION) { acc.recurrent = true; return@forEachIndexed }
+                // Seuils renforcés : le compteur repart dans la fenêtre Year-End sélectionnée.
                 if (acc.recurrent) return@forEachIndexed
-                acc.add(position, Chart.HOT_100.limit(Period.WEEKLY) + 1 - position, e.plays, e.durationMs)
+                if (YearEndRules.becomesRecurrent(acc.weeks, position)) {
+                    acc.recurrent = true
+                    return@forEachIndexed
+                }
+                acc.add(position, YearEndRules.pointsFor(position, Chart.HOT_100.limit(Period.WEEKLY)), e.plays, e.durationMs)
             }
             val rankedArtists = runCatching { db.billboardDao().rankArtists(from, to, Chart.ARTIST_50.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
             rankedArtists.forEachIndexed { i, e ->
@@ -254,7 +261,7 @@ class YearEndRepository(private val db: NovaDatabase) {
                 id = id, name = name, subtitle = sub, imageUrl = img,
                 points = a.points, plays = a.plays, durationMs = a.durationMs,
                 weeks = a.weeks, peak = if (a.peak == Int.MAX_VALUE) 0 else a.peak,
-                weeksAt1 = a.weeksAt1, extra = a.distinct
+                weeksAt1 = a.weeksAt1, recurrent = a.recurrent, extra = a.distinct
             )
         }
     }
@@ -262,11 +269,7 @@ class YearEndRepository(private val db: NovaDatabase) {
     private fun plural(n: Int): String = when { n > 1 -> "$n titres"; n == 1 -> "1 titre"; else -> "" }
 
     companion object {
-        /** Règle des récurrents du Hot 100 : 20 semaines + retombé au-delà de la 50e place. */
-        const val RECURRENT_WEEKS = 20
-        const val RECURRENT_POSITION = 50
-
-        fun pointsFor(position: Int, limit: Int): Int = (limit + 1 - position).coerceAtLeast(0)
+        fun pointsFor(position: Int, limit: Int): Int = YearEndRules.pointsFor(position, limit)
 
         val EMPTY = PeriodSummary(0, 0, 0, 0, 0, 0)
     }
