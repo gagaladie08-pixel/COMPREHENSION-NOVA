@@ -1,6 +1,10 @@
 package com.novastats.app.ui.screens
 
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +85,7 @@ fun StatsScreen() {
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
+    var versus by remember { mutableStateOf(false) }
     val range = remember(period) { Dates.statsRangeFor(period) }
 
     val summary by remember(range) { db.scrobbleDao().summary(range.fromMs, range.toMs) }
@@ -100,6 +105,13 @@ fun StatsScreen() {
     fun matches(vararg fields: String?) = q.isBlank() || fields.any { it != null && TitleNormalizer.normalizeKey(it).contains(q) }
 
     DetailPopupHost(detail) { detail = null }
+
+    // ⚔️ Comparer deux titres / artistes (écran plein, retour = Stats)
+    if (versus) {
+        BackHandler { versus = false }
+        VersusScreen { versus = false }
+        return
+    }
 
     val filteredTracks = remember(tracks, q) { tracks.mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
     val filteredArtists = remember(artists, q) { artists.mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
@@ -142,6 +154,21 @@ fun StatsScreen() {
                     color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
                 )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.30f), theme.secondary.copy(alpha = 0.22f), Color.Transparent)))
+                        .clickable { versus = true }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("⚔️", fontSize = 20.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Comparer deux titres ou artistes", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Face à face : écoutes, temps, régularité, certification…", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("›", color = theme.primary, fontSize = 22.sp)
+                }
             }
         }
 

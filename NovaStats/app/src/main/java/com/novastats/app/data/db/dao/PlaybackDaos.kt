@@ -107,6 +107,9 @@ interface ScrobbleDao {
     @Query("SELECT * FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED' ORDER BY started_at DESC")
     suspend fun allOfTrack(trackId: Long): List<ScrobbleEntity>
 
+    @Query("SELECT * FROM scrobbles WHERE artist_id = :artistId AND status = 'CONFIRMED' ORDER BY started_at")
+    suspend fun allOfArtist(artistId: Long): List<ScrobbleEntity>
+
     @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")
     suspend fun countOfTrack(trackId: Long): Int
 

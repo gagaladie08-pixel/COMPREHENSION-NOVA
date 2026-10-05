@@ -920,6 +920,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.17.0" to listOf(
+        "\u2694\ufe0f **Mode comparaison** (Stats → « Comparer deux titres ou artistes ») : deux pochettes face \u00e0 face autour d'un badge **VS**, et un duel crit\u00e8re par crit\u00e8re avec barres anim\u00e9es.",
+        "\ud83c\udfc6 **8 crit\u00e8res** : \u00e9coutes, temps d'\u00e9coute, jours actifs, moyenne par jour actif, certification, derni\u00e8re \u00e9coute (fra\u00eecheur), anciennet\u00e9 et heure de pr\u00e9dilection. Chaque crit\u00e8re d\u00e9signe son vainqueur d'une m\u00e9daille.",
+        "\ud83d\udcca **Verdict** : « X m\u00e8ne 5 \u00e0 3 » ou « \u00c9galit\u00e9 parfaite », avec les deux courbes d'heures d'\u00e9coute c\u00f4te \u00e0 c\u00f4te et les pics respectifs.",
+        "\ud83d\udd0e **Recherche int\u00e9gr\u00e9e** : tape un nom ou choisis dans ton top 20. Boutons « Inverser » (\u00e9changer les camps) et « Nouveau duel »."
+    ),
     "0.16.0" to listOf(
         "\ud83e\ude7a **Nouvel écran « Santé de la détection »** (Réglages → 🩺 Santé de la détection) : un **score sur 100** affich\u00e9 sur un cadran anim\u00e9, avec un verdict (Excellente / Correcte / Fragile / Bloqu\u00e9e) et le nombre de points \u00e0 corriger.",
         "\ud83d\udd0d **Les 6 v\u00e9rifications** pass\u00e9es en revue une par une : acc\u00e8s aux notifications, service connect\u00e9, MediaSession, signe de vie du service, optimisation batterie, activit\u00e9 sur 7 jours. Chaque point rouge propose le bouton qui ouvre directement le bon écran.",
