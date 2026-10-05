@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
+import java.util.Locale
 
 /** Une ligne d'un classement de fin d'année, prête à afficher. */
 data class YearEndRow(
@@ -234,10 +235,10 @@ class YearEndRepository(private val db: NovaDatabase) {
         }
     }
 
-    private fun resolve(
+    private suspend fun resolve(
         acc: HashMap<Long, Acc>,
         limit: Int,
-        names: (List<Long>) -> Map<Long, Triple<String, String?, String?>>
+        names: suspend (List<Long>) -> Map<Long, Triple<String, String?, String?>>
     ): List<YearEndRow> {
         val ranked = acc.entries
             .sortedWith(compareByDescending<Map.Entry<Long, Acc>> { it.value.points }
