@@ -904,6 +904,13 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.13.0" to listOf(
+        "\ud83c\udfaf Nova Rewind refait en mode \u00ab poster \u00bb : fond plein \u00e9cran flout\u00e9 \u00e0 partir de la pochette ou de la photo de ton artiste n\u00b01 (avec travelling lent), plus aucune liste s\u00e8che \u2014 tout est en cartes de verre bord\u00e9es de lumi\u00e8re, typographie XXL et chiffres g\u00e9ants.",
+        "\ud83d\udcca Rythme : vrai graphique de tes 24 heures d'\u00e9coute + barres des 7 jours de la semaine + ta journ\u00e9e record et ta plus longue session.",
+        "\ud83d\udc31 Artiste / Titre n\u00b01 : nom en tr\u00e8s gros, chiffre g\u00e9ant en d\u00e9grad\u00e9 balayant, anneau qui tourne autour de la pochette, carte de pr\u00e9sence (X jours sur Y).",
+        "\ud83c\udfc5 R\u00e9compenses : vraies m\u00e9dailles (Argent / Or / Platine / Diamant) d\u00e9filantes au lieu de simples lignes ; d\u00e9couvertes en grille de portraits ; top 5 avec podium (le n\u00b01 en plus grand).",
+        "\u2728 Entr\u00e9es en cascade avec l\u00e9ger rebond (ressort), transitions en profondeur, confettis \u00e0 la finale."
+    ),
     "0.12.3" to listOf(
         "\ud83c\udf08 Rewind encore plus spectaculaire : aurores de couleur qui d\u00e9rivent derri\u00e8re les slides, grands chiffres en d\u00e9grad\u00e9 balayant (couleurs des drapeaux pour Survivor), titre de la couverture qui s'\u00e9crit lettre par lettre, pochettes en travelling lent (\u00ab Ken Burns \u00bb) dans leur anneau qui tourne.",
         "\ud83c\udf8a Confettis \u00e0 la finale (or, ou couleurs des drapeaux pour Survivor) + pastilles r\u00e9cap (artiste n\u00b01, titre n\u00b01, certifications, s\u00e9rie) qui apparaissent en cascade.",

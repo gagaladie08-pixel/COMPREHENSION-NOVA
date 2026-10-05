@@ -61,6 +61,8 @@ data class RewindData(
     val favouriteHour: Int?,          // 0-23
     val nightShare: Float,            // part des écoutes entre 22h et 5h
     val favouriteWeekday: Int?,       // 1 = lundi … 7 = dimanche
+    val hours: List<Int>,             // 24 valeurs : écoutes par heure locale (index = heure)
+    val weekdays: List<Int>,          // 7 valeurs : écoutes par jour (index 0 = lundi)
     val newArtists: List<NewArtist>,
     val newArtistCount: Int,
     val newTrackCount: Int,
@@ -122,7 +124,10 @@ class RewindEngine(private val db: NovaDatabase) {
         val favouriteHour = hours.maxByOrNull { it.plays }?.hour
         val night = hours.filter { it.hour >= 22 || it.hour < 5 }.sumOf { it.plays }
         val nightShare = if (totalH == 0) 0f else night.toFloat() / totalH
-        val weekday = dao.weekdays(spec.fromMs, spec.toMs).maxByOrNull { it.plays }?.weekday?.let { if (it == 0) 7 else it }
+        val wdRaw = dao.weekdays(spec.fromMs, spec.toMs)
+        val weekday = wdRaw.maxByOrNull { it.plays }?.weekday?.let { if (it == 0) 7 else it }
+        // Lundi d'abord : strftime %w renvoie 0 = dimanche … 6 = samedi
+        val weekdayBuckets = (1..7).map { d -> val idx = if (d == 7) 0 else d; wdRaw.firstOrNull { it.weekday == idx }?.plays ?: 0 }
 
         val newArtists = dao.newArtists(from, to, spec.fromMs, spec.toMs)
         val newArtistCount = dao.newArtistCount(spec.fromMs, spec.toMs)
@@ -145,6 +150,7 @@ class RewindEngine(private val db: NovaDatabase) {
         return RewindData(
             spec, totals, previous, topTracks, topArtists, topAlbums, topTrackDays, topArtistDays,
             bestDate, best?.playCount ?: 0, bestDayTrack, streak, favouriteHour, nightShare, weekday,
+            (0..23).map { h -> hours.firstOrNull { it.hour == h }?.plays ?: 0 }, weekdayBuckets,
             newArtists, newArtistCount, newTrackCount, certs, pantheon, numberOnes,
             dao.longestSessionMs(spec.fromMs, spec.toMs), previousTopArtist
         )
