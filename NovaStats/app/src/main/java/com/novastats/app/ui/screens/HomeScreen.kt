@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.first
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.dao.RankedAlbum
 import com.novastats.app.data.db.entity.TrackEntity
@@ -45,6 +46,7 @@ import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
 import com.novastats.app.domain.Dates
+import com.novastats.app.domain.Period
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.ui.navigation.NovaTab
@@ -90,6 +92,15 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     DetailPopupHost(detail) { detail = null }
 
+    // 🎨 Fond artistique : photo de ton artiste du moment (7 derniers jours), sinon pochette de ton titre du jour
+    val week = remember { Dates.statsRangeFor(Period.WEEKLY) }
+    val artUrl by produceState<String?>(initialValue = null) {
+        value = runCatching {
+            val a = db.artistDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()
+            a?.artist?.photoUrl ?: db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()?.track?.coverUrl
+        }.getOrNull()
+    }
+
     var rewindKey by remember { mutableStateOf<String?>(null) }
     if (rewindKey != null) {
         RewindScreen(rewindKey) { rewindKey = null }
@@ -101,6 +112,10 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         return
     }
 
+    Box(Modifier.fillMaxSize()) {
+        // Fond plein écran, très assombri pour garder la liste lisible
+        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.42f, scrim = 1.18f)
+        RewindParticles(theme, Modifier.fillMaxSize())
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         /* ---------- 0. Nova Rewind ---------- */
         item { RewindEntryCard { rewindKey = it } }
@@ -169,6 +184,13 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         /* ---------- 2. Aujourd'hui ---------- */
         item {
             SectionTitle("Aujourd'hui")
+            // Bloc « verre » : le compteur du jour en très gros
+            StatGlass(
+                plays = todayStats?.playCount ?: 0,
+                durationMs = todayStats?.totalDurationMs ?: 0L,
+                extras = listOf("${todayStats?.distinctTracks ?: 0}" to "titres", "${todayStats?.distinctArtists ?: 0}" to "artistes"),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
             // Même bandeau que l'onglet Stats
             SummaryStrip(
                 listOf(
@@ -351,6 +373,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
+    }
     }
 }
 

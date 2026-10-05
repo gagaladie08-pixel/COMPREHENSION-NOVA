@@ -227,16 +227,14 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
         PeriodChip(period, theme.primary)
         Spacer(Modifier.height(8.dp))
         if (scoped) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                StatPill(formatCount(ps?.plays ?: 0), "écoutes ${periodWord(period)}")
-                StatPill(formatDuration(ps?.durationMs ?: 0L), "temps ${periodWord(period)}", accent = theme.secondary)
-                StatPill("${ps?.activeDays ?: 0}", "jour${if ((ps?.activeDays ?: 0) > 1) "s" else ""} actif${if ((ps?.activeDays ?: 0) > 1) "s" else ""}", accent = theme.accent)
-            }
+            StatGlass(
+                plays = ps?.plays ?: 0,
+                durationMs = ps?.durationMs ?: 0L,
+                extras = listOf("${ps?.activeDays ?: 0}" to "jour${if ((ps?.activeDays ?: 0) > 1) "s" else ""} actif${if ((ps?.activeDays ?: 0) > 1) "s" else ""}"),
+                playLabel = "écoutes ${periodWord(period)}"
+            )
             Text("Cumul all time : ${formatCount(t.playCount)} écoutes · ${formatDuration(t.totalDurationMs)}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-        } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            StatPill(formatCount(t.playCount), "écoutes")
-            StatPill(formatDuration(t.totalDurationMs), "temps cumulé", accent = theme.secondary)
-        }
+        } else StatGlass(plays = t.playCount, durationMs = t.totalDurationMs, playLabel = "écoutes")
         if (versions.isNotEmpty()) {
             PopupSection("🔗 Versions fusionnées")
             Text(
@@ -248,6 +246,7 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
         PopupSection(if (scoped) "🏅 Certification (cumul all time)" else "🏅 Certification")
         val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (lvl != null) MedalBadge(lvl, cert?.multiplier ?: 1, size = 58.dp)
             CertBadge(lvl, cert?.multiplier ?: 1)
             if (lvl != null) Text("obtenue le ${formatDate(cert?.certifiedAt)}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             else {
@@ -354,19 +353,19 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         if (scoped) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { PeriodChip(period, theme.glowSecondary) }
             Spacer(Modifier.height(6.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                StatPill(formatCount(ps?.plays ?: 0), "écoutes")
-                StatPill(formatDuration(ps?.durationMs ?: 0L), "temps", accent = theme.secondary)
-                StatPill("${ps?.distinctTracks ?: 0}", "titres", accent = theme.accent)
-                StatPill("${ps?.distinctAlbums ?: 0}", "albums", accent = theme.glowSecondary)
-            }
+            StatGlass(
+                plays = ps?.plays ?: 0,
+                durationMs = ps?.durationMs ?: 0L,
+                extras = listOf("${ps?.distinctTracks ?: 0}" to "titres", "${ps?.distinctAlbums ?: 0}" to "albums"),
+                color = theme.glowSecondary
+            )
             Text("Cumul all time : ${formatCount(a.playCount)} écoutes · ${formatDuration(a.totalDurationMs)} · ${a.distinctTracks} titres · ${a.distinctAlbums} albums", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-        } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            StatPill(formatCount(a.playCount), "écoutes")
-            StatPill(formatDuration(a.totalDurationMs), "temps total", accent = theme.secondary)
-            StatPill("${a.distinctTracks}", "titres", accent = theme.accent)
-            StatPill("${a.distinctAlbums}", "albums", accent = theme.glowSecondary)
-        }
+        } else StatGlass(
+            plays = a.playCount,
+            durationMs = a.totalDurationMs,
+            extras = listOf("${a.distinctTracks}" to "titres", "${a.distinctAlbums}" to "albums"),
+            color = theme.glowSecondary
+        )
         // 🖼️ Autres photos : propositions de toutes les sources, vérifiées avec ta bibliothèque ; un appui = photo 👤 USER
         ImagePickerBar(EntityType.ARTIST, a.artistId, a.name, null, a.photoUrl, a.photoSource, theme.glowSecondary, circle = true) { artist = db.artistDao().getById(artistId) }
         PopupSection("👑 Statut Panthéon", theme.glowSecondary)
@@ -630,20 +629,24 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
         ImagePickerBar(EntityType.ALBUM, al.albumId, al.title, artistName, al.coverUrl, al.coverSource, theme.secondary, circle = false) { album = db.albumDao().getById(albumId) }
         Spacer(Modifier.height(8.dp))
         if (scoped) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                StatPill(formatCount(ps?.plays ?: 0), "écoutes ${periodWord(period)}")
-                StatPill(formatDuration(ps?.durationMs ?: 0L), "temps", accent = theme.secondary)
-                StatPill("${ps?.distinctTracks ?: 0}", "titres écoutés", accent = theme.accent)
-            }
+            StatGlass(
+                plays = ps?.plays ?: 0,
+                durationMs = ps?.durationMs ?: 0L,
+                extras = listOf("${ps?.distinctTracks ?: 0}" to "titres écoutés"),
+                playLabel = "écoutes ${periodWord(period)}",
+                color = theme.secondary
+            )
             Text("Cumul all time : ${formatCount(al.playCount)} écoutes · ${formatDuration(al.totalDurationMs)} · ${al.distinctTracksPlayed} titres", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-        } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            StatPill(formatCount(al.playCount), "écoutes")
-            StatPill(formatDuration(al.totalDurationMs), "temps total", accent = theme.secondary)
-            StatPill("${al.distinctTracksPlayed}", "titres écoutés", accent = theme.accent)
-        }
+        } else StatGlass(
+            plays = al.playCount,
+            durationMs = al.totalDurationMs,
+            extras = listOf("${al.distinctTracksPlayed}" to "titres écoutés"),
+            color = theme.secondary
+        )
         PopupSection(if (scoped) "🏅 Certification album (cumul all time)" else "🏅 Certification album", theme.secondary)
         val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (lvl != null) MedalBadge(lvl, cert?.multiplier ?: 1, size = 58.dp)
             CertBadge(lvl, cert?.multiplier ?: 1)
             if (lvl != null) Text("obtenue le ${formatDate(cert?.certifiedAt)}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             else {
@@ -929,6 +932,7 @@ private fun ChartRunSection(type: String, id: Long, color: Color) {
     val peak = stats.peak ?: return
 
     PopupSection("📈 Parcours ${chartLabel(type)} (hebdo)", color)
+    GlassCard(glow = color) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
         StatPill("#${peak.position}", "meilleur rang", accent = color)
         StatPill("${stats.periodsInChart}", "semaines classé", accent = theme.secondary)
@@ -963,6 +967,7 @@ private fun ChartRunSection(type: String, id: Long, color: Color) {
             }
         }
     }
+    }
 }
 
 /**
@@ -982,6 +987,7 @@ private fun ForecastSection(
     val progress = (current.toFloat() / target.toFloat()).coerceIn(0f, 1f)
 
     PopupSection("$emoji Vers $targetLabel", color)
+    GlassCard(glow = color) {
     LinearProgressIndicator(
         progress = { progress },
         modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
@@ -998,5 +1004,6 @@ private fun ForecastSection(
         )
     } else {
         Text("Rythme récent trop faible pour une estimation.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+    }
     }
 }

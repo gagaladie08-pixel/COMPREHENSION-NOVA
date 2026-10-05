@@ -904,6 +904,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.14.0" to listOf(
+        "\ud83c\udfa8 Le langage visuel du Rewind s'\u00e9tend \u00e0 toute l'app. **Accueil** : fond artistique plein \u00e9cran (photo de ton artiste du moment des 7 derniers jours, flout\u00e9e et tr\u00e8s assombrie) + particules + bloc \u00ab Aujourd'hui \u00bb en verre avec le compteur du jour en tr\u00e8s gros.",
+        "\ud83e\udea1 **Popups de fiche** (titre / artiste / album) : les statistiques passent en carte de verre avec le nombre d'\u00e9coutes en tr\u00e8s gros et d\u00e9filant, le parcours hebdomadaire et la pr\u00e9vision sont encapsul\u00e9s dans le verre.",
+        "\ud83c\udfc5 **M\u00e9dailles** : Argent / Or / Platine / Diamant en d\u00e9grad\u00e9s m\u00e9talliques (avec halo et multiplicateur \u00d7n) affich\u00e9es dans les fiches certifi\u00e9es.",
+        "\u2728 Briques partag\u00e9es (nouveau fichier `PremiumUi.kt`) : fond flout\u00e9, particules, confettis, cascade \u00e0 ressort, cartes et pastilles de verre, compteurs anim\u00e9s, graphiques, pochettes cercl\u00e9es."
+    ),
     "0.13.0" to listOf(
         "\ud83c\udfaf Nova Rewind refait en mode \u00ab poster \u00bb : fond plein \u00e9cran flout\u00e9 \u00e0 partir de la pochette ou de la photo de ton artiste n\u00b01 (avec travelling lent), plus aucune liste s\u00e8che \u2014 tout est en cartes de verre bord\u00e9es de lumi\u00e8re, typographie XXL et chiffres g\u00e9ants.",
         "\ud83d\udcca Rythme : vrai graphique de tes 24 heures d'\u00e9coute + barres des 7 jours de la semaine + ta journ\u00e9e record et ta plus longue session.",
