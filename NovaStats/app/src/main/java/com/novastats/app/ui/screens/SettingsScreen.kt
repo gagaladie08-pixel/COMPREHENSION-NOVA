@@ -84,6 +84,7 @@ enum class SettingsPage(val emoji: String, val title: String, val subtitle: Stri
     EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
     SERVICE("🛡️", "Service & diagnostic", "État du service, batterie, journal"),
     HEALTH("🩺", "Santé de la détection", "Score /100, 6 vérifications, plan HiOS"),
+    CUSTOM_THEME("✨", "Mon thème", "Crée ton 16ᵉ thème : couleurs, coins, polices, effet"),
     GUIDE("📱", "Guide constructeur", "Samsung, Xiaomi, Huawei, Oppo, Pixel — libérer NovaStats"),
     APIS("🌐", "APIs & enrichissement", "Pochettes, photos — 9 sources"),
     ABOUT("ℹ️", "À propos", "Version, nouveautés, crédits")
@@ -111,12 +112,13 @@ fun SettingsScreen() {
         SubPageHeader(current) { page = null }
         when (current) {
             SettingsPage.DETECTION -> DetectionPage(onOpenReview = { editorReview = true; editorFocus = null; page = SettingsPage.EDITOR })
-            SettingsPage.APPEARANCE -> AppearancePage()
+            SettingsPage.APPEARANCE -> AppearancePage(onOpenCustom = { page = SettingsPage.CUSTOM_THEME })
             SettingsPage.NOTIFICATIONS -> NotificationsPage()
             SettingsPage.DATA -> DataPage()
             SettingsPage.EDITOR -> DataEditorScreen(startOnReview = editorReview, focusTrackId = editorFocus)
             SettingsPage.SERVICE -> ServicePage(onOpenHealth = { page = SettingsPage.HEALTH })
             SettingsPage.HEALTH -> DetectionHealthScreen { page = null }
+            SettingsPage.CUSTOM_THEME -> CustomThemeScreen { page = null }
             SettingsPage.GUIDE -> com.novastats.app.ui.onboarding.GuideStepScreen(com.novastats.app.ui.onboarding.rememberObAudio(), Nova.theme, embedded = true)
             SettingsPage.APIS -> ApisPage()
             SettingsPage.ABOUT -> AboutPage()
@@ -333,7 +335,7 @@ private fun ChipEditor(title: String, hint: String, values: Set<String>, onChang
 /* ================================ APPARENCE ================================ */
 
 @Composable
-private fun AppearancePage() {
+private fun AppearancePage(onOpenCustom: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as NovaStatsApp
     val settings = app.settings
     val scope = rememberCoroutineScope()
@@ -368,6 +370,41 @@ private fun AppearancePage() {
                 }
                 Text("Aperçu : Les classements, popups et réglages s'adaptent immédiatement.", color = theme.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 10.dp))
                 if (fontPct != 100) Text("↺ Revenir à 100 %", color = theme.primary, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp).clickable { scope.launch { settings.setFontScalePct(100) } })
+            }
+        }
+        SectionTitle("✨ Mon thème (16ᵉ)")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                val custom = NovaThemes.customTheme
+                Text(
+                    if (custom == null) "Crée ton propre thème : couleurs, arrondi, polices et effet signature. Il rejoindra la liste des thèmes et s'active comme les autres."
+                    else "${custom.emoji} ${custom.name} est prêt. Tu peux le modifier quand tu veux, ou revenir aux 15 thèmes d'origine.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                if (custom != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.size(46.dp).background(custom.background, CircleShape)
+                                .border(if (themeId == com.novastats.app.ui.theme.CUSTOM_THEME_ID) 3.dp else 1.dp, if (themeId == com.novastats.app.ui.theme.CUSTOM_THEME_ID) custom.accent else custom.textSecondary.copy(alpha = 0.4f), CircleShape)
+                                .clickable { scope.launch { settings.setTheme(com.novastats.app.ui.theme.CUSTOM_THEME_ID) } }
+                                .padding(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Dot(custom.primary); Dot(custom.secondary); Dot(custom.accent)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("${custom.emoji} ${custom.name}", color = theme.text, fontWeight = FontWeight.SemiBold)
+                            Text(if (themeId == com.novastats.app.ui.theme.CUSTOM_THEME_ID) "Activé" else "Appuie pour l'activer", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenCustom, modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary, contentColor = theme.background)
+                ) { Text(if (custom == null) "✨ Créer mon thème" else "✨ Modifier mon thème") }
             }
         }
         SectionTitle("🎨 Thèmes — ${NovaThemes.ALL.size}")
@@ -920,6 +957,13 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.19.0" to listOf(
+        "\u2728 **Th\u00e8me personnalis\u00e9 — le 16\u1d47\u1d49 th\u00e8me** (R\u00e9glages → ✨ Mon th\u00e8me) : cr\u00e9e tes propres couleurs, ton arrondi, tes polices et ton effet signature. Ton th\u00e8me rejoint la liste et s'active comme les 15 autres.",
+        "\ud83d\udca1 **Aper\u00e7u en direct** : une carte « application miniature » (brand bar, compteur g\u00e9ant, pastilles, graphique) se re-th\u00e8me instantan\u00e9ment pendant que tu bouges les curseurs.",
+        "\ud83c\udfa8 **6 palettes de d\u00e9part** (N\u00e9on, Coucher de soleil, Oc\u00e9an, For\u00eat, Rubis, Pastel) puis 3 curseurs de teinte + intensit\u00e9 + luminosit\u00e9, et le choix Sombre / Clair.",
+        "\ud83e\udde9 **Formes & typo** : arrondi des cartes de 0 \u00e0 28 dp (angles vifs → tr\u00e8s arrondi) et 5 paires de polices. **Effet signature** au choix : shimmer dor\u00e9, scanlines, reflets chrom\u00e9s, bulles, paillettes, glow chaud, fondu nuage, confettis.",
+        "\ud83c\udff7\ufe0f Nom et embl\u00e8me libres. Boutons Enregistrer / R\u00e9initialiser / Supprimer. Le changement de th\u00e8me ne ferme pas l'app."
+    ),
     "0.18.0" to listOf(
         "\u2694\ufe0f **Le duel passe \u00e0 20 crit\u00e8res** (au lieu de 8), r\u00e9partis en 4 familles de difficult\u00e9 croissante : 🥉 Les bases, 🥈 La r\u00e9gularit\u00e9, 🌙 Les moments, 💎 L'endurance. Chaque famille d\u00e9signe son vainqueur, ce qui laisse \u00e0 chaque camp une vraie chance de gagner.",
         "\ud83e\udd49 **Les bases** : \u00e9coutes, temps d'\u00e9coute, jours actifs, moyenne par jour actif, certification.\n🥈 **La r\u00e9gularit\u00e9** : s\u00e9rie max de jours cons\u00e9cutifs, mois actifs, record sur une journ\u00e9e, jours \u00e0 3 \u00e9coutes et plus, \u00e9coutes par mois.",

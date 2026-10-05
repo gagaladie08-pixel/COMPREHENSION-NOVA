@@ -314,7 +314,80 @@ object NovaThemes {
 
     val DEFAULT = CYBER_NOVA
 
-    fun byId(id: String?): NovaTheme = ALL.firstOrNull { it.id == id } ?: DEFAULT
+    /**
+     * Thème créé par l'utilisateur (16ᵉ thème). Chargé au démarrage par [NovaStatsApp] et
+     * mis à jour dès que le thème personnalisé est enregistré. `null` = pas encore créé.
+     */
+    @Volatile
+    var customTheme: NovaTheme? = null
+
+    fun byId(id: String?): NovaTheme = ALL.firstOrNull { it.id == id }
+        ?: customTheme?.takeIf { id == CUSTOM_THEME_ID }
+        ?: DEFAULT
+}
+
+/** Identifiant réservé au thème personnalisé — n'existe pas dans [NovaThemes.ALL]. */
+const val CUSTOM_THEME_ID = "custom"
+
+/** Conversion HSL → Color (pure Kotlin : utilisable dans les tests JVM). */
+private fun hsl(h: Float, s: Float, l: Float): Color {
+    val hh = ((h % 360f) + 360f) % 360f
+    val c = (1f - kotlin.math.abs(2f * l - 1f)) * s
+    val x = c * (1f - kotlin.math.abs((hh / 60f) % 2f - 1f))
+    val m = l - c / 2f
+    val (r, g, b) = when {
+        hh < 60f -> Triple(c, x, 0f)
+        hh < 120f -> Triple(x, c, 0f)
+        hh < 180f -> Triple(0f, c, x)
+        hh < 240f -> Triple(0f, x, c)
+        hh < 300f -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    return Color((r + m).coerceIn(0f, 1f), (g + m).coerceIn(0f, 1f), (b + m).coerceIn(0f, 1f))
+}
+
+/**
+ * Spécification du thème personnalisé : exactement ce que l'utilisateur règle à l'écran.
+ * [toTheme] dérive les 8 couleurs du thème (fond, surface, textes…) à partir de 3 teintes.
+ */
+data class CustomThemeSpec(
+    val name: String = "Mon thème",
+    val emoji: String = "✨",
+    /** Teintes 0–360. */
+    val primaryHue: Float = 320f,
+    val secondaryHue: Float = 200f,
+    val accentHue: Float = 175f,
+    val saturation: Float = 0.88f,
+    val lightness: Float = 0.58f,
+    val dark: Boolean = true,
+    val cornerDp: Int = 16,
+    val titleFont: String = "Orbitron",
+    val bodyFont: String = "Rajdhani",
+    val signature: Signature = Signature.GOLD_SHIMMER
+) {
+    fun toTheme(): NovaTheme {
+        val sat = saturation.coerceIn(0.25f, 1f)
+        val lig = lightness.coerceIn(0.35f, 0.80f)
+        return NovaTheme(
+            id = CUSTOM_THEME_ID, emoji = emoji, name = name,
+            primary = hsl(primaryHue, sat, lig),
+            secondary = hsl(secondaryHue, sat, (lig + 0.02f).coerceAtMost(0.82f)),
+            glowSecondary = hsl(accentHue, sat, (lig - 0.10f).coerceAtLeast(0.22f)),
+            background = hsl(primaryHue, if (dark) 0.38f else 0.32f, if (dark) 0.045f else 0.965f),
+            surface = hsl(primaryHue, if (dark) 0.30f else 0.26f, if (dark) 0.11f else 0.92f),
+            text = hsl(primaryHue, 0.10f, if (dark) 0.96f else 0.10f),
+            textSecondary = hsl(primaryHue, 0.16f, if (dark) 0.70f else 0.38f),
+            accent = hsl(accentHue, (sat * 0.95f).coerceIn(0f, 1f), (lig + 0.08f).coerceAtMost(0.86f)),
+            effects = "Ta propre signature visuelle",
+            inspiration = "Thème créé par toi — couleurs, coins, polices et effet au choix",
+            titleFont = titleFont, bodyFont = bodyFont,
+            iconsDescription = "Style de ton thème personnalisé",
+            icons = IconStyle.HUD,
+            transitionMs = 320, easing = MotionEasing.EASE_OUT,
+            signature = signature, cornerDp = cornerDp,
+            chart = ChartStyle(stroke = ColorKey.ACCENT, glowDp = 7f, fillTop = ColorKey.PRIMARY, deco = CurveDeco.STARS)
+        )
+    }
 }
 
 /** Couleurs transverses (indépendantes du thème). */

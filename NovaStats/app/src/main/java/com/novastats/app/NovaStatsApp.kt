@@ -44,6 +44,8 @@ class NovaStatsApp : Application() {
         com.novastats.app.data.api.EnrichmentState.attach(this)
         EnrichmentWorker.schedulePeriodic(this)
         BackupWorker.schedulePeriodic(this)
+        // ✨ 16ᵉ thème : celui créé par l'utilisateur (null s'il n'en a pas encore)
+        com.novastats.app.ui.theme.NovaThemes.customTheme = com.novastats.app.ui.theme.CustomThemeStore.load(this)?.toTheme()
         com.novastats.app.service.DetectionState.bind(this)
         com.novastats.app.service.Watchdog.schedule(this)
         // Icône du launcher = thème actif (15 activity-alias, un seul activé)

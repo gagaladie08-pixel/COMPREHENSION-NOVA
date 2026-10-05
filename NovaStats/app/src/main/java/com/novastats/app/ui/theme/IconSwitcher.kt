@@ -43,8 +43,14 @@ object IconSwitcher {
     }
 
     /** Demande la bascule vers l'icône de [themeId] : immédiate si aucune activité n'est visible, sinon reportée. */
+    /** Un id hors catalogue (thème personnalisé) n'a pas d'alias : on garde l'icône du thème par défaut. */
+    private fun normalized(themeId: String?): String {
+        val id = NovaThemes.byId(themeId).id
+        return if (NovaThemes.ALL.any { it.id == id }) id else NovaThemes.DEFAULT.id
+    }
+
     fun request(themeId: String?) {
-        val target = NovaThemes.byId(themeId).id
+        val target = normalized(themeId)
         if (!::appRef.isInitialized) return
         if (isCurrent(appRef, target)) { pending = null; return }
         pending = target
@@ -60,7 +66,7 @@ object IconSwitcher {
     fun aliasFor(context: Context, themeId: String) = ComponentName(context, "${context.packageName}.icon.$themeId")
 
     fun apply(context: Context, themeId: String?) {
-        val target = NovaThemes.byId(themeId).id
+        val target = normalized(themeId)
         val pm = context.packageManager
         val ids = NovaThemes.ALL.map { it.id }
         runCatching {
