@@ -12,9 +12,11 @@ class NotificationPermissionRulesTest {
     }
 
     @Test
-    fun android13RequiresRuntimePermission() {
-        assertFalse(NotificationPermissionRules.canPost(apiLevel = 33, runtimePermissionGranted = false, appNotificationsEnabled = true))
-        assertTrue(NotificationPermissionRules.canPost(apiLevel = 33, runtimePermissionGranted = true, appNotificationsEnabled = true))
+    fun android13AndLaterRequireRuntimePermission() {
+        for (apiLevel in 33..35) {
+            assertFalse(NotificationPermissionRules.canPost(apiLevel, runtimePermissionGranted = false, appNotificationsEnabled = true))
+            assertTrue(NotificationPermissionRules.canPost(apiLevel, runtimePermissionGranted = true, appNotificationsEnabled = true))
+        }
     }
 
     @Test
