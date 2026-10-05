@@ -89,9 +89,9 @@ fun RewindBackdrop(
     theme: NovaTheme,
     modifier: Modifier = Modifier,
     /** Opacité de l'image floutée. */
-    artAlpha: Float = 0.85f,
-    /** Force du voile sombre par-dessus (1 = cinéma, >1 = encore plus sombre). */
-    scrim: Float = 1f,
+    artAlpha: Float = 0.78f,
+    /** Force du voile sombre par-dessus (1 = cinéma, >1 = encore plus sombre, <1 = plus clair). */
+    scrim: Float = 0.85f,
     /** Nappes de couleur qui dérivent. */
     aurora: Boolean = true
 ) {
@@ -104,7 +104,7 @@ fun RewindBackdrop(
         if (!url.isNullOrBlank()) {
             // Image chargée en 64 px puis étirée : flou doux, sans coût de rendu
             AsyncImage(
-                model = ImageRequest.Builder(ctx).data(url).size(64).crossfade(700).allowHardware(false).build(),
+                model = ImageRequest.Builder(ctx).data(url).size(96).crossfade(700).allowHardware(false).build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = ken; scaleY = ken; alpha = artAlpha }
@@ -115,9 +115,9 @@ fun RewindBackdrop(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
                     listOf(
-                        theme.background.copy(alpha = (0.55f * scrim).coerceIn(0f, 1f)),
-                        theme.background.copy(alpha = (0.80f * scrim).coerceIn(0f, 1f)),
-                        Color.Black.copy(alpha = (0.94f * scrim).coerceIn(0f, 1f))
+                        theme.background.copy(alpha = (0.46f * scrim).coerceIn(0f, 1f)),
+                        theme.background.copy(alpha = (0.74f * scrim).coerceIn(0f, 1f)),
+                        Color.Black.copy(alpha = (0.93f * scrim).coerceIn(0f, 1f))
                     )
                 )
             )
@@ -130,7 +130,7 @@ fun RewindBackdrop(
                 val cy = size.height * (0.34f + 0.30f * sin(a * 0.8f + i))
                 val r = size.width * (0.58f + 0.14f * sin(a * 1.3f))
                 drawCircle(
-                    brush = Brush.radialGradient(listOf(c.copy(alpha = 0.18f), Color.Transparent), center = Offset(cx, cy), radius = r),
+                    brush = Brush.radialGradient(listOf(c.copy(alpha = 0.30f), Color.Transparent), center = Offset(cx, cy), radius = r),
                     radius = r, center = Offset(cx, cy)
                 )
             }
@@ -153,7 +153,7 @@ fun RewindParticles(theme: NovaTheme, modifier: Modifier = Modifier) {
         seeds.forEach { s ->
             val y = h - ((t * s[2] + s[1]) % 1f) * h
             val x = s[0] * w + sin((t * 6.28f + s[1] * 6.28f)) * 26f
-            drawCircle(color = palette[(s[4].toInt() % palette.size)].copy(alpha = 0.06f + s[3] * 0.16f), radius = 1.6f + s[3] * 3.4f, center = Offset(x, y))
+            drawCircle(color = palette[(s[4].toInt() % palette.size)].copy(alpha = 0.10f + s[3] * 0.26f), radius = 1.8f + s[3] * 3.8f, center = Offset(x, y))
         }
     }
 }
@@ -482,7 +482,7 @@ fun MedalBadge(level: com.novastats.app.domain.CertLevel?, multiplier: Int = 1, 
 fun ScreenBackdrop(artUrl: String?, content: @Composable BoxScope.() -> Unit) {
     val theme = Nova.theme
     Box(Modifier.fillMaxSize()) {
-        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.30f, scrim = 1.28f)
+        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.70f, scrim = 0.95f)
         RewindParticles(theme, Modifier.fillMaxSize())
         content()
     }

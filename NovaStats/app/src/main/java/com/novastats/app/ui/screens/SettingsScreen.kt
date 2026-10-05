@@ -904,6 +904,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.15.1" to listOf(
+        "\ud83d\udd0a **Les fonds artistiques \u00e9taient trop discrets** (quasiment invisibles) : l'opacit\u00e9 de l'image et la force du voile se multipliaient. Nouveau dosage : l'art flout\u00e9 est nettement pr\u00e9sent en haut de l'\u00e9cran et s'efface vers le bas pour garder les listes lisibles.",
+        "\ud83c\udf1f Nappes de couleur plus larges et plus lumineuses, particules plus visibles, image de fond en meilleure d\u00e9finition (96 px au lieu de 64 px avant \u00e9tirement)."
+    ),
     "0.15.0" to listOf(
         "\ud83c\udf0c **Tous les onglets** (Stats, Billboard, Certifications, Records, Panth\u00e9on, Nova Awards, Hall of Fame) ont d\u00e9sormais un **fond artistique** : pochette ou photo mise en avant, flout\u00e9e, tr\u00e8s assombrie, avec les particules qui montent. Stats suit ta p\u00e9riode (l'artiste n\u00b01 du moment), Billboard suit le n\u00b01 du chart affich\u00e9.",
         "\ud83e\udea1 **Certifications** : chaque ligne porte maintenant une **m\u00e9daille m\u00e9tallique** (Argent / Or / Platine / Diamant) pos\u00e9e sur le coin de la pochette, avec le multiplicateur \u00d7n quand il y en a un.",
