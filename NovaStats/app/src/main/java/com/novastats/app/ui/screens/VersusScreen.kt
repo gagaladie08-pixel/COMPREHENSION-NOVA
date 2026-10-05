@@ -108,8 +108,8 @@ fun VersusScreen(onBack: () -> Unit) {
                     val list = if (query.isBlank()) db.trackDao().topAllTime(20).first() else db.trackDao().search(query, 25)
                     list.map { VsPick(it.track.trackId, it.track.title, it.artistName, it.track.coverUrl) }
                 } else {
-                    val list = if (query.isBlank()) db.artistDao().topAllTime(20).first() else db.artistDao().search(query, 25)
-                    list.map { VsPick(it.artistId, it.name, null, it.photoUrl) }
+                    if (query.isBlank()) db.artistDao().topAllTime(20).first().map { VsPick(it.artist.artistId, it.artist.name, null, it.artist.photoUrl) }
+                    else db.artistDao().search(query, 25).map { VsPick(it.artistId, it.name, null, it.photoUrl) }
                 }
             }.getOrDefault(emptyList())
         }
@@ -188,9 +188,10 @@ fun VersusScreen(onBack: () -> Unit) {
                                     modifier = Modifier.fillMaxWidth(),
                                     placeholder = { Text(if (mode == 0) "Rechercher un titre…" else "Rechercher un artiste…", color = theme.textSecondary) },
                                     trailingIcon = {
-                                        if (query.isNotEmpty()) IconButton({ query = "" }) {
-                                            Text("✕", color = theme.textSecondary, fontSize = 16.sp)
-                                        }
+                                        if (query.isNotEmpty()) Text(
+                                            "✕", color = theme.textSecondary, fontSize = 16.sp,
+                                            modifier = Modifier.clickable { query = "" }.padding(4.dp)
+                                        )
                                     },
                                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
                                     colors = OutlinedTextFieldDefaults.colors(
