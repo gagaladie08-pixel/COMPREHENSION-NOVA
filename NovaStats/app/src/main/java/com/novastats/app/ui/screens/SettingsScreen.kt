@@ -957,6 +957,12 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.20.0" to listOf(
+        "\ud83d\udc41\ufe0f **Aper\u00e7u complet avant de cr\u00e9er** : le bouton « Voir l'aper\u00e7u complet » ouvre un \u00e9cran plein avec 4 vrais morceaux d'application (bandeau + compteur, classement, fiche avec m\u00e9daille, courbe des heures) et un bouton **Avant / Apr\u00e8s** pour comparer avec ton th\u00e8me actuel. Rien n'est enregistr\u00e9 tant que tu n'appuies pas sur « Cr\u00e9er mon th\u00e8me ».",
+        "\ud83c\udfa8 **12 palettes de d\u00e9part** (N\u00e9on, Coucher, Oc\u00e9an, For\u00eat, Rubis, Pastel, Myrtille, Champagne, Sang, Glacier, Sakura, Sauge) qui posent aussi la teinte du fond et l'effet signature.",
+        "\ud83c\udfaf **Chaque \u00e9l\u00e9ment devient ind\u00e9pendant et combinable** : 3 teintes + intensit\u00e9 + luminosit\u00e9, **teinte du fond s\u00e9par\u00e9e** avec profondeur et relief des cartes, sombre/clair, arrondi 0–28 dp, **14 styles d'ic\u00f4nes**, **14 polices de titres × 13 polices de corps** \u00e0 marier librement, dur\u00e9e 120–600 ms et **7 styles de transition**, **15 effets signature**, **forme de courbe, d\u00e9coration et glow des graphiques**, et le texte secondaire arc-en-ciel.",
+        "\u2728 Le mini-aper\u00e7u en haut de l'\u00e9diteur suit toujours tes r\u00e8glages en direct pendant que tu combines."
+    ),
     "0.19.0" to listOf(
         "\u2728 **Th\u00e8me personnalis\u00e9 — le 16\u1d47\u1d49 th\u00e8me** (R\u00e9glages → ✨ Mon th\u00e8me) : cr\u00e9e tes propres couleurs, ton arrondi, tes polices et ton effet signature. Ton th\u00e8me rejoint la liste et s'active comme les 15 autres.",
         "\ud83d\udca1 **Aper\u00e7u en direct** : une carte « application miniature » (brand bar, compteur g\u00e9ant, pastilles, graphique) se re-th\u00e8me instantan\u00e9ment pendant que tu bouges les curseurs.",

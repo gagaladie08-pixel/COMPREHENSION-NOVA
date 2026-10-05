@@ -353,73 +353,60 @@ private fun hsl(h: Float, s: Float, l: Float): Color {
 data class CustomThemeSpec(
     val name: String = "Mon thème",
     val emoji: String = "✨",
-    /** Teintes 0–360. */
+    /** Teintes principales (0–360). */
     val primaryHue: Float = 320f,
     val secondaryHue: Float = 200f,
     val accentHue: Float = 175f,
     val saturation: Float = 0.88f,
     val lightness: Float = 0.58f,
+    /** Teinte du fond — indépendante de la couleur principale. */
+    val backgroundHue: Float = 320f,
+    /** 0 = fond très profond, 1 = fond plus clair. */
+    val backgroundLevel: Float = 0.35f,
+    /** Écart de luminosité entre les cartes et le fond. */
+    val surfaceLevel: Float = 0.45f,
     val dark: Boolean = true,
     val cornerDp: Int = 16,
     val titleFont: String = "Orbitron",
     val bodyFont: String = "Rajdhani",
-    val signature: Signature = Signature.GOLD_SHIMMER
+    val signature: Signature = Signature.GOLD_SHIMMER,
+    val transitionMs: Int = 320,
+    val easing: MotionEasing = MotionEasing.EASE_OUT,
+    val icons: IconStyle = IconStyle.HUD,
+    val chartShape: CurveShape = CurveShape.SMOOTH,
+    val chartDeco: CurveDeco = CurveDeco.STARS,
+    val chartGlowDp: Float = 7f,
+    val rainbowTextSecondary: Boolean = false
 ) {
     fun toTheme(): NovaTheme {
         val sat = saturation.coerceIn(0.25f, 1f)
         val lig = lightness.coerceIn(0.35f, 0.80f)
+        val lvl = backgroundLevel.coerceIn(0f, 1f)
+        val bgL = if (dark) 0.015f + lvl * 0.13f else 0.90f + lvl * 0.09f
+        val surfL = if (dark) (bgL + 0.03f + surfaceLevel * 0.16f).coerceAtMost(0.42f)
+                    else (bgL - 0.02f - surfaceLevel * 0.10f).coerceAtLeast(0.62f)
         return NovaTheme(
             id = CUSTOM_THEME_ID, emoji = emoji, name = name,
             primary = hsl(primaryHue, sat, lig),
             secondary = hsl(secondaryHue, sat, (lig + 0.02f).coerceAtMost(0.82f)),
             glowSecondary = hsl(accentHue, sat, (lig - 0.10f).coerceAtLeast(0.22f)),
-            background = hsl(primaryHue, if (dark) 0.38f else 0.32f, if (dark) 0.045f else 0.965f),
-            surface = hsl(primaryHue, if (dark) 0.30f else 0.26f, if (dark) 0.11f else 0.92f),
-            text = hsl(primaryHue, 0.10f, if (dark) 0.96f else 0.10f),
-            textSecondary = hsl(primaryHue, 0.16f, if (dark) 0.70f else 0.38f),
+            background = hsl(backgroundHue, if (dark) 0.38f else 0.32f, bgL),
+            surface = hsl(backgroundHue, if (dark) 0.30f else 0.26f, surfL),
+            text = hsl(backgroundHue, 0.10f, if (dark) 0.96f else 0.10f),
+            textSecondary = hsl(backgroundHue, 0.16f, if (dark) 0.70f else 0.38f),
             accent = hsl(accentHue, (sat * 0.95f).coerceIn(0f, 1f), (lig + 0.08f).coerceAtMost(0.86f)),
             effects = "Ta propre signature visuelle",
-            inspiration = "Thème créé par toi — couleurs, coins, polices et effet au choix",
+            inspiration = "Thème créé par toi — chaque élément est combinable",
             titleFont = titleFont, bodyFont = bodyFont,
             iconsDescription = "Style de ton thème personnalisé",
-            icons = IconStyle.HUD,
-            transitionMs = 320, easing = MotionEasing.EASE_OUT,
+            icons = icons,
+            transitionMs = transitionMs, easing = easing,
             signature = signature, cornerDp = cornerDp,
-            chart = ChartStyle(stroke = ColorKey.ACCENT, glowDp = 7f, fillTop = ColorKey.PRIMARY, deco = CurveDeco.STARS)
+            chart = ChartStyle(
+                stroke = ColorKey.ACCENT, strokeWidthDp = 2.5f, glowDp = chartGlowDp,
+                fillTop = ColorKey.PRIMARY, shape = chartShape, deco = chartDeco
+            ),
+            rainbowTextSecondary = rainbowTextSecondary
         )
     }
-}
-
-/** Couleurs transverses (indépendantes du thème). */
-object NovaColors {
-    val Gold = Color(0xFFFFD700)
-    val Silver = Color(0xFFC0C0C0)
-    val Platinum = Color(0xFFE5E4E2)
-    val Diamond = Color(0xFF00FFFF)
-    val Up = Color(0xFF2ECC71)
-    val Down = Color(0xFFE74C3C)
-    val Neutral = Color(0xFF95A5A6)
-    val DirectDebut = Color(0xFF7B2FBE)
-    /** Arc-en-ciel pride (Survivor / Rainbow Pop). */
-    val Rainbow = listOf(Color(0xFFE40303), Color(0xFFFF8C00), Color(0xFFFFED00), Color(0xFF008026), Color(0xFF004DFF), Color(0xFF750787))
-    /** Drapeau trans (bleu ciel, rose, blanc). */
-    val Trans = listOf(Color(0xFF5BCEFA), Color(0xFFF5A9B8), Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA))
-    /** Drapeau bi (magenta, lavande, bleu). */
-    val Bi = listOf(Color(0xFFD60270), Color(0xFF9B4F96), Color(0xFF0038A8))
-    /** Drapeau gay (hommes) — verts, blanc, bleus, indigo. */
-    val Gay = listOf(Color(0xFF078D70), Color(0xFF26CEAA), Color(0xFF98E8C1), Color(0xFFFFFFFF), Color(0xFF7BADE2), Color(0xFF5049CC), Color(0xFF3D1A78))
-    /** Drapeau lesbien (oranges, blanc, roses). */
-    val Lesbian = listOf(Color(0xFFD52D00), Color(0xFFFF9A56), Color(0xFFFFFFFF), Color(0xFFD362A4), Color(0xFFA30262))
-    /** Drapeau pan. */
-    val Pan = listOf(Color(0xFFFF218C), Color(0xFFFFD800), Color(0xFF21B1FF))
-    /** Drapeau non-binaire. */
-    val NonBinary = listOf(Color(0xFFFCF434), Color(0xFFFFFFFF), Color(0xFF9C59D1), Color(0xFF2C2C2C))
-    /** Chevron du drapeau Progress (blanc, rose, bleu, marron, noir). */
-    val Progress = listOf(Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA), Color(0xFF613915), Color(0xFF000000))
-    /** Tous les drapeaux du thème Survivor, dans l'ordre d'affichage. */
-    val PrideFlags: List<List<Color>> = listOf(Rainbow, Trans, Bi, Gay, Lesbian, Pan, NonBinary)
-    /** Palette qui tourne (texte secondaire / courbes Survivor) : arc-en-ciel → trans → bi → gay. */
-    val PrideCycle: List<Color> = Rainbow + listOf(Color(0xFF5BCEFA), Color(0xFFF5A9B8), Color(0xFFFFFFFF), Color(0xFFF5A9B8), Color(0xFF5BCEFA)) + Bi + listOf(Color(0xFF078D70), Color(0xFF26CEAA), Color(0xFF7BADE2), Color(0xFF5049CC))
-    /** Confettis Survivor : toutes les couleurs de tous les drapeaux. */
-    val PrideConfetti: List<Color> = PrideFlags.flatten().distinct()
 }
