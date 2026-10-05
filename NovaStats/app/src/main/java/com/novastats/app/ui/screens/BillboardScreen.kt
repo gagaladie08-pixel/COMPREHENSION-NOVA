@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -100,6 +101,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     var showPicker by remember { mutableStateOf(false) }
 
     var searching by remember { mutableStateOf(false) }
+    var yearEnd by remember { mutableStateOf(false) }
 
     val rows = state.filtered
     val limit = state.limit
@@ -115,6 +117,13 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     // 🎨 Pochette du n°1 du chart affiché, en fond d'écran
     val artUrl = state.items.firstOrNull()?.coverUrl
 
+    // 🏆 Year-End Charts (écran plein, retour = Billboard)
+    if (yearEnd) {
+        BackHandler { yearEnd = false }
+        YearEndScreen { yearEnd = false }
+        return
+    }
+
     ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
         /* ---------- En-tête défilant : périodes → navigation → bandeau ---------- */
@@ -122,6 +131,23 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
             Column(Modifier.fillMaxWidth()) {
                 // 1. Périodes
                 PeriodSegment(state.period) { vm.selectPeriod(it) }
+
+                // 🏆 Bilan de l'année civile
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.30f), theme.secondary.copy(alpha = 0.22f), Color.Transparent)))
+                        .clickable { yearEnd = true }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🏆", fontSize = 20.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Year-End Charts", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Le bilan complet de chaque année civile", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("›", color = theme.primary, fontSize = 22.sp)
+                }
 
                 // 2. Navigation dans l'historique (appui long sur la date → calendrier)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

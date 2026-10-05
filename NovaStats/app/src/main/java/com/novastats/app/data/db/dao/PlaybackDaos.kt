@@ -40,6 +40,16 @@ data class DailyEntityRow(@androidx.room.ColumnInfo(name = "track_id") val track
 data class IdCount(val id: Long, val plays: Int, @androidx.room.ColumnInfo(name = "duration_ms") val durationMs: Long)
 data class ArtistMonths(@androidx.room.ColumnInfo(name = "artist_id") val artistId: Long, val months: Int, val plays: Int)
 
+/** Ligne d'un classement annuel (Year-End Charts). */
+data class YearEndRow(
+    @androidx.room.ColumnInfo(name = "id") val id: Long,
+    @androidx.room.ColumnInfo(name = "name") val name: String,
+    @androidx.room.ColumnInfo(name = "subtitle") val subtitle: String?,
+    @androidx.room.ColumnInfo(name = "image_url") val imageUrl: String?,
+    @androidx.room.ColumnInfo(name = "plays") val plays: Int,
+    @androidx.room.ColumnInfo(name = "duration_ms") val durationMs: Long
+)
+
 data class SourceCount(
     @androidx.room.ColumnInfo(name = "name") val name: String?,
     @androidx.room.ColumnInfo(name = "plays") val plays: Int
@@ -293,6 +303,36 @@ interface DailyPlayDao {
 
     @Query("SELECT IFNULL(SUM(total_duration_ms), 0) FROM daily_plays WHERE date BETWEEN :from AND :to")
     suspend fun durationBetween(from: String, to: String): Long
+
+    /* ---------- 🏆 Year-End Charts ---------- */
+
+    @Query("""SELECT IFNULL(SUM(play_count), 0) AS play_count, IFNULL(SUM(total_duration_ms), 0) AS total_duration_ms,
+                 COUNT(DISTINCT track_id) AS distinct_tracks, COUNT(DISTINCT artist_id) AS distinct_artists,
+                 COUNT(DISTINCT album_id) AS distinct_albums, COUNT(DISTINCT date) AS active_days
+          FROM daily_plays WHERE date BETWEEN :from AND :to""")
+    suspend fun summaryBetween(from: String, to: String): PeriodSummary
+
+    @Query("""SELECT t.track_id AS id, t.title AS name, a.name AS subtitle, t.cover_url AS image_url,
+                 SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms
+          FROM daily_plays d JOIN tracks t ON t.track_id = d.track_id JOIN artists a ON a.artist_id = t.artist_id
+          WHERE d.date BETWEEN :from AND :to GROUP BY t.track_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit""")
+    suspend fun yearEndTracks(from: String, to: String, limit: Int): List<YearEndRow>
+
+    @Query("""SELECT a.artist_id AS id, a.name AS name, '' AS subtitle, a.photo_url AS image_url,
+                 SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms
+          FROM daily_plays d JOIN artists a ON a.artist_id = d.artist_id
+          WHERE d.date BETWEEN :from AND :to GROUP BY a.artist_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit""")
+    suspend fun yearEndArtists(from: String, to: String, limit: Int): List<YearEndRow>
+
+    @Query("""SELECT al.album_id AS id, al.title AS name, IFNULL(a.name, 'Artistes variés') AS subtitle, al.cover_url AS image_url,
+                 SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms
+          FROM daily_plays d JOIN albums al ON al.album_id = d.album_id LEFT JOIN artists a ON a.artist_id = al.artist_id
+          WHERE d.date BETWEEN :from AND :to AND d.album_id IS NOT NULL
+          GROUP BY al.album_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit""")
+    suspend fun yearEndAlbums(from: String, to: String, limit: Int): List<YearEndRow>
+
+    @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY date ORDER BY play_count DESC LIMIT 1")
+    suspend fun bestDayBetween(from: String, to: String): DayCount?
 
     /** Record : le titre le plus écouté en une seule journée. */
     @Query("SELECT d.*, t.title AS title FROM daily_plays d JOIN tracks t ON t.track_id = d.track_id ORDER BY d.play_count DESC, d.total_duration_ms DESC LIMIT 1")

@@ -957,6 +957,13 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.21.0" to listOf(
+        "\ud83c\udfc6 **Year-End Charts** (Billboard → 🏆 Year-End Charts) : le bilan complet de chaque **ann\u00e9e civile** (1\u1d52\u1d49 janvier → 31 d\u00e9cembre), calcul\u00e9 avec les m\u00eames r\u00e8gles que tes charts hebdomadaires.",
+        "\ud83d\udcc5 **S\u00e9lecteur d'ann\u00e9e** : toutes tes ann\u00e9es d'\u00e9coute sont l\u00e0, en pastilles, du plus r\u00e9cent au plus ancien.",
+        "\ud83d\udcca **Les chiffres de l'ann\u00e9e** : \u00e9coutes, temps d'\u00e9coute, titres distincts, artistes distincts, jours actifs et moyenne par jour, avec l'\u00e9cart en % par rapport \u00e0 l'ann\u00e9e pr\u00e9c\u00e9dente.",
+        "\u2728 **L'ann\u00e9e en bref** : titre de l'ann\u00e9e, artiste de l'ann\u00e9e, album de l'ann\u00e9e, meilleure journ\u00e9e, artistes d\u00e9couverts et albums distincts.",
+        "\ud83e\udd47 **Podium + classement** : top 100 sur chaque onglet (Titres / Artistes / Albums). Les trois premiers ont une grande carte m\u00e9daill\u00e9e (or / argent / bronze) avec barre de part, le reste suit en liste avec barre de progression."
+    ),
     "0.20.0" to listOf(
         "\ud83d\udc41\ufe0f **Aper\u00e7u complet avant de cr\u00e9er** : le bouton « Voir l'aper\u00e7u complet » ouvre un \u00e9cran plein avec 4 vrais morceaux d'application (bandeau + compteur, classement, fiche avec m\u00e9daille, courbe des heures) et un bouton **Avant / Apr\u00e8s** pour comparer avec ton th\u00e8me actuel. Rien n'est enregistr\u00e9 tant que tu n'appuies pas sur « Cr\u00e9er mon th\u00e8me ».",
         "\ud83c\udfa8 **12 palettes de d\u00e9part** (N\u00e9on, Coucher, Oc\u00e9an, For\u00eat, Rubis, Pastel, Myrtille, Champagne, Sang, Glacier, Sakura, Sauge) qui posent aussi la teinte du fond et l'effet signature.",
