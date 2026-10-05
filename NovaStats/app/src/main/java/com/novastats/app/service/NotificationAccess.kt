@@ -11,9 +11,11 @@ import androidx.core.content.ContextCompat
 object NotificationAccess {
     fun canPost(context: Context): Boolean {
         val appContext = context.applicationContext
-        val runtimePermission = Build.VERSION.SDK_INT < 33 ||
+        val sdkInt = Build.VERSION.SDK_INT
+        val runtimePermissionGranted = sdkInt >= 33 &&
             ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        return runtimePermission && NotificationManagerCompat.from(appContext).areNotificationsEnabled()
+        val appNotificationsEnabled = NotificationManagerCompat.from(appContext).areNotificationsEnabled()
+        return NotificationPermissionRules.canPost(sdkInt, runtimePermissionGranted, appNotificationsEnabled)
     }
 
     fun hasRuntimePermission(context: Context): Boolean = Build.VERSION.SDK_INT < 33 ||
