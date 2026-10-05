@@ -42,7 +42,7 @@ internal fun YearEndRulesPremiumPopup(
         onDismiss = onDismiss,
         glowDp = 26,
         widthFraction = 0.96f,
-        heightFraction = 0.94f,
+        heightFraction = 0.86f,
         backdropUrl = imageUrl,
         banner = {
             Box(Modifier.fillMaxWidth().height(214.dp)) {
@@ -190,12 +190,13 @@ internal fun YearEndEntryPremiumPopup(entry: YearEndPopupEntry, onDismiss: () ->
         Chart.ALBUMS_75 -> theme.primary
     }
     val limit = entry.chart.limit(Period.WEEKLY)
+    val story = yearEndStory(entry)
     NovaPopupCard(
         borderColor = accent,
         onDismiss = onDismiss,
         glowDp = 24,
         widthFraction = 0.96f,
-        heightFraction = 0.94f,
+        heightFraction = 0.86f,
         backdropUrl = row.imageUrl,
         banner = {
             Box(Modifier.fillMaxWidth().height(210.dp)) {
@@ -252,6 +253,28 @@ internal fun YearEndEntryPremiumPopup(entry: YearEndPopupEntry, onDismiss: () ->
                     fontWeight = FontWeight.Black
                 )
                 Text("points Year-End · position calculée sur le total des points", color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            }
+        }
+
+        GlassCard(glow = accent) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("✦", color = accent, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("ANECDOTE DE CETTE ÉDITION", color = accent, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.7.sp, fontWeight = FontWeight.Black)
+                        Text("La signature de son parcours", color = theme.text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Text(story.anecdote, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(2.dp))
+                Text("SON EXPLOIT · ${entry.chart.label.uppercase()}", color = accent, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp, fontWeight = FontWeight.Black)
+                Text(story.achievement, color = theme.text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    "Chronique composée à partir de ses statistiques Nova, sans fait biographique ajouté.",
+                    color = theme.textSecondary,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
         }
 

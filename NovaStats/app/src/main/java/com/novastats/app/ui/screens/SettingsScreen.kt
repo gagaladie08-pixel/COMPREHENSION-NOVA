@@ -957,6 +957,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.4" to listOf(
+        "✨ **Fiches Year-End ajustées à l'écran** : hauteur contenue, marges de sécurité et défilement interne pour ne plus déborder en bas.",
+        "✦ **Chronique personnalisée par entrée** : anecdote et exploit rédigés selon le chart, le rang, la durée, les semaines au sommet et le palier atteint.",
+        "📊 **Récits ancrés dans les chiffres Nova** : aucune anecdote biographique inventée ; chaque phrase met en valeur un fait mesuré dans la fenêtre."
+    ),
     "0.22.3" to listOf(
         "✨ **Pop-ups Year-End agrandis et repensés** : presque plein écran, bannière artistique plus ample, grand score et finition verre doré.",
         "📖 **Méthode explicitée** : source locale, formule par semaine, limites par chart, départages, récurrence et limites du modèle détaillés.",
