@@ -3,6 +3,7 @@ package com.novastats.app.ui.screens
 import com.novastats.app.data.repository.YearEndRow
 import com.novastats.app.domain.Chart
 import com.novastats.app.domain.YearEndRules
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -83,5 +84,30 @@ class YearEndStoryTest {
         assertTrue(story.achievement.contains("Albums 75"))
         assertTrue(story.achievement.contains("75 points"))
         assertTrue(story.achievement.contains("rang annuel #1"))
+    }
+
+    @Test
+    fun `nearby entries receive different dedicated wording with the same chart statistics`() {
+        val baseRow = YearEndRow(
+            id = 31L,
+            name = "Chorale",
+            subtitle = "3 titres",
+            imageUrl = null,
+            points = 700,
+            plays = 100,
+            durationMs = 600_000L,
+            weeks = 8,
+            peak = 4,
+            weeksAt1 = 0,
+            extra = 3
+        )
+        val first = yearEndStory(YearEndPopupEntry(Chart.ARTIST_50, 1, baseRow, "2025", 35))
+        val secondRow = baseRow.copy(id = 32L, name = "Aurore")
+        val second = yearEndStory(YearEndPopupEntry(Chart.ARTIST_50, 2, secondRow, "2025", 35))
+
+        assertTrue(first.anecdote.contains("Chorale"))
+        assertTrue(second.anecdote.contains("Aurore"))
+        assertNotEquals(first.anecdote.substringBefore("«Chorale»"), second.anecdote.substringBefore("«Aurore»"))
+        assertNotEquals(first.achievement.substringBefore("«Chorale»"), second.achievement.substringBefore("«Aurore»"))
     }
 }

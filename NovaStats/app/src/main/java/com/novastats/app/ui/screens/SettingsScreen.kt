@@ -957,6 +957,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.5" to listOf(
+        "✦ **Vraies phrases dédiées à chaque entrée** : titres, artistes et albums ont une anecdote et un exploit personnalisés selon leur nom, leur chart et leurs propres statistiques.",
+        "🧩 **Tournures différenciées par rang annuel** : les entrées voisines ne réutilisent plus la même phrase passe-partout ; les faits restent ancrés dans les relevés Nova."
+    ),
     "0.22.4" to listOf(
         "✨ **Fiches Year-End ajustées à l'écran** : hauteur contenue, marges de sécurité et défilement interne pour ne plus déborder en bas.",
         "✦ **Chronique personnalisée par entrée** : anecdote et exploit rédigés selon le chart, le rang, la durée, les semaines au sommet et le palier atteint.",

@@ -271,7 +271,7 @@ internal fun YearEndEntryPremiumPopup(entry: YearEndPopupEntry, onDismiss: () ->
                 Text("SON EXPLOIT · ${entry.chart.label.uppercase()}", color = accent, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp, fontWeight = FontWeight.Black)
                 Text(story.achievement, color = theme.text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(
-                    "Chronique composée à partir de ses statistiques Nova, sans fait biographique ajouté.",
+                    "Phrase dédiée à cette entrée, construite à partir de ses propres relevés Nova — sans anecdote inventée.",
                     color = theme.textSecondary,
                     style = MaterialTheme.typography.labelSmall
                 )
