@@ -19,7 +19,7 @@ data class YearEndRow(
     val name: String,
     val subtitle: String?,
     val imageUrl: String?,
-    /** Points cumulés sur l'année (barème Billboard). */
+    /** Points cumulés sur la fenêtre annuelle (barème local Nova, inspiré des classements de rang). */
     val points: Int,
     val plays: Int,
     val durationMs: Long,
@@ -31,6 +31,12 @@ data class YearEndRow(
     val weeksAt1: Int,
     /** Le titre a cessé de gagner des points après avoir atteint un seuil de récurrence. */
     val recurrent: Boolean = false,
+    /** Seuil local qui a arrêté son cumul, s'il y en a un. */
+    val recurrentThreshold: YearEndRules.RecurrentThreshold? = null,
+    /** Rang de la semaine qui a déclenché la récurrence. */
+    val recurrentAtPosition: Int? = null,
+    /** Semaines créditées avant le déclenchement. */
+    val recurrentAfterWeeks: Int? = null,
     /** Titres distincts (affiché en sous-titre pour les artistes). */
     val extra: Int = 0
 )
@@ -132,8 +138,12 @@ class YearEndRepository(private val db: NovaDatabase) {
                 val acc = accTracks.getOrPut(e.entityId) { Acc() }
                 // Seuils renforcés : le compteur repart dans la fenêtre Year-End sélectionnée.
                 if (acc.recurrent) return@forEachIndexed
-                if (YearEndRules.becomesRecurrent(acc.weeks, position)) {
+                val recurrentThreshold = YearEndRules.recurrentThresholdFor(acc.weeks, position)
+                if (recurrentThreshold != null) {
                     acc.recurrent = true
+                    acc.recurrentThreshold = recurrentThreshold
+                    acc.recurrentAfterWeeks = acc.weeks
+                    acc.recurrentAtPosition = position
                     return@forEachIndexed
                 }
                 acc.add(position, YearEndRules.pointsFor(position, Chart.HOT_100.limit(Period.WEEKLY)), e.plays, e.durationMs)
@@ -230,6 +240,9 @@ class YearEndRepository(private val db: NovaDatabase) {
         var peak: Int = Int.MAX_VALUE
         var weeksAt1: Int = 0
         var recurrent: Boolean = false
+        var recurrentThreshold: YearEndRules.RecurrentThreshold? = null
+        var recurrentAtPosition: Int? = null
+        var recurrentAfterWeeks: Int? = null
         var distinct: Int = 0
 
         fun add(position: Int, pts: Int, weekPlays: Int, weekDuration: Long) {
@@ -261,7 +274,12 @@ class YearEndRepository(private val db: NovaDatabase) {
                 id = id, name = name, subtitle = sub, imageUrl = img,
                 points = a.points, plays = a.plays, durationMs = a.durationMs,
                 weeks = a.weeks, peak = if (a.peak == Int.MAX_VALUE) 0 else a.peak,
-                weeksAt1 = a.weeksAt1, recurrent = a.recurrent, extra = a.distinct
+                weeksAt1 = a.weeksAt1,
+                recurrent = a.recurrent,
+                recurrentThreshold = a.recurrentThreshold,
+                recurrentAtPosition = a.recurrentAtPosition,
+                recurrentAfterWeeks = a.recurrentAfterWeeks,
+                extra = a.distinct
             )
         }
     }

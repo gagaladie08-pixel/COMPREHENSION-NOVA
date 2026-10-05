@@ -19,10 +19,13 @@ object YearEndRules {
         RecurrentThreshold(minimumWeeks = 52, belowPosition = 10)
     )
 
+    fun recurrentThresholdFor(weeksAlreadyCounted: Int, position: Int): RecurrentThreshold? =
+        recurrentThresholds
+            .filter { weeksAlreadyCounted >= it.minimumWeeks && position > it.belowPosition }
+            .maxByOrNull { it.minimumWeeks }
+
     fun becomesRecurrent(weeksAlreadyCounted: Int, position: Int): Boolean =
-        recurrentThresholds.any { threshold ->
-            weeksAlreadyCounted >= threshold.minimumWeeks && position > threshold.belowPosition
-        }
+        recurrentThresholdFor(weeksAlreadyCounted, position) != null
 
     /** Points du barème inversé Nova pour une position valide du chart. */
     fun pointsFor(position: Int, limit: Int): Int =

@@ -957,6 +957,11 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.3" to listOf(
+        "✨ **Pop-ups Year-End agrandis et repensés** : presque plein écran, bannière artistique plus ample, grand score et finition verre doré.",
+        "📖 **Méthode explicitée** : source locale, formule par semaine, limites par chart, départages, récurrence et limites du modèle détaillés.",
+        "🔎 **Fiche de chaque entrée enrichie** : rang, points, semaines créditées, peak, semaines n°1, écoutes et palier de récurrence déclencheur."
+    ),
     "0.22.2" to listOf(
         "🏆 **Year-End Nova renforcé** : paliers titres 20/50, 26/25 et 52/10, comptés dans la fenêtre annuelle ; les points acquis restent conservés.",
         "ⓘ **Deux pop-ups** : explication complète du calcul et fiche détaillée au toucher de chaque entrée du classement.",

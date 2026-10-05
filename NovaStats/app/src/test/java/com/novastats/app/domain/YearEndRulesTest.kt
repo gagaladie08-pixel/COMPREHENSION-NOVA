@@ -2,6 +2,7 @@ package com.novastats.app.domain
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,6 +37,19 @@ class YearEndRulesTest {
         assertFalse(YearEndRules.becomesRecurrent(51, 11))
         assertFalse(YearEndRules.becomesRecurrent(52, 10))
         assertTrue(YearEndRules.becomesRecurrent(52, 11))
+    }
+
+    @Test
+    fun `retourne le palier exact pour le popup detail`() {
+        assertEquals(
+            YearEndRules.RecurrentThreshold(20, 50),
+            YearEndRules.recurrentThresholdFor(20, 51)
+        )
+        assertEquals(
+            YearEndRules.RecurrentThreshold(26, 25),
+            YearEndRules.recurrentThresholdFor(26, 26)
+        )
+        assertNull(YearEndRules.recurrentThresholdFor(26, 25))
     }
 
 }
