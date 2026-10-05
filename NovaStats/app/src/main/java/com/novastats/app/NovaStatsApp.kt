@@ -16,6 +16,7 @@ import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.data.repository.StatsRebuilder
 import com.novastats.app.service.BackupWorker
 import com.novastats.app.service.EnrichmentWorker
+import com.novastats.app.service.WeeklyChartsWorker
 
 /**
  * Point d'entrée : conteneur de dépendances minimal (pas de Hilt pour l'instant — simple et lisible).
@@ -44,6 +45,7 @@ class NovaStatsApp : Application() {
         com.novastats.app.data.api.EnrichmentState.attach(this)
         EnrichmentWorker.schedulePeriodic(this)
         BackupWorker.schedulePeriodic(this)
+        WeeklyChartsWorker.schedule(this)
         // ✨ 16ᵉ thème : celui créé par l'utilisateur (null s'il n'en a pas encore)
         com.novastats.app.ui.theme.NovaThemes.customTheme = com.novastats.app.ui.theme.CustomThemeStore.load(this)?.toTheme()
         com.novastats.app.service.DetectionState.bind(this)
@@ -78,6 +80,11 @@ class NovaStatsApp : Application() {
                 description = "Statuts Panthéon, Hall of Fame, Nova Awards"
             }
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_WEEKLY_CHARTS, "Charts hebdomadaires", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Résumé des charts locaux de la semaine écoulée, chaque lundi matin"
+            }
+        )
         // Sons distincts par palier de certification : léger (Argent/Or) → moyen (Platine) → épique + vibration (Diamant)
         val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
         fun sound(raw: String): Uri = Uri.parse("android.resource://$packageName/raw/$raw")
@@ -103,6 +110,7 @@ class NovaStatsApp : Application() {
         const val CHANNEL_SERVICE = "nova_service"
         const val CHANNEL_REVIEW = "nova_review"
         const val CHANNEL_ACHIEVEMENTS = "nova_achievements"
+        const val CHANNEL_WEEKLY_CHARTS = "nova_weekly_charts"
         const val CHANNEL_CERT_LIGHT = "nova_cert_light"
         const val CHANNEL_CERT_MID = "nova_cert_mid"
         const val CHANNEL_CERT_EPIC = "nova_cert_epic"

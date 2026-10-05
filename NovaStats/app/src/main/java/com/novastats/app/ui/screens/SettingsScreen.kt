@@ -484,6 +484,9 @@ private fun NotificationsPage() {
     val feed by app.database.notificationFeedDao().recent(10).collectAsStateWithLifecycle(initialValue = emptyList())
 
     val groups = listOf(
+        "📊 Charts" to listOf(
+            SettingsRepository.Notif.WEEKLY_CHARTS to "Cette semaine dans tes charts — chaque lundi vers 9 h"
+        ),
         "🏆 Certifications" to listOf(
             SettingsRepository.Notif.CERT_SILVER to "🥉 Argent (25 écoutes · album 50) — son léger", SettingsRepository.Notif.CERT_GOLD to "🥈 Or (50 · 100) — son léger",
             SettingsRepository.Notif.CERT_PLATINUM to "🥇 Platine (100 · 200) — son intermédiaire", SettingsRepository.Notif.CERT_DIAMOND to "💎 Diamant (350 · 700) — son épique + vibration",
@@ -957,6 +960,9 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.6" to listOf(
+        "🔔 **Cette semaine dans tes charts** : chaque lundi vers 9 h, un récap local du top titre, artiste et album de la semaine complète précédente, avec l'évolution du n°1 par rapport à la semaine d'avant. Une option dédiée permet de le désactiver."
+    ),
     "0.22.5" to listOf(
         "✦ **Vraies phrases dédiées à chaque entrée** : titres, artistes et albums ont une anecdote et un exploit personnalisés selon leur nom, leur chart et leurs propres statistiques.",
         "🧩 **Tournures différenciées par rang annuel** : les entrées voisines ne réutilisent plus la même phrase passe-partout ; les faits restent ancrés dans les relevés Nova."

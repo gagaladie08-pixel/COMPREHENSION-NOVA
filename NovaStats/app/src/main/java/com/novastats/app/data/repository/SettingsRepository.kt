@@ -44,13 +44,14 @@ class SettingsRepository(private val context: Context) {
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
     }
 
-    /** Clés des 11 notifications (cahier des charges — toutes actives par défaut). */
+    /** Clés des 12 notifications (toutes actives par défaut, chacune désactivable séparément). */
     object Notif {
         const val CERT_SILVER = "CERT_SILVER"; const val CERT_GOLD = "CERT_GOLD"; const val CERT_PLATINUM = "CERT_PLATINUM"; const val CERT_DIAMOND = "CERT_DIAMOND"
         const val CERT_MULTIPLIERS = "CERT_MULTIPLIERS"
         const val P_STAR = "P_STAR"; const val P_SUPERSTAR = "P_SUPERSTAR"; const val P_MEGASTAR = "P_MEGASTAR"; const val P_LEGENDE = "P_LEGENDE"; const val P_MYTHIQUE = "P_MYTHIQUE"
         const val HOF = "HOF"
-        val ALL = listOf(CERT_SILVER, CERT_GOLD, CERT_PLATINUM, CERT_DIAMOND, CERT_MULTIPLIERS, P_STAR, P_SUPERSTAR, P_MEGASTAR, P_LEGENDE, P_MYTHIQUE, HOF)
+        const val WEEKLY_CHARTS = "WEEKLY_CHARTS"
+        val ALL = listOf(CERT_SILVER, CERT_GOLD, CERT_PLATINUM, CERT_DIAMOND, CERT_MULTIPLIERS, P_STAR, P_SUPERSTAR, P_MEGASTAR, P_LEGENDE, P_MYTHIQUE, HOF, WEEKLY_CHARTS)
     }
 
     /**
