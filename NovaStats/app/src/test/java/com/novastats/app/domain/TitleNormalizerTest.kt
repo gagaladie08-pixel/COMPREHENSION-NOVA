@@ -17,6 +17,28 @@ class TitleNormalizerTest {
     }
 
     @Test
+    fun `variantes solo membre et suffixe remix nus sont normalisees`() {
+        val cases = listOf(
+            "What It Is (Solo Version)" to "What It Is",
+            "SPAGHETTI (membre Version)" to "SPAGHETTI",
+            "SPAGHETTI (Member Version)" to "SPAGHETTI",
+            "Bloody Samaritan remix" to "Bloody Samaritan"
+        )
+        cases.forEach { (raw, expected) ->
+            val normalized = TitleNormalizer.normalizeTitle(raw)
+            assertEquals(raw, expected, normalized.title)
+            assertTrue("$raw should be marked as a version", normalized.isVersion)
+        }
+    }
+
+    @Test
+    fun `afterhours reste un titre tant quil nest pas lie manuellement`() {
+        val normalized = TitleNormalizer.normalizeTitle("Danceteria Afterhours")
+        assertEquals("Danceteria Afterhours", normalized.title)
+        assertFalse(normalized.isVersion)
+    }
+
+    @Test
     fun `parentheses non-version conservees`() {
         assertEquals("Baby (I'm Yours)", TitleNormalizer.normalizeTitle("Baby (I'm Yours)").title)
     }

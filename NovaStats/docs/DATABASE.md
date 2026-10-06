@@ -122,8 +122,13 @@ Service / Import ──► scrobbles (CONFIRMED)
   principal diffère → original cherché parmi les titres portant le même nom et partageant un artiste ; versions
   orphelines rattachées quand l'original apparaît. Table `artist_exceptions` (`name`, `name_key` UNIQUE) = noms
   jamais découpés par `splitArtists` (« HUNTR/X », « AC/DC », « Tyler, The Creator »…), éditables (Éditeur →
-  🔒 Noms protégés), exportés dans le JSON (format 2.1, `artist_exceptions`). `RelinkJob` re-résout toutes les
-  écoutes depuis `raw_title` / `raw_artist` / `raw_album` (une fois après la mise à jour, puis Réglages → Données).
+  🔒 Noms protégés), exportés dans le JSON (format 2.1, `artist_exceptions`). `TitleNormalizer` reconnaît aussi les
+  suffixes « Solo Version », « Member/Membre Version » et les marqueurs connus en fin de titre (« … remix ») ;
+  `Afterhours` reste volontairement un titre ordinaire. Depuis 0.22.11, Réglages → Données permet de lier manuellement
+  une version à un original sans fusionner les fiches ni déplacer les écoutes ; la racine doit avoir au moins une
+  écoute confirmée qui lui est directement rattachée. Le lien est journalisé et annulable, puis les agrégats sont
+  recalculés. `RelinkJob` v5 réapplique une fois les règles aux écoutes existantes depuis
+  `raw_title` / `raw_artist` / `raw_album` (puis Réglages → Données).
 - **Révision (v4, `MIGRATION_3_4`)** : `scrobbles.needs_review` / `review_reason` (ex. "Artiste manquant", "Titre
   inconnu", "Notification incomplète") et `raw_title` / `raw_artist` / `raw_album` (valeur brute du player). Le score
   `confidence_score` suit la source : MediaSession 100 · Mixte 80 · Notification complète 70 · Incomplet 50 ; titre ou

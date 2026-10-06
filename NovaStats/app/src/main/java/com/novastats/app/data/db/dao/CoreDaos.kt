@@ -361,6 +361,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET original_track_id = :rootId, is_remix = 1 WHERE track_id = :trackId")
     suspend fun linkToRoot(trackId: Long, rootId: Long)
 
+    @Query("UPDATE tracks SET original_track_id = :rootId, is_remix = :isRemix WHERE track_id = :trackId")
+    suspend fun setVersionLink(trackId: Long, rootId: Long?, isRemix: Boolean)
+
     @Query("UPDATE tracks SET title = :title WHERE track_id = :trackId")
     suspend fun setTitle(trackId: Long, title: String)
     @Query("SELECT * FROM tracks WHERE album_id = :albumId") suspend fun inAlbum(albumId: Long): List<TrackEntity>

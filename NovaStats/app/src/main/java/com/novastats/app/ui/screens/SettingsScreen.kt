@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -58,6 +59,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.BuildConfig
 import com.novastats.app.NovaStatsApp
+import com.novastats.app.data.db.dao.RankedTrack
 import com.novastats.app.data.api.EnrichmentState
 import com.novastats.app.data.importer.BackupExporter
 import com.novastats.app.data.importer.LegacyBackupImporter
@@ -71,7 +73,9 @@ import com.novastats.app.service.NovaListenerService
 import com.novastats.app.service.NotificationAccess
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaThemes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -82,7 +86,7 @@ enum class SettingsPage(val emoji: String, val title: String, val subtitle: Stri
     DETECTION("🎵", "Détection", "Seuil, apps sources, blacklist, filtres"),
     APPEARANCE("🎨", "Apparence", "15 thèmes néon · taille du texte · retour haptique"),
     NOTIFICATIONS("🔔", "Notifications", "Récompenses, vérifications, Awards et charts"),
-    DATA("🗄️", "Données", "Export / import JSON, sauvegarde auto, suppression"),
+    DATA("🗄️", "Données", "Export / import, liens manuels, sauvegarde auto, suppression"),
     EDITOR("🛠️", "Éditeur de données", "Renommer, fusionner, corriger, annuler"),
     SERVICE("🛡️", "Service & diagnostic", "État du service, batterie, journal"),
     HEALTH("🩺", "Santé de la détection", "Score /100, 6 vérifications, plan HiOS"),
@@ -592,6 +596,7 @@ private fun DataPage() {
     var pendingExport by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmText by remember { mutableStateOf("") }
+    var manualLinkOpen by rememberSaveable { mutableStateOf(false) }
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -675,6 +680,12 @@ private fun DataPage() {
                     enabled = relinkState == null && !working && scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
                 ) { Text(if (relinkState != null) "⏳ ${relinkState}" else "🔗 Recalculer liens & versions") }
                 relinkResult?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp)) }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { manualLinkOpen = true }, enabled = !working && relinkState == null && tracks > 1,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("🔗 Lier manuellement deux titres", color = theme.primary) }
+                Text("Choisis la version puis son titre original. Les fiches restent distinctes et les statistiques sont regroupées sous l'original. La racine doit avoir au moins une écoute confirmée directement rattachée à sa fiche.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
 
@@ -714,6 +725,26 @@ private fun DataPage() {
         }
     }
 
+    if (manualLinkOpen) ManualTrackLinkDialog(
+        app = app,
+        onDismiss = { manualLinkOpen = false },
+        onLink = { versionId, originalId ->
+            manualLinkOpen = false
+            working = true
+            status = "Lien manuel en cours · recalcul des statistiques…"
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { app.editor.linkTrackAsVersion(versionId, originalId) }
+                    status = app.editor.status.value ?: "✅ Version liée à l'original"
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    status = "❌ ${e.message ?: "Impossible de créer le lien"}"
+                } finally { working = false }
+            }
+        }
+    )
+
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false }, containerColor = theme.surface, titleContentColor = theme.text, textContentColor = theme.textSecondary,
         title = { Text("⚠️ Tout supprimer ?") },
@@ -734,6 +765,115 @@ private fun DataPage() {
         },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annuler", color = theme.textSecondary) } }
     )
+}
+
+@Composable
+private fun ManualTrackLinkDialog(
+    app: NovaStatsApp,
+    onDismiss: () -> Unit,
+    onLink: (versionId: Long, originalId: Long) -> Unit
+) {
+    val theme = Nova.theme
+    var version by remember { mutableStateOf<RankedTrack?>(null) }
+    var original by remember { mutableStateOf<RankedTrack?>(null) }
+    val canLink = version != null && original != null && version!!.track.trackId != original!!.track.trackId
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = theme.surface,
+        titleContentColor = theme.text,
+        textContentColor = theme.textSecondary,
+        title = { Text("🔗 Lier une version à son original") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
+                Text("Les deux fiches restent distinctes, mais les statistiques de la version sont regroupées sous l'original. Recherche et choisis d'abord la version, puis le titre original.", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(10.dp))
+                TrackLinkPicker(
+                    app = app, label = "Version / remix", selected = version,
+                    excludedTrackId = original?.track?.trackId,
+                    onSelected = { version = it }
+                )
+                Spacer(Modifier.height(10.dp))
+                TrackLinkPicker(
+                    app = app, label = "Titre original à conserver", selected = original,
+                    excludedTrackId = version?.track?.trackId,
+                    onSelected = { original = it }
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("La racine doit avoir au moins une écoute confirmée qui lui est directement rattachée (les écoutes de ses versions seules ne suffisent pas). Si la cible est déjà une version, NovaStats la rattache à sa racine.", style = MaterialTheme.typography.labelSmall, color = theme.textSecondary)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canLink,
+                onClick = { version?.track?.trackId?.let { v -> original?.track?.trackId?.let { r -> onLink(v, r) } } }
+            ) { Text("Lier", color = theme.primary, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler", color = theme.textSecondary) } }
+    )
+}
+
+@Composable
+private fun TrackLinkPicker(
+    app: NovaStatsApp,
+    label: String,
+    selected: RankedTrack?,
+    excludedTrackId: Long?,
+    onSelected: (RankedTrack?) -> Unit
+) {
+    val theme = Nova.theme
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+
+    LaunchedEffect(query, selected?.track?.trackId, excludedTrackId) {
+        val term = query.trim()
+        if (selected != null || term.length < 2) {
+            results = emptyList()
+            searching = false
+            return@LaunchedEffect
+        }
+        searching = true
+        try {
+            delay(220)
+            results = withContext(Dispatchers.IO) {
+                app.database.trackDao().search(term, 20).filter { it.track.trackId != excludedTrackId }
+            }
+        } finally {
+            searching = false
+        }
+    }
+
+    Text(label, color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+    if (selected != null) {
+        Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Text(selected.track.title, color = theme.text, fontWeight = FontWeight.Bold)
+            Text("${selected.artistName} · ${selected.track.playCount} écoute(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { onSelected(null) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                Text("Changer de titre", color = theme.primary)
+            }
+        }
+    } else {
+        OutlinedTextField(
+            value = query, onValueChange = { query = it }, singleLine = true,
+            placeholder = { Text("Rechercher un titre ou un artiste") }, modifier = Modifier.fillMaxWidth()
+        )
+        when {
+            query.trim().length < 2 -> Text("Saisis au moins 2 caractères.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            searching -> Text("Recherche…", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            results.isEmpty() -> Text("Aucun titre écouté trouvé.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            else -> Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                results.forEach { result ->
+                    Column(
+                        Modifier.fillMaxWidth().clickable { onSelected(result); query = "" }.padding(horizontal = 8.dp, vertical = 7.dp)
+                    ) {
+                        Text(result.track.title, color = theme.text, fontWeight = FontWeight.SemiBold)
+                        Text("${result.artistName} · ${result.track.playCount} écoute(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
 }
 
 /* ================================ SERVICE ================================ */
@@ -997,6 +1137,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.11" to listOf(
+        "🔗 **Lien manuel de versions** : associe une version/remix à son original depuis Réglages → Données sans supprimer les fiches ni déplacer les écoutes.",
+        "🎧 **Marqueurs mieux reconnus** : remix en suffixe nu, « Solo Version » et « Member/Membre Version » ; les écoutes existantes sont réassociées une fois après la mise à jour."
+    ),
     "0.22.10" to listOf(
         "⚡ **Séries plus rapides** : les index composites artiste/date, album/date et titre/date accélèrent les périodes et les graphiques quotidiens.",
         "🛡️ **Migration sans perte** : les index unitaires sont remplacés par leurs variantes composites, sans modifier les écoutes agrégées."

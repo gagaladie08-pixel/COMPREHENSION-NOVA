@@ -381,7 +381,7 @@ private fun DupLine(side: DupSide, label: String, labelColor: Color) {
 
 private val playFmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
 
-private fun editTypeEmoji(t: String) = when (t) { "RENAME" -> "✏️"; "MERGE" -> "🔗"; "DELETE_PLAY" -> "🗑️"; "ARTIST_CHANGE" -> "🎤"; "ALBUM_CHANGE" -> "💿"; "COVER_CHANGE" -> "🖼️"; else -> "✅" }
+private fun editTypeEmoji(t: String) = when (t) { "RENAME" -> "✏️"; "MERGE", "LINK_VERSION" -> "🔗"; "DELETE_PLAY" -> "🗑️"; "ARTIST_CHANGE" -> "🎤"; "ALBUM_CHANGE" -> "💿"; "COVER_CHANGE" -> "🖼️"; else -> "✅" }
 
 private sealed interface EditorAction {
     data class Track(val t: RankedTrack) : EditorAction

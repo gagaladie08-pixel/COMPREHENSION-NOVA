@@ -150,7 +150,7 @@ object TitleNormalizer {
 
     /** Mots-clés de versions fusionnées automatiquement et invisiblement avec le titre original. */
     val VERSION_KEYWORDS = listOf(
-        "remix", "acoustic", "live", "instrumental", "extended", "extended mix", "edit", "radio edit",
+        "remix", "solo version", "member version", "membre version", "acoustic", "live", "instrumental", "extended", "extended mix", "edit", "radio edit",
         "remaster", "remastered", "dj mix", "dj remix", "club mix", "club edit", "edm remix", "deluxe",
         "bonus track", "slowed", "sped up", "reverb", "slowed + reverb", "slowed & reverb", "bass boosted", "lofi", "lo-fi",
         "official video", "official audio", "official music video", "lyrics", "lyric video", "visualizer",
@@ -198,6 +198,11 @@ object TitleNormalizer {
      */
     private val featRegex = Regex("""(?i)(?:\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]|\s+(?:feat\.?|ft\.?|featuring)\s+(.+?)(?=\s*[\(\[]|\s+[-–—]\s|$))""")
     private val spaceRegex = Regex("""\s+""")
+    /** Suffixes de version nus (« Titre remix », « Titre solo version »), sans retirer les mots au milieu du titre. */
+    private val versionSuffixRegex = Regex(
+        """\s+(?:${VERSION_KEYWORDS.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }})$""",
+        RegexOption.IGNORE_CASE
+    )
 
     /**
      * Nettoie un titre brut : retire les suffixes de version connus, les "feat.", les mots indésirables.
@@ -224,6 +229,10 @@ object TitleNormalizer {
         dashSuffixRegex.find(title)?.let { m ->
             val suffix = m.groupValues[1].lowercase()
             if (VERSION_KEYWORDS.any { suffix.contains(it) }) { isVersion = true; title = title.removeSuffix(m.value) }
+        }
+        versionSuffixRegex.find(title)?.let { m ->
+            val shortened = title.removeRange(m.range).trimEnd()
+            if (shortened.isNotBlank()) { isVersion = true; title = shortened }
         }
         junkWords.forEach { title = title.replace(it, "") }
         title = spaceRegex.replace(title, " ").trim()

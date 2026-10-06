@@ -29,6 +29,7 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         const val RENAME = "RENAME"; const val MERGE = "MERGE"; const val COVER_CHANGE = "COVER_CHANGE"
         const val ALBUM_CHANGE = "ALBUM_CHANGE"; const val ARTIST_CHANGE = "ARTIST_CHANGE"; const val DELETE_PLAY = "DELETE_PLAY"; const val REVIEWED = "REVIEWED"
         const val REVIEW_FIX = "REVIEW_FIX"; const val REVIEW_IGNORE = "REVIEW_IGNORE"; const val ALBUM_SHARED = "ALBUM_SHARED"
+        const val LINK_VERSION = "LINK_VERSION"
     }
 
     private suspend fun log(type: String, entityType: String, entityId: Long, before: String?, after: String?, extra: String? = null) {
@@ -207,6 +208,36 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
                 .onFailure { errors += "${a.title} : ${it.message ?: it.javaClass.simpleName}" }
         }
         if (errors.isNotEmpty()) error("${pairs.size - errors.size} fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
+    }
+
+    /** Lie une fiche de version/remix à son original sans fusionner ni déplacer ses écoutes. */
+    suspend fun linkTrackAsVersion(versionId: Long, originalCandidateId: Long) = perform("Version liée à l'original", rebuild = true) {
+        require(versionId != originalCandidateId) { "Choisis deux titres différents" }
+        db.withTransaction {
+            val version = db.trackDao().getById(versionId) ?: error("Version introuvable")
+            var original = db.trackDao().getById(originalCandidateId) ?: error("Titre original introuvable")
+            val visited = mutableSetOf<Long>()
+            while (original.originalTrackId != null) {
+                check(visited.add(original.trackId)) { "Cycle de versions détecté" }
+                original = db.trackDao().getById(original.originalTrackId!!) ?: error("Titre racine introuvable")
+            }
+            require(original.trackId != versionId) { "Un titre ne peut pas être lié à lui-même ou à sa propre version" }
+            require(version.originalTrackId != original.trackId) { "Cette version est déjà liée à ce titre" }
+            require(db.trackDao().ownPlays(original.trackId) > 0) {
+                "L'original doit avoir une écoute confirmée directement rattachée (pas seulement à ses versions)"
+            }
+
+            val childVersions = db.trackDao().versionsOf(versionId).map { it.trackId }
+            db.trackDao().repointVersions(versionId, original.trackId)
+            db.trackDao().setVersionLink(versionId, original.trackId, true)
+            db.trackDao().flattenRoots()
+            log(
+                Type.LINK_VERSION, "TRACK", versionId,
+                before = version.originalTrackId?.toString() ?: "ROOT",
+                after = original.trackId.toString(),
+                extra = "wasRemix=${if (version.isRemix) 1 else 0};children=${childVersions.joinToString(",")}"
+            )
+        }
     }
 
     private suspend fun mergeTracksInternal(from: Long, into: Long) {
@@ -391,6 +422,28 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
                     db.artistDao().getById(last.entityId)?.let { db.artistDao().update(it.copy(isMerged = false, mergedIntoId = null)) }
                     "↩️ Nom « ${last.before} » restauré — les titres restent fusionnés"
                 } else "⚠️ Une fusion d'${if (last.entityType == "ALBUM") "albums" else "titres"} ne peut pas être annulée"
+            }
+            Type.LINK_VERSION -> {
+                val version = db.trackDao().getById(last.entityId)
+                if (version == null) "⚠️ Lien non annulable : le titre version n'existe plus"
+                else {
+                    val extra = (last.extraData ?: "").split(";").mapNotNull { part ->
+                        part.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
+                    }.toMap()
+                    val oldRootId = last.before?.takeUnless { it == "ROOT" }?.toLongOrNull()
+                    val oldIsRemix = extra["wasRemix"] == "1"
+                    val childIds = extra["children"]?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
+                    db.withTransaction {
+                        db.trackDao().setVersionLink(version.trackId, oldRootId, oldIsRemix)
+                        childIds.forEach { childId ->
+                            db.trackDao().getById(childId)?.let { child -> db.trackDao().setVersionLink(childId, version.trackId, child.isRemix) }
+                        }
+                        db.trackDao().flattenRoots()
+                    }
+                    library?.clearCaches()
+                    rebuilder.rebuildAll(fullBillboard = true)
+                    "↩️ Lien entre les titres annulé"
+                }
             }
             Type.ARTIST_CHANGE -> { last.before?.toLongOrNull()?.let { setTrackArtist(last.entityId, it) }; "↩️ Artiste restauré" }
             Type.ALBUM_SHARED -> {
