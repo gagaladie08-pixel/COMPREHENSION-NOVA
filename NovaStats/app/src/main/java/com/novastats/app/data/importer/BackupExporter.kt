@@ -12,9 +12,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 📤 Export JSON NovaStats v2 — rétro-compatible v1 : les clés `songs` / `plays` sont exactement celles du format
- * legacy (donc ré-importables par [LegacyBackupImporter]), enrichies des artistes, albums, certifications,
- * Panthéon, Hall of Fame et de l'historique d'édition.
+ * 📤 Export JSON NovaStats v2.3 — rétro-compatible v1 : les clés `songs` / `plays` sont exactement celles du format
+ * legacy (donc ré-importables par [LegacyBackupImporter]), enrichies des liens de versions, du statut / horodatage
+ * de validation des écoutes, des artistes, albums, certifications, Panthéon, Hall of Fame et de l'historique d'édition.
  */
 @Serializable
 data class NovaExport(
@@ -34,7 +34,9 @@ data class NovaExport(
     val edit_history: List<ExportEdit> = emptyList(),
     val artist_exceptions: List<String> = emptyList(),
     val album_overrides: List<ExportAlbumOverride> = emptyList()
-) { companion object { const val FORMAT_VERSION = "2.2" } }
+) {
+    companion object { const val FORMAT_VERSION = "2.3" }
+}
 
 @Serializable data class ExportArtist(val id: Long, val name: String, val photoUrl: String? = null, val playCount: Int = 0)
 @Serializable data class ExportAlbum(val id: Long, val title: String, val artistId: Long? = null, val coverUrl: String? = null, val playCount: Int = 0)
@@ -66,11 +68,20 @@ object BackupExporter {
             LegacySong(
                 id = t.trackId, title = t.title,
                 artistNames = ids.mapNotNull { artistName[it] }.distinct().joinToString(", "),
-                albumName = t.albumId?.let { albumTitle[it] }, duration = t.durationMs, genre = t.genre
+                albumName = t.albumId?.let { albumTitle[it] }, duration = t.durationMs, genre = t.genre,
+                originalSongId = t.originalTrackId
             )
         }
         val plays = db.scrobbleDao().allConfirmedOrdered().filter { it.status == ScrobbleStatus.CONFIRMED }
-            .map { LegacyPlay(songId = it.trackId, playedAt = it.startedAt, listenedDuration = it.durationListenedMs) }
+            .map {
+                LegacyPlay(
+                    songId = it.trackId,
+                    playedAt = it.startedAt,
+                    listenedDuration = it.durationListenedMs,
+                    isConfirmed = true,
+                    validatedAt = it.validatedAt
+                )
+            }
 
         val export = NovaExport(
             export_date = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date()),

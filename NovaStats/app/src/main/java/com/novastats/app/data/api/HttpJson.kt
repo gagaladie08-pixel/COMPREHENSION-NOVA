@@ -17,7 +17,12 @@ import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+private fun safeHost(url: String): String = runCatching {
+    java.net.URI(url).host?.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT)
+}.getOrNull() ?: "API"
 
 /**
  * Client HTTP minimaliste partagé par toutes les APIs : OkHttp + arbre JSON kotlinx.
@@ -36,7 +41,7 @@ object HttpJson {
 
     val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
 
-    class HttpException(val code: Int, url: String) : Exception("HTTP $code · $url")
+    class HttpException(val code: Int, url: String) : Exception("HTTP $code · ${safeHost(url)}")
 
     /** GET → JSON (null si 404 / corps vide). Lève HttpException pour les autres codes d'erreur. */
     suspend fun get(url: String, headers: Map<String, String> = emptyMap()): JsonElement? = withContext(Dispatchers.IO) {

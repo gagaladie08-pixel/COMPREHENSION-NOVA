@@ -33,8 +33,8 @@ android {
         applicationId = "com.novastats.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 73
-        versionName = "0.22.13"
+        versionCode = 74
+        versionName = "0.22.14"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

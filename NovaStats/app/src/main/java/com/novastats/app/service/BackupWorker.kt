@@ -11,6 +11,7 @@ import androidx.work.WorkerParameters
 import com.novastats.app.BuildConfig
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.importer.BackupExporter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -28,6 +29,8 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         return try {
             writeBackup(app)
             Result.success()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (runAttemptCount < 2) Result.retry() else Result.failure()
         }

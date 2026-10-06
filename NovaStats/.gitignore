@@ -1,5 +1,6 @@
-# Fichiers sensibles
+# Fichiers sensibles — les clés locales ne doivent jamais être suivies par Git
 local.properties
+api_keys.properties
 *.jks
 *.keystore
 

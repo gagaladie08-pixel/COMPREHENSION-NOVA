@@ -604,7 +604,9 @@ private fun DataPage() {
         scope.launch {
             try {
                 val report = withContext(Dispatchers.IO) {
-                    val text = context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
+                    val input = context.contentResolver.openInputStream(uri)
+                        ?: error("Le fournisseur de fichiers n'a pas pu ouvrir ce backup.")
+                    val text = input.bufferedReader().use { it.readText() }
                     val version = BackupExporter.formatVersion(text)
                     if (BackupExporter.isNewerThanSupported(version)) error("Ce fichier vient d'une version plus récente de NovaStats ($version). Mets à jour l'app avant d'importer.")
                     val backup = LegacyBackupImporter.parse(text.byteInputStream())
@@ -612,17 +614,34 @@ private fun DataPage() {
                 }
                 EnrichmentWorker.enqueue(context)
                 status = report.summary()
-            } catch (e: Exception) { status = "❌ Import échoué : ${e.message}" } finally { working = false }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                status = "❌ Import échoué : ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                working = false
+            }
         }
     }
     val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val text = pendingExport
         if (uri == null || text == null) { pendingExport = null; return@rememberLauncherForActivityResult }
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) } } }
-                .onSuccess { status = "✅ Export enregistré (${text.length / 1024} Ko)"; settings.setLastBackupAt(System.currentTimeMillis()) }
-                .onFailure { status = "❌ Export échoué : ${it.message}" }
-            pendingExport = null
+            try {
+                withContext(Dispatchers.IO) {
+                    val output = context.contentResolver.openOutputStream(uri)
+                        ?: error("Le fournisseur de fichiers n'a pas pu créer le backup.")
+                    output.use { it.write(text.toByteArray()) }
+                }
+                status = "✅ Export enregistré (${text.length / 1024} Ko)"
+                settings.setLastBackupAt(System.currentTimeMillis())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                status = "❌ Export échoué : ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                pendingExport = null
+            }
         }
     }
 
@@ -645,16 +664,26 @@ private fun DataPage() {
         SectionTitle("📤 Export / 📥 Import JSON")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                Text("Format NovaStats v2 : compatible avec l'ancien format v1 (songs + plays) et enrichi (artistes, albums, certifications, Panthéon, Hall of Fame, historique).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("Format NovaStats v2.3 : compatible avec l'ancien format v1 (songs + plays), avec liens de versions, horodatages de validation et données enrichies.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
                         working = true; status = "Préparation de l'export…"
                         scope.launch {
-                            runCatching { withContext(Dispatchers.IO) { BackupExporter.build(app.database, BuildConfig.VERSION_NAME) } }
-                                .onSuccess { (text, s) -> pendingExport = text; status = "${s.songs} titres · ${s.plays} écoutes · ${s.bytes / 1024} Ko"; saver.launch(BackupExporter.fileName()) }
-                                .onFailure { status = "❌ ${it.message}" }
-                            working = false
+                            try {
+                                val (text, summary) = withContext(Dispatchers.IO) {
+                                    BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
+                                }
+                                pendingExport = text
+                                status = "${summary.songs} titres · ${summary.plays} écoutes · ${summary.bytes / 1024} Ko"
+                                saver.launch(BackupExporter.fileName())
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                status = "❌ Export échoué : ${e.message ?: e.javaClass.simpleName}"
+                            } finally {
+                                working = false
+                            }
                         }
                     },
                     enabled = !working && scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
@@ -758,8 +787,16 @@ private fun DataPage() {
             TextButton(enabled = confirmText.trim().equals("SUPPRIMER", ignoreCase = true), onClick = {
                 confirmDelete = false; working = true
                 scope.launch {
-                    withContext(Dispatchers.IO) { app.database.clearAllTables() }
-                    status = "🗑️ Toutes les données ont été supprimées"; working = false
+                    try {
+                        withContext(Dispatchers.IO) { app.database.clearAllTables() }
+                        status = "🗑️ Toutes les données ont été supprimées"
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        status = "❌ Suppression échouée : ${e.message ?: e.javaClass.simpleName}"
+                    } finally {
+                        working = false
+                    }
                 }
             }) { Text("Supprimer", color = Color(0xFFE74C3C), fontWeight = FontWeight.Bold) }
         },

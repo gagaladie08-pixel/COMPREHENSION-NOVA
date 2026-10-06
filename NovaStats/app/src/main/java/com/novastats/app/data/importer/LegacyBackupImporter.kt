@@ -41,15 +41,39 @@ data class LegacySong(
     val artistNames: String = "",
     val albumName: String? = null,
     val duration: Long? = null,
-    val genre: String? = null
+    val genre: String? = null,
+    /** ID source du titre racine ; absent des anciens backups, utilisé pour restaurer les liens de versions. */
+    val originalSongId: Long? = null
 )
 
 @Serializable
 data class LegacyPlay(
     val songId: Long,
     val playedAt: Long,
-    val listenedDuration: Long = 0
-)
+    val listenedDuration: Long = 0,
+    /** Statut exporté par NovaStats : null dans les anciens backups, donc déterminé avec le seuil courant. */
+    val isConfirmed: Boolean? = null,
+    /** Horodatage exact de validation dans les exports NovaStats ; absent des anciens backups. */
+    val validatedAt: Long? = null
+) {
+    val listenedDurationForImport: Long get() = listenedDuration.coerceAtLeast(0L)
+
+    fun isConfirmedAtImport(thresholdSec: Int): Boolean =
+        isConfirmed ?: ScrobbleRules.isValidated(listenedDurationForImport, thresholdSec)
+
+    /** Garde un horodatage cohérent même si l'ancien format ne le fournissait pas. */
+    fun validatedAtForImport(thresholdSec: Int): Long? {
+        if (!isConfirmedAtImport(thresholdSec)) return null
+        val endAt = safeAdd(playedAt, listenedDurationForImport)
+        val fallback = safeAdd(playedAt, minOf(listenedDurationForImport, thresholdSec.coerceAtLeast(0) * 1000L))
+        return (validatedAt ?: fallback).coerceIn(playedAt, endAt)
+    }
+
+    fun endedAtForImport(): Long = safeAdd(playedAt, listenedDurationForImport)
+
+    private fun safeAdd(start: Long, duration: Long): Long =
+        try { Math.addExact(start, duration) } catch (_: ArithmeticException) { Long.MAX_VALUE }
+}
 
 data class ImportReport(
     val songsInFile: Int,
@@ -116,6 +140,17 @@ object LegacyBackupImporter {
                 )
                 if (i % 200 == 0) onProgress("Titres : $i / ${backup.songs.size}")
             }
+            // Restaure après résolution : les identifiants du backup ne sont pas ceux de cette base.
+            backup.songs.forEach { song ->
+                val originalSongId = song.originalSongId ?: return@forEach
+                val version = trackBySongId[song.id] ?: return@forEach
+                val original = trackBySongId[originalSongId] ?: return@forEach
+                if (version.trackId == original.trackId) return@forEach
+                val originalEntity = db.trackDao().getById(original.trackId) ?: return@forEach
+                val rootId = originalEntity.originalTrackId ?: originalEntity.trackId
+                if (rootId != version.trackId) db.trackDao().linkToRoot(version.trackId, rootId)
+            }
+            db.trackDao().flattenRoots()
         }
 
         onProgress("Import de ${backup.plays.size} écoutes…")
@@ -149,7 +184,7 @@ object LegacyBackupImporter {
                     } else duplicates++
                     return@forEachIndexed
                 }
-                val validated = ScrobbleRules.isValidated(play.listenedDuration, thresholdSec)
+                val validated = play.isConfirmedAtImport(thresholdSec)
                 if (!validated) belowThreshold++
                 batch += ScrobbleEntity(
                     trackId = r.trackId,
@@ -159,9 +194,9 @@ object LegacyBackupImporter {
                     rawArtist = song?.artistNames,
                     rawAlbum = song?.albumName,
                     startedAt = play.playedAt,
-                    validatedAt = if (validated) play.playedAt + thresholdSec * 1000L else null,
-                    endedAt = play.playedAt + play.listenedDuration,
-                    durationListenedMs = play.listenedDuration,
+                    validatedAt = play.validatedAtForImport(thresholdSec),
+                    endedAt = play.endedAtForImport(),
+                    durationListenedMs = play.listenedDurationForImport,
                     sourceApp = "legacy_import",
                     detectionSource = "IMPORT",
                     confidenceScore = 100,
