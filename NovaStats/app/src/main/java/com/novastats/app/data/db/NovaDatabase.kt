@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -161,11 +161,18 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v8 : index de lecture chronologique pour filtrer les écoutes confirmées ou en attente. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_scrobbles_status_started_at ON scrobbles(status, started_at)")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

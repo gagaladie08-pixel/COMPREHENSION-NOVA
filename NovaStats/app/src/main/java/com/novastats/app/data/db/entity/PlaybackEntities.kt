@@ -15,7 +15,8 @@ import androidx.room.PrimaryKey
     tableName = "scrobbles",
     indices = [
         Index("track_id"), Index("artist_id"), Index("album_id"),
-        Index("started_at"), Index(value = ["track_id", "started_at"], unique = true)
+        Index("started_at"), Index(value = ["track_id", "started_at"], unique = true),
+        Index(value = ["status", "started_at"])
     ]
 )
 data class ScrobbleEntity(

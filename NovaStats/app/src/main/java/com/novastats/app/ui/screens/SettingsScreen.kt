@@ -997,6 +997,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.9" to listOf(
+        "⚡ **Historique plus fluide** : index Room composite statut/date pour accélérer les compteurs, la première/dernière écoute et les listes chronologiques.",
+        "🛡️ **Mise à jour sûre** : index ajouté par migration sans perte ni recalcul des écoutes."
+    ),
     "0.22.8" to listOf(
         "⚡ **Fil d'actualités accéléré** : nouvel index Room pour le dédoublonnage des notifications, ajouté par migration sans effacer tes écoutes.",
         "🔋 **Réglage général optimisé** : les 15 interrupteurs sont activés ou désactivés dans une seule écriture DataStore."
