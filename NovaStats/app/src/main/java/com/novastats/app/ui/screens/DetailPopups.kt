@@ -178,7 +178,7 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
     val scoped = period != Period.GLOBAL
     val range = remember(period) { Dates.statsRangeFor(period) }
     var ps by remember { mutableStateOf<PeriodEntityStats?>(null) }
-    var track by remember { mutableStateOf<TrackEntity?>(null) }
+    val track by remember(trackId) { db.trackDao().observeById(trackId) }.collectAsStateWithLifecycle(initialValue = null)
     var artists by remember { mutableStateOf("") }
     var album by remember { mutableStateOf<AlbumEntity?>(null) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
@@ -189,9 +189,8 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
     var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
     val cert by remember { db.certificationDao().observe(trackId, EntityType.TRACK) }.collectAsStateWithLifecycle(initialValue = null)
 
-    LaunchedEffect(trackId, period) {
+    LaunchedEffect(trackId, period, track?.playCount, track?.originalTrackId) {
         val t = db.trackDao().getById(trackId) ?: return@LaunchedEffect
-        track = t
         original = t.originalTrackId?.let { db.trackDao().getById(it) }
         val linked = db.trackDao().versionsOf(trackId)
         versions = if (linked.isEmpty()) emptyList() else listOf("Original" to db.trackDao().ownPlays(trackId)) + linked.map { v -> v.title.removePrefix(t.title).trim().trim('(', ')').ifBlank { v.title } to v.playCount }

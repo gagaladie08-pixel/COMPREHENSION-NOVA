@@ -17,8 +17,8 @@ object RelinkJob {
     private const val PREFS = "nova_relink"
     /** v5 (0.22.11) : marqueurs de versions solo/membre et suffixes nus — réapplique les règles aux écoutes existantes une fois. */
     private const val KEY_DONE = "v5_done"
-    /** Réparation légère des totaux racines depuis daily_plays, sans relancer le rapprochement. */
-    private const val KEY_ROOT_TOTALS_DONE = "root_totals_daily_v1_done"
+    /** Réparation ciblée depuis les scrobbles confirmés — distincte du correctif v1 fondé sur daily_plays. */
+    private const val KEY_ROOT_TOTALS_DONE = "root_totals_scrobbles_v2_done"
     private val mutex = Mutex()
 
     private val _state = MutableStateFlow<String?>(null)

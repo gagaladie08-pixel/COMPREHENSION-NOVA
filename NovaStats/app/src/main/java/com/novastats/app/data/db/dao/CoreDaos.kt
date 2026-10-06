@@ -73,6 +73,10 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE track_id = :id")
     suspend fun getById(id: Long): TrackEntity?
 
+    /** Fiche réactive : les popups reflètent immédiatement les agrégats modifiés après un recalcul. */
+    @Query("SELECT * FROM tracks WHERE track_id = :id")
+    fun observeById(id: Long): Flow<TrackEntity?>
+
     @Query("SELECT * FROM tracks WHERE artist_id = :artistId AND title = :title COLLATE NOCASE LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artistId: Long): TrackEntity?
     /** Fusion : les versions de [from] suivent la cible (ou son original). */
@@ -331,16 +335,22 @@ interface TrackDao {
     )
     suspend fun recomputeAggregates()
 
-    /** Totaux all-time des racines calculés depuis les jours déjà regroupés par root_id. */
+    /** Recalcule le total des racines depuis les scrobbles confirmés, jamais depuis un agrégat dérivé. */
     @Query(
         """
         UPDATE tracks SET
-            play_count = (SELECT IFNULL(SUM(d.play_count), 0) FROM daily_plays d WHERE d.root_id = tracks.track_id),
-            total_duration_ms = (SELECT IFNULL(SUM(d.total_duration_ms), 0) FROM daily_plays d WHERE d.root_id = tracks.track_id)
+            play_count = (SELECT COUNT(*) FROM scrobbles s
+                WHERE s.status = 'CONFIRMED'
+                  AND (s.track_id = tracks.track_id OR s.track_id IN
+                      (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id))),
+            total_duration_ms = (SELECT IFNULL(SUM(s.duration_listened_ms), 0) FROM scrobbles s
+                WHERE s.status = 'CONFIRMED'
+                  AND (s.track_id = tracks.track_id OR s.track_id IN
+                      (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id)))
         WHERE original_track_id IS NULL
         """
     )
-    suspend fun recomputeRootAggregatesFromDailyPlays()
+    suspend fun recomputeRootAggregatesFromScrobbles()
 
     /** Écoutes PROPRES d'un titre (sans ses versions liées) — répartition par version dans les popups. */
     @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")

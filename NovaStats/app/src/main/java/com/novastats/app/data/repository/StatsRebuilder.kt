@@ -63,8 +63,8 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             db.dailyPlayDao().rebuildFromScrobbles()
             db.dailyStatsDao().clear()
             db.dailyStatsDao().rebuildFromScrobbles()
-            // Source de vérité all-time des racines : somme des lignes quotidiennes qui partagent le même root_id.
-            db.trackDao().recomputeRootAggregatesFromDailyPlays()
+            // Le cumul all-time est calculé directement depuis les scrobbles confirmés, pas depuis daily_plays dérivé.
+            db.trackDao().recomputeRootAggregatesFromScrobbles()
         }
 
         onProgress("Streaks…")
@@ -116,12 +116,13 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         return news
     }
 
-    /** Répare rapidement les totaux all-time existants sans re-résoudre chaque écoute ni reconstruire les charts. */
+    /** Répare rapidement les totaux depuis les scrobbles confirmés, sans re-résoudre chaque écoute ni reconstruire les charts. */
     suspend fun repairTrackRootTotals() {
         db.withTransaction {
             db.dailyPlayDao().clear()
             db.dailyPlayDao().rebuildFromScrobbles()
-            db.trackDao().recomputeRootAggregatesFromDailyPlays()
+            // La source primaire corrige également les éventuels compteurs racines déjà écrasés par daily_plays.
+            db.trackDao().recomputeRootAggregatesFromScrobbles()
         }
     }
 
