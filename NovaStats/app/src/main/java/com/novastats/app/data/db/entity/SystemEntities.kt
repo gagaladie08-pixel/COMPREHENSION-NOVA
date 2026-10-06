@@ -46,7 +46,10 @@ data class DailyStatsEntity(
 )
 
 /** Table 29 — notifications_feed : "Dernières actualités" (section 4 de l'Accueil) */
-@Entity(tableName = "notifications_feed", indices = [Index("created_at"), Index("is_read")])
+@Entity(
+    tableName = "notifications_feed",
+    indices = [Index("created_at"), Index("is_read"), Index(value = ["type", "entity_id", "created_at"])]
+)
 data class NotificationFeedEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     /** CERTIFICATION / PANTHEON / HALL_OF_FAME / FIRST_SCROBBLE / REVIEW / WEEKLY_CHARTS / AWARDS_UNLOCK */

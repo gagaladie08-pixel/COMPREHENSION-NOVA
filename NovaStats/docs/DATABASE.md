@@ -49,6 +49,13 @@ Fichier source : `app/src/main/java/com/novastats/app/data/db/entity/*.kt`
 | 34 | `migration_log` | Import/Export | SystemEntities.kt |
 | 35 | `artist_exceptions` | Référentiel | CoreEntities.kt |
 
+## Migrations et index
+
+- **Schéma v7 (`MIGRATION_6_7`)** : création non destructive de `index_notifications_feed_type_entity_id_created_at`
+  sur `(type, entity_id, created_at)`. Il accélère la recherche des notifications déjà annoncées par catégorie et entité.
+  Aucun enregistrement du fil ni aucune écoute n'est supprimé ou recalculé.
+- Les index simples `created_at` et `is_read` restent dédiés au tri récent et au filtrage de lecture.
+
 ## Flux de données
 
 ```

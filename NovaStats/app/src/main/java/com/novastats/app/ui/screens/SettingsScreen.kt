@@ -997,6 +997,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.8" to listOf(
+        "⚡ **Fil d'actualités accéléré** : nouvel index Room pour le dédoublonnage des notifications, ajouté par migration sans effacer tes écoutes.",
+        "🔋 **Réglage général optimisé** : les 15 interrupteurs sont activés ou désactivés dans une seule écriture DataStore."
+    ),
     "0.22.7" to listOf(
         "🔔 **Notifications réparées et enrichies** : demande Android 13+, 15 réglages indépendants, sons/canaux dédiés, notifications de première écoute, vérification, Awards après 60 jours et intronisations Hall of Fame fiables.",
         "✨ **Récapitulatif premium** : bilans hebdomadaires plus détaillés, fil d'actualités unifié et notifications qui ouvrent directement le bon onglet."
