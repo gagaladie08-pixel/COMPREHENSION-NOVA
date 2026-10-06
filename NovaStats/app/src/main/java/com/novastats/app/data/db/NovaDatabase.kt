@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -168,11 +168,23 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v9 : index composites des séries de lectures par entité et date, en remplaçant les index simples. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_daily_plays_artist_id_date ON daily_plays(artist_id, date)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_daily_plays_album_id_date ON daily_plays(album_id, date)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_daily_plays_root_id_date ON daily_plays(root_id, date)")
+                db.execSQL("DROP INDEX IF EXISTS index_daily_plays_artist_id")
+                db.execSQL("DROP INDEX IF EXISTS index_daily_plays_album_id")
+                db.execSQL("DROP INDEX IF EXISTS index_daily_plays_root_id")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 .also { instance = it }

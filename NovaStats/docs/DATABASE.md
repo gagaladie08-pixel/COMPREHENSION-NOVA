@@ -55,7 +55,10 @@ Fichier source : `app/src/main/java/com/novastats/app/data/db/entity/*.kt`
   sur `(type, entity_id, created_at)`. Il accélère la recherche des notifications déjà annoncées par catégorie et entité.
 - **Schéma v8 (`MIGRATION_7_8`)** : création de `index_scrobbles_status_started_at` sur `(status, started_at)` pour
   les compteurs, les bornes temporelles et les listes chronologiques d'écoutes confirmées/en attente.
-- Ces migrations ajoutent uniquement des index : aucune écoute, entrée du fil ou statistique n'est supprimée/recalculée.
+- **Schéma v9 (`MIGRATION_8_9`)** : remplace les index simples `daily_plays.artist_id`, `album_id` et `root_id` par
+  les index composites `(artist_id, date)`, `(album_id, date)` et `(root_id, date)`. Les filtres d'entité et de période
+  s'appuient ainsi sur une même recherche, et les séries quotidiennes sont déjà ordonnées par date.
+- Ces migrations ne touchent qu'aux index : aucune écoute, entrée du fil ou statistique n'est supprimée/recalculée.
 - Les index simples `created_at` et `is_read` restent dédiés au tri récent et au filtrage de lecture.
 
 ## Flux de données

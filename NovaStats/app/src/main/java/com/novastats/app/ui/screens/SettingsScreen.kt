@@ -997,6 +997,10 @@ private fun secretName(src: com.novastats.app.domain.ApiSource): String = when (
 /* ================================ À PROPOS ================================ */
 
 private val CHANGELOG = listOf(
+    "0.22.10" to listOf(
+        "⚡ **Séries plus rapides** : les index composites artiste/date, album/date et titre/date accélèrent les périodes et les graphiques quotidiens.",
+        "🛡️ **Migration sans perte** : les index unitaires sont remplacés par leurs variantes composites, sans modifier les écoutes agrégées."
+    ),
     "0.22.9" to listOf(
         "⚡ **Historique plus fluide** : index Room composite statut/date pour accélérer les compteurs, la première/dernière écoute et les listes chronologiques.",
         "🛡️ **Mise à jour sûre** : index ajouté par migration sans perte ni recalcul des écoutes."

@@ -85,7 +85,11 @@ data class PendingQueueEntity(
 /** Table 9 — daily_plays : agrégat par (titre, jour) — base des snapshots et des périodes */
 @Entity(
     tableName = "daily_plays",
-    indices = [Index(value = ["track_id", "date"], unique = true), Index("date"), Index("artist_id"), Index("album_id"), Index("root_id")]
+    indices = [
+        Index(value = ["track_id", "date"], unique = true), Index("date"),
+        Index(value = ["artist_id", "date"]), Index(value = ["album_id", "date"]),
+        Index(value = ["root_id", "date"])
+    ]
 )
 data class DailyPlayEntity(
     @PrimaryKey(autoGenerate = true) @ColumnInfo(name = "daily_id") val dailyId: Long = 0,
