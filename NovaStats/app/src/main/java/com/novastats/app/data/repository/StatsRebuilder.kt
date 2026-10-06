@@ -31,6 +31,15 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
     /** Nouveauté détectée après un recalcul (pour les notifications). */
     data class Achievement(val kind: String, val entityType: String, val entityId: Long, val level: String, val name: String)
 
+    /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
+    private suspend fun recomputeRootAggregatesFromScrobbles() {
+        val totals = db.trackDao().rootAggregatesFromScrobbles()
+        db.trackDao().clearRootAggregates()
+        for (total in totals) {
+            db.trackDao().updateRootAggregate(total.rootId, total.playCount, total.totalDurationMs)
+        }
+    }
+
     /**
      * @param fullBillboard true = reconstruit tous les snapshots (import) ; false = ne recalcule que la période
      *                      courante (après une écoute).
@@ -63,8 +72,8 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             db.dailyPlayDao().rebuildFromScrobbles()
             db.dailyStatsDao().clear()
             db.dailyStatsDao().rebuildFromScrobbles()
-            // Le cumul all-time est calculé directement depuis les scrobbles confirmés, pas depuis daily_plays dérivé.
-            db.trackDao().recomputeRootAggregatesFromScrobbles()
+            // Le cumul all-time est calculé en un scan groupé des scrobbles confirmés.
+            recomputeRootAggregatesFromScrobbles()
         }
 
         onProgress("Streaks…")
@@ -121,8 +130,8 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         db.withTransaction {
             db.dailyPlayDao().clear()
             db.dailyPlayDao().rebuildFromScrobbles()
-            // La source primaire corrige également les éventuels compteurs racines déjà écrasés par daily_plays.
-            db.trackDao().recomputeRootAggregatesFromScrobbles()
+            // Agrégation groupée (une seule lecture de scrobbles, pas de requête par racine).
+            recomputeRootAggregatesFromScrobbles()
         }
     }
 

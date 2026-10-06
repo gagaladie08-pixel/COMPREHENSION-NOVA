@@ -58,6 +58,12 @@ data class PeriodEntityStats(
     @androidx.room.ColumnInfo(name = "distinct_albums") val distinctAlbums: Int
 )
 
+data class RootScrobbleAggregate(
+    @androidx.room.ColumnInfo(name = "root_id") val rootId: Long,
+    @androidx.room.ColumnInfo(name = "play_count") val playCount: Int,
+    @androidx.room.ColumnInfo(name = "total_duration_ms") val totalDurationMs: Long
+)
+
 @Dao
 interface TrackDao {
 
@@ -335,22 +341,25 @@ interface TrackDao {
     )
     suspend fun recomputeAggregates()
 
-    /** Recalcule le total des racines depuis les scrobbles confirmés, jamais depuis un agrégat dérivé. */
+    /** Un seul parcours des écoutes confirmées, groupé par racine (évite une sous-requête par titre). */
     @Query(
         """
-        UPDATE tracks SET
-            play_count = (SELECT COUNT(*) FROM scrobbles s
-                WHERE s.status = 'CONFIRMED'
-                  AND (s.track_id = tracks.track_id OR s.track_id IN
-                      (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id))),
-            total_duration_ms = (SELECT IFNULL(SUM(s.duration_listened_ms), 0) FROM scrobbles s
-                WHERE s.status = 'CONFIRMED'
-                  AND (s.track_id = tracks.track_id OR s.track_id IN
-                      (SELECT v.track_id FROM tracks v WHERE v.original_track_id = tracks.track_id)))
-        WHERE original_track_id IS NULL
+        SELECT IFNULL(t.original_track_id, s.track_id) AS root_id,
+               COUNT(*) AS play_count,
+               IFNULL(SUM(s.duration_listened_ms), 0) AS total_duration_ms
+        FROM scrobbles s
+        LEFT JOIN tracks t ON t.track_id = s.track_id
+        WHERE s.status = 'CONFIRMED'
+        GROUP BY IFNULL(t.original_track_id, s.track_id)
         """
     )
-    suspend fun recomputeRootAggregatesFromScrobbles()
+    suspend fun rootAggregatesFromScrobbles(): List<RootScrobbleAggregate>
+
+    @Query("UPDATE tracks SET play_count = 0, total_duration_ms = 0 WHERE original_track_id IS NULL")
+    suspend fun clearRootAggregates()
+
+    @Query("UPDATE tracks SET play_count = :playCount, total_duration_ms = :durationMs WHERE track_id = :rootId AND original_track_id IS NULL")
+    suspend fun updateRootAggregate(rootId: Long, playCount: Int, durationMs: Long)
 
     /** Écoutes PROPRES d'un titre (sans ses versions liées) — répartition par version dans les popups. */
     @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")
