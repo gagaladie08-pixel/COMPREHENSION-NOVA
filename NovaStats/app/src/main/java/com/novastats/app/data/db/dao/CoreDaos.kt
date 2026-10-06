@@ -331,6 +331,17 @@ interface TrackDao {
     )
     suspend fun recomputeAggregates()
 
+    /** Totaux all-time des racines calculés depuis les jours déjà regroupés par root_id. */
+    @Query(
+        """
+        UPDATE tracks SET
+            play_count = (SELECT IFNULL(SUM(d.play_count), 0) FROM daily_plays d WHERE d.root_id = tracks.track_id),
+            total_duration_ms = (SELECT IFNULL(SUM(d.total_duration_ms), 0) FROM daily_plays d WHERE d.root_id = tracks.track_id)
+        WHERE original_track_id IS NULL
+        """
+    )
+    suspend fun recomputeRootAggregatesFromDailyPlays()
+
     /** Écoutes PROPRES d'un titre (sans ses versions liées) — répartition par version dans les popups. */
     @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")
     suspend fun ownPlays(trackId: Long): Int

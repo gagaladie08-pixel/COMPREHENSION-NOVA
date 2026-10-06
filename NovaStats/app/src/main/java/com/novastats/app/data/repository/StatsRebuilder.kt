@@ -63,6 +63,8 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             db.dailyPlayDao().rebuildFromScrobbles()
             db.dailyStatsDao().clear()
             db.dailyStatsDao().rebuildFromScrobbles()
+            // Source de vérité all-time des racines : somme des lignes quotidiennes qui partagent le même root_id.
+            db.trackDao().recomputeRootAggregatesFromDailyPlays()
         }
 
         onProgress("Streaks…")
@@ -112,6 +114,15 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             }
         }
         return news
+    }
+
+    /** Répare rapidement les totaux all-time existants sans re-résoudre chaque écoute ni reconstruire les charts. */
+    suspend fun repairTrackRootTotals() {
+        db.withTransaction {
+            db.dailyPlayDao().clear()
+            db.dailyPlayDao().rebuildFromScrobbles()
+            db.trackDao().recomputeRootAggregatesFromDailyPlays()
+        }
     }
 
     /* ---------------- Versions ---------------- */

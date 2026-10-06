@@ -17,6 +17,8 @@ object RelinkJob {
     private const val PREFS = "nova_relink"
     /** v5 (0.22.11) : marqueurs de versions solo/membre et suffixes nus — réapplique les règles aux écoutes existantes une fois. */
     private const val KEY_DONE = "v5_done"
+    /** Réparation légère des totaux racines depuis daily_plays, sans relancer le rapprochement. */
+    private const val KEY_ROOT_TOTALS_DONE = "root_totals_daily_v1_done"
     private val mutex = Mutex()
 
     private val _state = MutableStateFlow<String?>(null)
@@ -26,13 +28,40 @@ object RelinkJob {
 
     fun isDone(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_DONE, false)
     private fun markDone(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DONE, true).apply()
+    private fun isRootTotalsRepairDone(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ROOT_TOTALS_DONE, false)
+    private fun markRootTotalsRepairDone(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ROOT_TOTALS_DONE, true).apply()
 
-    /** Au démarrage : charge les noms protégés ; lance le recalcul si jamais fait et s'il y a des écoutes. */
+    /** Au démarrage : charge les noms protégés, puis effectue au besoin le rapprochement ou la réparation légère des totaux. */
     suspend fun ensure(app: NovaStatsApp) {
         runCatching { app.library.loadArtistExceptions(seedDefaults = true) }
-        if (isDone(app)) return
-        if (app.database.scrobbleDao().countConfirmed() == 0) { markDone(app); return }
-        run(app)
+        val confirmedCount = app.database.scrobbleDao().countConfirmed()
+        if (!isDone(app)) {
+            if (confirmedCount == 0) {
+                markDone(app)
+                markRootTotalsRepairDone(app)
+                return
+            }
+            run(app)
+        }
+        if (isRootTotalsRepairDone(app)) return
+        if (confirmedCount == 0) {
+            markRootTotalsRepairDone(app)
+            return
+        }
+
+        // Répare le bug d'agrégation des versions déjà liées sans réexécuter la résolution coûteuse des scrobbles.
+        _state.value = "Réparation des totaux…"
+        try {
+            app.rebuilder.repairTrackRootTotals()
+            app.library.clearCaches()
+            markRootTotalsRepairDone(app)
+            _lastResult.value = "✅ Totaux des versions réparés"
+        } catch (e: Throwable) {
+            com.novastats.app.util.CrashJournal.note(app, "RelinkJob.rootTotalsRepair", e)
+            _lastResult.value = "⚠️ Réparation des totaux interrompue : ${e.message ?: e.javaClass.simpleName}"
+        } finally {
+            _state.value = null
+        }
     }
 
     /** Recalcul complet (idempotent). Retourne un résumé. */
@@ -46,6 +75,7 @@ object RelinkJob {
             app.rebuilder.rebuildAll(fullBillboard = true) { _state.value = it }
             app.library.clearCaches()
             markDone(app)
+            markRootTotalsRepairDone(app)
             val msg = "✅ Liens & versions recalculés — $moved écoute${if (moved > 1) "s" else ""} réattribuée${if (moved > 1) "s" else ""}" +
                 (if (dups > 0) " · $dups doublon${if (dups > 1) "s" else ""} supprimé${if (dups > 1) "s" else ""}" else "") +
                 (if (albums.merged > 0) " · ${albums.merged} album${if (albums.merged > 1) "s" else ""} fusionné${if (albums.merged > 1) "s" else ""} en multi-artistes" else "")
