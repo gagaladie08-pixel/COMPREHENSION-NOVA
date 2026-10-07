@@ -223,10 +223,6 @@ fun FullscreenImage(url: String, title: String, onDismiss: () -> Unit) {
 @Composable
 fun RankRow(
     position: Int, title: String, subtitle: String?, plays: Int, durationMs: Long, coverUrl: String?, circle: Boolean = false,
-    /** Mouvement de classement vs période précédente (positif = ça monte) ; null = pas de badge. */
-    delta: Int? = null,
-    /** Absent du classement de la période précédente → « ✦ nouveau ». */
-    isNew: Boolean = false,
     onClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null
 ) {
     val theme = Nova.theme
@@ -241,30 +237,13 @@ fun RankRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Mouvement de classement (▲ / ▼ / ＝ / ✦ nouveau) sous la position : un classement vivant.
-        val moveLabel = when {
-            isNew -> "✦ nouveau"
-            delta == null -> null
-            delta > 0 -> "▲$delta"
-            delta < 0 -> "▼${-delta}"
-            else -> "＝"
-        }
-        val moveColor = when {
-            isNew -> theme.primary
-            delta != null && delta > 0 -> Color(0xFF4CAF50)
-            delta != null && delta < 0 -> Color(0xFFE74C3C)
-            else -> theme.textSecondary
-        }
-        Column(Modifier.width(56.dp)) {
-            if (pride) Text(
-                positionLabel(position), fontWeight = FontWeight.Black,
-                style = MaterialTheme.typography.bodyMedium.copy(brush = prideBrushFor(position))
-            ) else Text(
-                positionLabel(position), color = posColor, fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            if (moveLabel != null) Text(moveLabel, color = moveColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-        }
+        if (pride) Text(
+            positionLabel(position), fontWeight = FontWeight.Black,
+            modifier = Modifier.width(56.dp), style = MaterialTheme.typography.bodyMedium.copy(brush = prideBrushFor(position))
+        ) else Text(
+            positionLabel(position), color = posColor, fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(56.dp), style = MaterialTheme.typography.bodyMedium
+        )
         CoverArt(coverUrl, title, circle = circle)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

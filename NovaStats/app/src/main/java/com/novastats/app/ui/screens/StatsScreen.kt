@@ -104,35 +104,7 @@ fun StatsScreen() {
         if (period == Period.GLOBAL) db.albumDao().topAllTime(TOP_LIMIT) else db.albumDao().topForPeriod(range.fromIso, range.toIso, TOP_LIMIT)
     }.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // 📈 Premium : la période précédente (même longueur, juste avant) sert de référence —
-    // variation d'écoutes du bandeau et mouvements de classement (▲ / ▼ / nouveau).
-    // Global n'a pas d'« avant » : tout y est désactivé.
-    val prevRange = remember(period) {
-        if (period == Period.GLOBAL) null else {
-            val len = java.time.temporal.ChronoUnit.DAYS.between(range.from, range.to) + 1
-            com.novastats.app.domain.DateRange(range.from.minusDays(len), range.from.minusDays(1))
-        }
-    }
-    val prevSummary by remember(prevRange) {
-        val r = prevRange
-        if (r == null) kotlinx.coroutines.flow.flowOf(PeriodSummary(0L, 0L, 0, 0, 0, 0))
-        else db.scrobbleDao().summary(r.fromMs, r.toMs)
-    }.collectAsStateWithLifecycle(initialValue = PeriodSummary(0L, 0L, 0, 0, 0, 0))
-    val prevTracks by remember(prevRange) {
-        val r = prevRange
-        if (r == null) kotlinx.coroutines.flow.flowOf(emptyList()) else db.trackDao().topForPeriod(r.fromIso, r.toIso, TOP_LIMIT)
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val prevArtists by remember(prevRange) {
-        val r = prevRange
-        if (r == null) kotlinx.coroutines.flow.flowOf(emptyList()) else db.artistDao().topForPeriod(r.fromIso, r.toIso, TOP_LIMIT)
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val prevAlbums by remember(prevRange) {
-        val r = prevRange
-        if (r == null) kotlinx.coroutines.flow.flowOf(emptyList()) else db.albumDao().topForPeriod(r.fromIso, r.toIso, TOP_LIMIT)
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val prevTrackPos = remember(prevTracks) { prevTracks.mapIndexed { i, t -> t.track.trackId to (i + 1) }.toMap() }
-    val prevArtistPos = remember(prevArtists) { prevArtists.mapIndexed { i, a -> a.artist.artistId to (i + 1) }.toMap() }
-    val prevAlbumPos = remember(prevAlbums) { prevAlbums.mapIndexed { i, al -> al.album.albumId to (i + 1) }.toMap() }
+
 
     val q = TitleNormalizer.normalizeKey(query)
     fun matches(vararg fields: String?) = q.isBlank() || fields.any { it != null && TitleNormalizer.normalizeKey(it).contains(q) }
@@ -190,17 +162,6 @@ fun StatsScreen() {
                     color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
                 )
-                // 📈 Variation factuelle vs la période précédente (même longueur, juste avant).
-                if (prevRange != null && prevSummary.playCount > 0) {
-                    val pct = ((summary.playCount - prevSummary.playCount).toFloat() / prevSummary.playCount * 100).toInt()
-                    val up = summary.playCount >= prevSummary.playCount
-                    Text(
-                        "${if (up) "▲ +$pct %" else "▼ $pct %"} d'écoutes vs ${prevPeriodName(period)}",
-                        color = if (up) Color(0xFF4CAF50) else Color(0xFFE74C3C),
-                        style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center
-                    )
-                }
                 // 🎯 Dominance du n°1 : quand un titre écrase la période, on le dit.
                 if (q.isBlank() && summary.playCount > 0) {
                     val t1 = tracks.firstOrNull()
@@ -302,27 +263,21 @@ fun StatsScreen() {
         } else when (tab) {
             // Liste démarrée après le podium (drop 3) quand il est affiché ; les positions restent réelles.
             0 -> itemsIndexed((if (podiumOn) filteredTracks.drop(3) else filteredTracks).take(shown), key = { _, (_, t) -> "t" + t.track.trackId }) { _, (pos, t) ->
-                val prev = prevTrackPos[t.track.trackId]
                 RankRow(
                     pos, t.track.title, listOfNotNull(t.artistName, t.albumTitle).joinToString(" · "), t.periodPlays, t.periodDurationMs, t.track.coverUrl,
-                    delta = prev?.let { it - pos }, isNew = prev == null && period != Period.GLOBAL,
                     onLongClick = { detail = DetailTarget.Track(t.track.trackId, period) }
                 )
             }
             1 -> itemsIndexed((if (podiumOn) filteredArtists.drop(3) else filteredArtists).take(shown), key = { _, (_, a) -> "a" + a.artist.artistId }) { _, (pos, a) ->
                 val sub = PantheonStatus.fromDb(a.artist.pantheonStatus)?.let { "${it.emoji} ${it.label.uppercase()}" }
-                val prev = prevArtistPos[a.artist.artistId]
                 RankRow(
                     pos, a.artist.name, sub, a.periodPlays, a.periodDurationMs, a.artist.photoUrl, circle = true,
-                    delta = prev?.let { it - pos }, isNew = prev == null && period != Period.GLOBAL,
                     onLongClick = { detail = DetailTarget.Artist(a.artist.artistId, period) }
                 )
             }
             else -> itemsIndexed((if (podiumOn) filteredAlbums.drop(3) else filteredAlbums).take(shown), key = { _, (_, al) -> "al" + al.album.albumId }) { _, (pos, al) ->
-                val prev = prevAlbumPos[al.album.albumId]
                 RankRow(
                     pos, al.album.title, al.artistName, al.periodPlays, al.periodDurationMs, al.album.coverUrl,
-                    delta = prev?.let { it - pos }, isNew = prev == null && period != Period.GLOBAL,
                     onLongClick = { detail = DetailTarget.Album(al.album.albumId, period) }
                 )
             }
@@ -332,14 +287,6 @@ fun StatsScreen() {
     }
     }
 
-}
-
-private fun prevPeriodName(p: Period) = when (p) {
-    Period.DAILY -> "hier"
-    Period.WEEKLY -> "la semaine dernière"
-    Period.MONTHLY -> "le mois dernier"
-    Period.YEARLY -> "l'an dernier"
-    Period.GLOBAL -> ""
 }
 
 private data class PodiumItem(
