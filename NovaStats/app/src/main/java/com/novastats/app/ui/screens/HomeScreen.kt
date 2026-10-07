@@ -26,6 +26,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -269,30 +273,47 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             }
         }
 
-        /* ---------- 3. Top du moment : titres, artistes, albums — top 5 ---------- */
+        /* ---------- 3. Top du moment : trois onglets côte à côte, comme dans Stats ---------- */
         item {
             SectionTitle("Top du moment")
+            var topTab by remember { mutableIntStateOf(0) }
             NovaCard {
-                Column(Modifier.padding(vertical = 8.dp)) {
-                    if (topTrack.isEmpty() && topArtist.isEmpty() && topAlbum.isEmpty()) {
-                        Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
-                    }
-                    if (topTrack.isNotEmpty()) {
-                        Text("🎵 Titres", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                        topTrack.forEachIndexed { i, it ->
-                            RankRow(i + 1, it.track.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.track.coverUrl, onClick = { detail = DetailTarget.Track(it.track.trackId) })
+                Column {
+                    TabRow(
+                        selectedTabIndex = topTab,
+                        containerColor = Color.Transparent,
+                        contentColor = theme.primary,
+                        indicator = { positions ->
+                            Box(
+                                Modifier.tabIndicatorOffset(positions[topTab])
+                                    .padding(horizontal = 28.dp).height(3.dp)
+                                    .clip(RoundedCornerShape(2.dp)).background(SolidColor(theme.primary))
+                            )
+                        },
+                        divider = {}
+                    ) {
+                        listOf("Titres", "Artistes", "Albums").forEachIndexed { i, label ->
+                            Tab(
+                                selected = topTab == i, onClick = { topTab = i },
+                                text = { Text(label, fontWeight = if (topTab == i) FontWeight.Bold else FontWeight.Normal, style = MaterialTheme.typography.titleSmall) },
+                                selectedContentColor = theme.primary, unselectedContentColor = theme.textSecondary
+                            )
                         }
                     }
-                    if (topArtist.isNotEmpty()) {
-                        Text("🎤 Artistes", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                        topArtist.forEachIndexed { i, it ->
-                            RankRow(i + 1, it.artist.name, "Artiste du jour", it.periodPlays, it.periodDurationMs, it.artist.photoUrl, circle = true, onClick = { detail = DetailTarget.Artist(it.artist.artistId) })
-                        }
-                    }
-                    if (topAlbum.isNotEmpty()) {
-                        Text("💿 Albums", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-                        topAlbum.forEachIndexed { i, it ->
-                            RankRow(i + 1, it.album.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.album.coverUrl, onClick = { detail = DetailTarget.Album(it.album.albumId) })
+                    Column(Modifier.padding(vertical = 6.dp)) {
+                        when (topTab) {
+                            0 -> if (topTrack.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
+                            else topTrack.forEachIndexed { i, it ->
+                                RankRow(i + 1, it.track.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.track.coverUrl, onClick = { detail = DetailTarget.Track(it.track.trackId) })
+                            }
+                            1 -> if (topArtist.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
+                            else topArtist.forEachIndexed { i, it ->
+                                RankRow(i + 1, it.artist.name, "Artiste du jour", it.periodPlays, it.periodDurationMs, it.artist.photoUrl, circle = true, onClick = { detail = DetailTarget.Artist(it.artist.artistId) })
+                            }
+                            else -> if (topAlbum.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
+                            else topAlbum.forEachIndexed { i, it ->
+                                RankRow(i + 1, it.album.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.album.coverUrl, onClick = { detail = DetailTarget.Album(it.album.albumId) })
+                            }
                         }
                     }
                 }
