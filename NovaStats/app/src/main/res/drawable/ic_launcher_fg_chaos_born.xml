@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Premier plan unique — Chaos Born -->
+    <group>
+        <clip-path android:pathData="M0,0 H108 L0,108 Z" />
+    <group android:translateX="-2" android:translateY="-2">
+        <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#C0C0C0" /><item android:offset="0.5" android:color="#1A1A1A" /><item android:offset="1" android:color="#E8E8E8" /></gradient></aapt:attr></path>
+    </group>
+    </group>
+    <group>
+        <clip-path android:pathData="M108,0 V108 H0 Z" />
+    <group android:translateX="3" android:translateY="3">
+        <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#C0C0C0" /><item android:offset="0.5" android:color="#1A1A1A" /><item android:offset="1" android:color="#E8E8E8" /></gradient></aapt:attr></path>
+    </group>
+    </group>
+    <path android:pathData="M0,0 L108,108" android:fillColor="#00000000" android:strokeColor="#DFDFDF" android:strokeWidth="1.2" android:strokeAlpha="0.7" />
+    <path android:pathData="M34,79.5 V84.5 M39,81 V83 M44,78 V86 M49,80.5 V83.5 M54,77 V87 M59,80 V84 M64,78.5 V85.5 M69,81 V83 M74,79 V85" android:fillColor="#00000000" android:strokeColor="#DFDFDF" android:strokeWidth="2.2" android:strokeAlpha="0.9" android:strokeLineCap="round" />
+</vector>

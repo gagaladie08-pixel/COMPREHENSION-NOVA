@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 🌐 Image web : détecter l'image téléchargée au retour du navigateur -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <application
+        android:name=".NovaStatsApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NovaStats"
+        tools:targetApi="34">
+
+        <!-- Activité principale : le filtre LAUNCHER est porté par les 15 alias ci-dessous (icône dynamique par thème) -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.NovaStats.Starting">
+            <!-- Cible de partage : « Partager l'image » depuis le navigateur / la galerie → photo ou pochette en attente -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- Icône dynamique : un activity-alias par thème, un seul activé à la fois (IconSwitcher) -->
+        <activity-alias android:name=".icon.cyber_nova" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_cyber_nova" android:label="@string/app_name" android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.neon_disco" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_neon_disco" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.villain_era" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_villain_era" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.slay_queen" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_slay_queen" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.pink_y2k" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_pink_y2k" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.velvet_stage" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_velvet_stage" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.pink_venom" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_pink_venom" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.cloud_nine" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_cloud_nine" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.solara" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_solara" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.chaos_born" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_chaos_born" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.survivor" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_survivor" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.rainbow_pop" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_rainbow_pop" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.pop_revolution" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_pop_revolution" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.african_confessions" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_african_confessions" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.bad_angel" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_bad_angel" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+
+        <!-- Module Détection v3.0 : MediaSession (principal) + NotificationListener (fallback) -->
+        <service
+            android:name=".service.NovaListenerService"
+            android:exported="true"
+            android:label="@string/service_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Service premier plan compagnon : garde le process vivant (notification discrète « NovaStats veille ») -->
+        <service
+            android:name=".service.NovaKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintien en vie du service de détection musicale (NotificationListener) pour les statistiques d'écoute" />
+        </service>
+
+        <!-- Action « ✅ C'est correct » de la notification 🟡 À vérifier -->
+        <receiver
+            android:name=".service.ReviewNotifier$ReviewActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Relance auto au redémarrage du téléphone -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+        <!-- Partage d'images (Nova Rewind, cartes) : fichiers du cache exposés via FileProvider, aucune permission stockage -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+        <!-- Ré-enrichissement long (WorkManager en premier plan, type dataSync) -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+    </application>
+</manifest>

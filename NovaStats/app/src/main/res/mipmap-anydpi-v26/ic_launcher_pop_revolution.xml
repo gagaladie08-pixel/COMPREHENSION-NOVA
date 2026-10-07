@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_bg_pop_revolution" />
+    <foreground android:drawable="@drawable/ic_launcher_fg_pop_revolution" />
+    <monochrome android:drawable="@drawable/ic_launcher_mono" />
+</adaptive-icon>

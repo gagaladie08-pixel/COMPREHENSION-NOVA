@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Premier plan unique — African Confessions -->
+    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#FFE9A6" /><item android:offset="0.5" android:color="#2D5A27" /><item android:offset="1" android:color="#C4622D" /></gradient></aapt:attr></path>
+    <path android:pathData="M28,82 L34,78 L40,82 L46,78 L52,82 L58,78 L64,82 L70,78 L76,82 L80,80" android:fillColor="#00000000" android:strokeColor="#FFB347" android:strokeWidth="1.8" android:strokeAlpha="0.9" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

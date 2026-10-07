@@ -1,0 +1,16 @@
+<resources>
+    <!-- Thème système minimal : tout le vrai theming est fait dans Compose (15 thèmes). -->
+    <style name="Theme.NovaStats" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#050510</item>
+        <item name="android:statusBarColor">#050510</item>
+        <item name="android:navigationBarColor">#050510</item>
+    </style>
+
+    <!-- Splash screen (API SplashScreen, Android 12+ ; rendu compat statique avant) : N animé sur fond sombre -->
+    <style name="Theme.NovaStats.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#050510</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_vector</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="postSplashScreenTheme">@style/Theme.NovaStats</item>
+    </style>
+</resources>

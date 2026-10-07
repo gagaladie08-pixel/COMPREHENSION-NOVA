@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Premier plan unique — Pink Y2K -->
+    <path android:pathData="M35,73 V35 L73,73 V35" android:fillColor="#00000000" android:strokeColor="#FF1493" android:strokeWidth="15" android:strokeAlpha="0.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M35,73 V35 L73,73 V35" android:strokeColor="#FF69B4" android:strokeWidth="10"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="35" android:startY="35" android:endX="73" android:endY="73"><item android:offset="0" android:color="#FF69B4" /><item android:offset="1" android:color="#87CEEB" /></gradient></aapt:attr></path>
+    <path android:pathData="M35,73 V35 L73,73 V35" android:fillColor="#00000000" android:strokeColor="#87CEEB" android:strokeWidth="10" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M39,38 L52,51" android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="2.4" android:strokeAlpha="0.7" android:strokeLineCap="round" />
+    <path android:pathData="M76,36 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 ZM83.5,46 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0 ZM25,72 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.75" />
+    <path android:pathData="M46,80.5 V83.5 M50,79 V85 M54,77.5 V86.5 M58,79 V85 M62,80.5 V83.5" android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="2.6" android:strokeAlpha="0.8" android:strokeLineCap="round" />
+</vector>

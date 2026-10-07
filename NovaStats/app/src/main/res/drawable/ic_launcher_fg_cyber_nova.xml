@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Premier plan unique — Cyber Nova -->
+    <path android:pathData="M30,38 V30 H38 M70,30 H78 V38 M78,70 V78 H70 M38,78 H30 V70" android:fillColor="#00000000" android:strokeColor="#00FFF0" android:strokeWidth="1.6" android:strokeAlpha="0.9" android:strokeLineCap="square" />
+    <path android:pathData="M31,76 L31,35 L34,32 L40,32 L68,64 L68,35 L71,32 L77,32 L77,73 L74,76 L68,76 L40,44 L40,73 L37,76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#FF006E" /><item android:offset="0.5" android:color="#00B4FF" /><item android:offset="1" android:color="#BD00FF" /></gradient></aapt:attr></path>
+    <path android:pathData="M31,52 H77 M31,58 H77" android:fillColor="#00000000" android:strokeColor="#00FFF0" android:strokeWidth="1.2" android:strokeAlpha="0.55" />
+    <path android:pathData="M44,64 H64" android:fillColor="#00000000" android:strokeColor="#00FFF0" android:strokeWidth="2.2" android:strokeAlpha="0.8" android:strokeLineCap="round" />
+</vector>

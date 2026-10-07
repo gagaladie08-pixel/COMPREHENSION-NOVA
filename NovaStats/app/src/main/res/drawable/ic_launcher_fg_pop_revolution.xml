@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Premier plan unique — Pop Revolution -->
+    <path android:pathData="M31,76 L40,32 L49,32 L70.4545,64 L77,32 L86,32 L77,76 L68,76 L46.5455,44 L40,76 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76"><item android:offset="0" android:color="#4A90D9" /><item android:offset="0.5" android:color="#FF6B9D" /><item android:offset="1" android:color="#00BFFF" /></gradient></aapt:attr></path>
+    <path android:pathData="M20,40 H30 M18,48 H28 M22,56 H30" android:fillColor="#00000000" android:strokeColor="#F0F8FF" android:strokeWidth="2.2" android:strokeAlpha="0.9" android:strokeLineCap="round" />
+    <path android:pathData="M84,60 H96 M86,68 H94 M82,76 H92" android:fillColor="#00000000" android:strokeColor="#F0F8FF" android:strokeWidth="2.2" android:strokeAlpha="0.9" android:strokeLineCap="round" />
+    <path android:pathData="M40,80.5 V83.5 M47,79 V85 M54,77 V87 M61,79 V85 M68,80.5 V83.5" android:fillColor="#00000000" android:strokeColor="#F0F8FF" android:strokeWidth="2.6" android:strokeAlpha="0.9" android:strokeLineCap="round" />
+</vector>

@@ -1,0 +1,105 @@
+        <activity-alias android:name=".icon.cyber_nova" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_cyber_nova" android:label="@string/app_name" android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.neon_disco" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_neon_disco" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.villain_era" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_villain_era" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.slay_queen" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_slay_queen" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.pink_y2k" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_pink_y2k" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.velvet_stage" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_velvet_stage" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.pink_venom" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_pink_venom" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.cloud_nine" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_cloud_nine" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.solara" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_solara" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.chaos_born" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_chaos_born" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.survivor" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_survivor" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.rainbow_pop" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_rainbow_pop" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.pop_revolution" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_pop_revolution" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.african_confessions" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_african_confessions" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".icon.bad_angel" android:targetActivity=".MainActivity" android:exported="true"
+            android:icon="@mipmap/ic_launcher_bad_angel" android:label="@string/app_name" android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>

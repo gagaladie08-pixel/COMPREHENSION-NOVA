@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Petite icône de notification : N blanc (le système applique la teinte) -->
+    <group android:scaleX="1.6" android:scaleY="1.6" android:pivotX="54" android:pivotY="54">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z" />
+    </group>
+</vector>

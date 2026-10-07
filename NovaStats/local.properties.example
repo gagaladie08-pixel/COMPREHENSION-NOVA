@@ -1,0 +1,12 @@
+# Copie ce fichier en local.properties et remplis TES propres clés.
+# local.properties est ignoré par Git : ne jamais committer de vraies clés.
+sdk.dir=/chemin/vers/Android/Sdk
+
+LASTFM_API_KEY=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+FANART_API_KEY=
+GOOGLE_API_KEY=
+GOOGLE_ENGINE_ID=
+DISCOGS_TOKEN=
+THEAUDIODB_API_KEY=

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Premier plan unique — Solara -->
+    <path android:pathData="M28,60 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="54" android:startY="34" android:endX="54" android:endY="86"><item android:offset="0" android:color="#FFA500" /><item android:offset="1" android:color="#FF6B35" /></gradient></aapt:attr></path>
+    <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z" android:fillColor="#1A0A00" />
+    <path android:pathData="M32.0,80.0 L33.8,80.8 L35.7,81.4 L37.5,81.6 L39.3,81.4 L41.2,80.8 L43.0,80.0 L44.8,79.2 L46.7,78.6 L48.5,78.4 L50.3,78.6 L52.2,79.2 L54.0,80.0 L55.8,80.8 L57.7,81.4 L59.5,81.6 L61.3,81.4 L63.2,80.8 L65.0,80.0 L66.8,79.2 L68.7,78.6 L70.5,78.4 L72.3,78.6 L74.2,79.2 L76.0,80.0" android:fillColor="#00000000" android:strokeColor="#FFD700" android:strokeWidth="2" android:strokeAlpha="0.9" android:strokeLineCap="round" />
+    <path android:pathData="M38.0,85.0 L39.3,85.6 L40.7,86.1 L42.0,86.5 L43.3,86.6 L44.7,86.5 L46.0,86.1 L47.3,85.6 L48.7,85.0 L50.0,84.4 L51.3,83.9 L52.7,83.5 L54.0,83.4 L55.3,83.5 L56.7,83.9 L58.0,84.4 L59.3,85.0 L60.7,85.6 L62.0,86.1 L63.3,86.5 L64.7,86.6 L66.0,86.5 L67.3,86.1 L68.7,85.6 L70.0,85.0" android:fillColor="#00000000" android:strokeColor="#FFD700" android:strokeWidth="1.6" android:strokeAlpha="0.6" android:strokeLineCap="round" />
+</vector>

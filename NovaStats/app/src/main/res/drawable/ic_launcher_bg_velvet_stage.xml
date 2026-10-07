@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Fond unique — Velvet Stage -->
+    <path android:pathData="M0,0 H108 V108 H0 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108"><item android:offset="0" android:color="#1A0010" /><item android:offset="1" android:color="#0C0008" /></gradient></aapt:attr></path>
+    <path android:pathData="M54,0 L14,108 H94 Z" android:fillAlpha="0.22"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108"><item android:offset="0" android:color="#722F37" /><item android:offset="1" android:color="#00000000" /></gradient></aapt:attr></path>
+    <path android:pathData="M0,0 H26 C18,30 22,70 12,108 H0 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="54" android:endX="26" android:endY="54"><item android:offset="0" android:color="#8B0000" /><item android:offset="1" android:color="#0C0008" /></gradient></aapt:attr></path>
+    <path android:pathData="M108,0 H82 C90,30 86,70 96,108 H108 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="108" android:startY="54" android:endX="82" android:endY="54"><item android:offset="0" android:color="#8B0000" /><item android:offset="1" android:color="#0C0008" /></gradient></aapt:attr></path>
+</vector>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Icône du splash screen (Android 12+) : N + onde, groupes nommés pour l'animated-vector -->
+    <group android:name="n" android:pivotX="54" android:pivotY="54">
+        <path android:pathData="M31,76 V32 H40 L68,64 V32 H77 V76 H68 L40,44 V76 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="31" android:startY="32" android:endX="77" android:endY="76">
+                    <item android:offset="0" android:color="#FF006E" />
+                    <item android:offset="0.5" android:color="#00B4FF" />
+                    <item android:offset="1" android:color="#BD00FF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+    <group android:name="wave" android:pivotX="54" android:pivotY="54">
+        <group android:name="bar0" android:pivotX="30" android:pivotY="54">
+            <path android:pathData="M30,51 V57" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+        <group android:name="bar1" android:pivotX="38" android:pivotY="54">
+            <path android:pathData="M38,47 V61" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+        <group android:name="bar2" android:pivotX="46" android:pivotY="54">
+            <path android:pathData="M46,42 V66" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+        <group android:name="bar3" android:pivotX="54" android:pivotY="54">
+            <path android:pathData="M54,38 V70" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+        <group android:name="bar4" android:pivotX="62" android:pivotY="54">
+            <path android:pathData="M62,42 V66" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+        <group android:name="bar5" android:pivotX="70" android:pivotY="54">
+            <path android:pathData="M70,47 V61" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+        <group android:name="bar6" android:pivotX="78" android:pivotY="54">
+            <path android:pathData="M78,51 V57" android:strokeColor="#00FFF0" android:strokeWidth="4" android:strokeLineCap="round" android:strokeAlpha="0.7" />
+        </group>
+    </group>
+</vector>

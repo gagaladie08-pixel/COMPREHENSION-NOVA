@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:drawable="@drawable/ic_splash_vector">
+    <!-- 1. Le N apparaît de l'intérieur vers l'extérieur : scale 0 → 1 avec overshoot -->
+    <target android:name="n">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="1" android:duration="550" android:interpolator="@android:anim/overshoot_interpolator" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1" android:duration="550" android:interpolator="@android:anim/overshoot_interpolator" />
+            </set>
+        </aapt:attr>
+    </target>
+    <!-- 2. L'onde sonore pulse une fois (après l'apparition du N) -->
+    <target android:name="wave">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="0" android:duration="350" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1.35" android:duration="300" android:interpolator="@android:anim/decelerate_interpolator" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="1.35" android:valueTo="1" android:duration="250" android:interpolator="@android:anim/accelerate_decelerate_interpolator" />
+            </set>
+        </aapt:attr>
+    </target>
+</animated-vector>

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">NovaStats</string>
+    <string name="service_label">NovaStats — Détection musicale</string>
+</resources>

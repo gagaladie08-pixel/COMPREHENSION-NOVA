@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Généré par design/icon/generate_icons.py — ne pas éditer à la main -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Fond unique — Pink Venom -->
+    <path android:pathData="M0,0 H108 V108 H0 Z"><aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108"><item android:offset="0" android:color="#000000" /><item android:offset="1" android:color="#0D0008" /></gradient></aapt:attr></path>
+    <path android:pathData="M-60,108 L0,0 h8 L-52,108 Z M-36,108 L24,0 h8 L-28,108 Z M-12,108 L48,0 h8 L-4,108 Z M12,108 L72,0 h8 L20,108 Z M36,108 L96,0 h8 L44,108 Z M60,108 L120,0 h8 L68,108 Z M84,108 L144,0 h8 L92,108 Z" android:fillColor="#FF0080" android:fillAlpha="0.12" />
+</vector>
