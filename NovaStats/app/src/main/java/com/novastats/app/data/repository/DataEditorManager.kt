@@ -533,9 +533,9 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
                 fix.rawArtist?.takeIf { it.isNotBlank() && it.trim() != artists }?.let { correctionEntries += "ARTIST" to it }
                 fix.rawAlbum?.takeIf { it.isNotBlank() && it.trim() != album.orEmpty() }?.let { correctionEntries += "ALBUM" to it }
             }
-            val correctionKeys = correctionEntries + album?.let {
+            val correctionKeys = correctionEntries + listOfNotNull(album?.let {
                 LibraryRepository.CORRECTION_ALBUM_SHARED to TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(it))
-            }.orEmpty()
+            })
             val correctionStates = snapshotCorrections(correctionKeys)
             val target = lib.resolve(title, artists, album, old.durationMs, old.genre, applyCorrections = false)
             val mode = if (target.trackId == old.trackId) "INPLACE" else "MOVE"
