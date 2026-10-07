@@ -1,7 +1,12 @@
 package com.novastats.app.ui.screens
 
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -41,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.first
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.dao.RankedAlbum
+import com.novastats.app.data.db.entity.DailyStatsEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
@@ -93,14 +99,27 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     DetailPopupHost(detail) { detail = null }
 
-    // 🎨 Fond artistique : photo de ton artiste du moment (7 derniers jours), sinon pochette de ton titre du jour
+    // 🎨 Fond artistique + en-tête : photo ET nom de ton artiste du moment (7 derniers jours),
+    // sinon pochette de ton titre du jour. Une seule requête pour les deux usages.
     val week = remember { Dates.statsRangeFor(Period.WEEKLY) }
-    val artUrl by produceState<String?>(initialValue = null) {
+    val weekHero by produceState<Pair<String?, String?>>(initialValue = null to null) {
         value = runCatching {
             val a = db.artistDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()
-            a?.artist?.photoUrl ?: db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()?.track?.coverUrl
-        }.getOrNull()
+            if (a != null) {
+                val url = a.artist.photoUrl
+                    ?: db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()?.track?.coverUrl
+                url to a.artist.name
+            } else {
+                db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()?.track?.coverUrl to null
+            }
+        }.getOrDefault(null to null)
     }
+    val artUrl = weekHero.first
+    val weekArtistName = weekHero.second
+
+    // 📈 Sparkline 7 jours + insight vs hier
+    val weekStats by db.dailyStatsDao().since(today.minusDays(6).format(Dates.ISO)).collectAsStateWithLifecycle(initialValue = emptyList())
+    val yesterdayStats by db.dailyStatsDao().forDate(today.minusDays(1).format(Dates.ISO)).collectAsStateWithLifecycle(initialValue = null)
 
     var rewindKey by remember { mutableStateOf<String?>(null) }
     if (rewindKey != null) {
@@ -118,7 +137,27 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 1f, scrim = 0.70f)
         RewindParticles(theme, Modifier.fillMaxSize())
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        /* ---------- 0. Nova Rewind ---------- */
+        /* ---------- 0. En-tête personnalisé ---------- */
+        item {
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val greet = when (hour) {
+                in 5..11 -> "Bonjour"
+                in 12..17 -> "Bon après-midi"
+                in 18..22 -> "Bonsoir"
+                else -> "Bonne nuit"
+            }
+            val dateLabel = today.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRANCE))
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text("$greet ✨", style = MaterialTheme.typography.headlineMedium, color = theme.text, fontWeight = FontWeight.Black)
+                Text(dateLabel.replaceFirstChar { it.uppercase() }, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                weekArtistName?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text("🎤 Artiste du moment : $it", color = theme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        /* ---------- 0b. Nova Rewind ---------- */
         item { RewindEntryCard { rewindKey = it } }
 
         /* ---------- 1. En cours de lecture ---------- */
@@ -153,6 +192,10 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                                 Text("Rien en lecture", color = theme.textSecondary)
                                 Text("Le service capte automatiquement ta musique", style = MaterialTheme.typography.bodySmall, color = theme.textSecondary)
                             }
+                        }
+                        if (active) {
+                            Spacer(Modifier.width(8.dp))
+                            EqualizerBars(theme.accent)
                         }
                     }
                     if (active && np != null) {
@@ -202,6 +245,31 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                     StripCell("${todayStats?.distinctAlbums ?: 0}", "Albums")
                 )
             )
+            // 📈 L'activité de la semaine, d'un coup d'œil — et où en est aujourd'hui par rapport à hier
+            val tPlays = todayStats?.playCount ?: 0
+            val yPlays = yesterdayStats?.playCount ?: 0
+            // Comparaison factuelle : hier est une journée complète, aujourd'hui est en cours —
+            // on ne compare donc pas « à la même heure », on mesure l'écart au total d'hier.
+            val insight = when {
+                tPlays > 0 && yPlays > 0 -> {
+                    val delta = tPlays - yPlays
+                    if (delta >= 0) "déjà devant hier : ${formatCount(tPlays)} écoutes contre ${formatCount(yPlays)} 🔥"
+                    else "${formatCount(tPlays)} écoute${if (tPlays > 1) "s" else ""} aujourd'hui — encore ${-delta} pour égaler hier"
+                }
+                tPlays > 0 -> "${formatCount(tPlays)} écoute${if (tPlays > 1) "s" else ""} — la journée est lancée 🔥"
+                yPlays > 0 -> "rien aujourd'hui, contre ${formatCount(yPlays)} hier — à toi de jouer 🎧"
+                else -> "le compteur attend ta première écoute de la journée"
+            }
+            Spacer(Modifier.height(8.dp))
+            NovaCard {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Tes 7 derniers jours", color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(insight, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(12.dp))
+                    WeekSparkline(weekStats, todayIso, theme)
+                }
+            }
         }
 
         /* ---------- 3. Top du moment ---------- */
@@ -452,6 +520,61 @@ private fun hofEntryLabel(type: String) = when (type) {
     "TRIPLE_DEBUT" -> "Triple début"
     "LEGENDARY_RUN" -> "Run légendaire"
     else -> type
+}
+
+/** 📊 Sept barres, une par jour (les journées sans écoute n'existent pas en base : on les complète à 0). */
+@Composable
+private fun WeekSparkline(stats: List<DailyStatsEntity>, todayIso: String, theme: NovaColors) {
+    val byDate = stats.associateBy { it.date }
+    val dayFmt = java.time.format.DateTimeFormatter.ofPattern("EEE", Locale.FRANCE)
+    val days = (0L..6L).map { off ->
+        val iso = Dates.today().minusDays(6 - off).format(Dates.ISO)
+        iso to (byDate[iso]?.playCount ?: 0)
+    }
+    val max = days.maxOf { it.second }.coerceAtLeast(1)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+        days.forEach { (iso, plays) ->
+            val frac = plays.toFloat() / max
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.fillMaxWidth()
+                        .height((6 + (frac * 44).toInt()).dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (iso == todayIso) theme.primary else theme.primary.copy(alpha = 0.25f + 0.45f * frac))
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    runCatching { Dates.parse(iso).format(dayFmt).take(2) }.getOrDefault(""),
+                    color = if (iso == todayIso) theme.primary else theme.textSecondary,
+                    style = MaterialTheme.typography.labelSmall, fontWeight = if (iso == todayIso) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
+/** 🎚️ Trois barres qui pulsent pendant la lecture — le signe visuel que l'app « entend » ta musique. */
+@Composable
+private fun EqualizerBars(color: Color) {
+    Row(
+        Modifier.height(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom
+    ) {
+        for (i in 0 until 3) {
+            val transition = rememberInfiniteTransition(label = "eq$i")
+            val f by transition.animateFloat(
+                initialValue = 0.25f, targetValue = 1f,
+                animationSpec = infiniteRepeatable(tween(420 + i * 160, easing = LinearEasing), RepeatMode.Reverse),
+                label = "eqh$i"
+            )
+            Box(
+                Modifier.width(3.dp)
+                    .height((4 + f * 12).dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(color)
+            )
+        }
+    }
 }
 
 /** Nom lisible de l'application source (package → nom). */

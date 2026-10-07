@@ -356,6 +356,10 @@ interface DailyStatsDao {
     @Query("SELECT * FROM daily_stats ORDER BY play_count DESC, total_duration_ms DESC LIMIT 1")
     fun bestDay(): Flow<DailyStatsEntity?>
 
+    /** Les journées depuis :fromIso inclus, en ordre chronologique (sparkline d'activité de l'Accueil). */
+    @Query("SELECT * FROM daily_stats WHERE date >= :fromIso ORDER BY date ASC")
+    fun since(fromIso: String): Flow<List<DailyStatsEntity>>
+
     @Query("DELETE FROM daily_stats")
     suspend fun clear()
 
