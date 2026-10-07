@@ -66,6 +66,11 @@ class NovaStatsApp : Application() {
         // ✨ 16ᵉ thème : celui créé par l'utilisateur (null s'il n'en a pas encore)
         com.novastats.app.ui.theme.NovaThemes.customTheme = com.novastats.app.ui.theme.CustomThemeStore.load(this)?.toTheme()
         com.novastats.app.service.DetectionState.bind(this)
+        // 🩹 Un recalcul tué en route laissait les classements vides jusqu'à la prochaine écoute.
+        // Après bind() : le journal persisté est alors déjà rechargé en mémoire.
+        appScope.launch(Dispatchers.IO) {
+            runCatching { com.novastats.app.util.StartupRepair.run(this@NovaStatsApp) }
+        }
         com.novastats.app.service.Watchdog.schedule(this)
         com.novastats.app.ui.theme.IconSwitcher.install(this)
         appScope.launch { runCatching { com.novastats.app.data.repository.RelinkJob.ensure(this@NovaStatsApp) } }

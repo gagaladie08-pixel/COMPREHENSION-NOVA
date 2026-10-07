@@ -27,6 +27,13 @@ jobs:
       - name: Récupérer le code
         uses: actions/checkout@v4
 
+      # Un index créé par une migration mais absent de l'entité fait planter l'app À L'OUVERTURE
+      # (« Migration didn't properly handle: … ») et la compilation ne le voit pas : Room ne
+      # valide à la compilation que le SQL des @Query et le schéma cible. C'est ce qu'a produit
+      # la 0.22.16. Vérification en quelques secondes, avant même d'installer le JDK.
+      - name: Cohérence migrations / entités (index)
+        run: python3 NovaStats/tools/check_schema.py
+
       - name: JDK 17
         uses: actions/setup-java@v4
         with:
