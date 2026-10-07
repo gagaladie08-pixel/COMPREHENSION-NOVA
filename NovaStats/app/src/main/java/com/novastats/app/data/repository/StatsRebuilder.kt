@@ -108,10 +108,15 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         onProgress("Versions, agrégats titres et écoutes quotidiennes…")
         // Le repli d'une version déplace les scrobbles du root et supprime parfois le dernier titre visible.
         // Publier les compteurs + daily_plays dans la même transaction évite que les listes paraissent vides.
+        val stepOneStartedAt = System.currentTimeMillis()
         db.withTransaction {
             collapseEmptyRootsInTransaction()
             recomputeEntityAggregatesInTransaction()
             recomputeDailyAggregatesInTransaction()
+        }
+        if (auditContext != null) {
+            val elapsed = System.currentTimeMillis() - stepOneStartedAt
+            RebuildAudit.write(auditContext, "⏱️ Étape 1 terminée en ${elapsed} ms")
         }
         // Règle 13 : un duo arrivé avant les titres solo a créé un album homonyme chez le partenaire → fusion continue.
         // Les play_count sont déjà à jour pour choisir le bon album à conserver.
