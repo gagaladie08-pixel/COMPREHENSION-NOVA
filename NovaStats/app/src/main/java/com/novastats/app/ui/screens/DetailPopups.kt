@@ -107,12 +107,6 @@ sealed interface DetailTarget {
 
 private val dateFmt = SimpleDateFormat("d MMM yyyy", Locale.FRANCE)
 private val ceremonyFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)
-
-/** Libellé court pour l'axe X des courbes (« 3 oct. »). */
-private val axisFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
-
-/** Date ISO (`yyyy-MM-dd`) de `daily_plays` → libellé d'axe ; null si illisible. */
-private fun axisDate(iso: String?): String? = iso?.let { runCatching { Dates.parse(it).format(axisFmt) }.getOrNull() }
 fun formatDate(ms: Long?): String = ms?.let { dateFmt.format(it) } ?: "—"
 private fun formatIso(iso: String?): String = iso?.let { runCatching { Dates.parse(it).format(ceremonyFmt) }.getOrNull() } ?: "—"
 
