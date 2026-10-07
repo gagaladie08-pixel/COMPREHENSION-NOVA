@@ -107,6 +107,12 @@ sealed interface DetailTarget {
 
 private val dateFmt = SimpleDateFormat("d MMM yyyy", Locale.FRANCE)
 private val ceremonyFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)
+
+/** Libellé court pour l'axe X des courbes (« 3 oct. »). */
+private val axisFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+
+/** Date ISO (`yyyy-MM-dd`) de `daily_plays` → libellé d'axe ; null si illisible. */
+private fun axisDate(iso: String?): String? = iso?.let { runCatching { Dates.parse(it).format(axisFmt) }.getOrNull() }
 fun formatDate(ms: Long?): String = ms?.let { dateFmt.format(it) } ?: "—"
 private fun formatIso(iso: String?): String = iso?.let { runCatching { Dates.parse(it).format(ceremonyFmt) }.getOrNull() } ?: "—"
 
@@ -734,7 +740,13 @@ private fun PantheonPopup(artistId: Long, onDismiss: () -> Unit) {
         if (det.history.isEmpty()) Text("Aucun statut atteint pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         det.history.forEach { h ->
             val st = PantheonStatus.fromDb(h.status)
-            PopupInfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶", valueColor = st?.let { pantheonColor(it) } ?: theme.text)
+            // Temps mis pour atteindre ce statut depuis la première écoute de l'artiste.
+            val took = formatElapsed(h.timeToReachMs, h.dateReached)
+            PopupInfoRow(
+                "${st?.emoji ?: "•"} ${st?.label ?: h.status}",
+                listOfNotNull(formatDate(h.dateReached), took, "${formatCount(h.playCountAtStatus)} ▶").joinToString(" · "),
+                valueColor = st?.let { pantheonColor(it) } ?: theme.text
+            )
         }
 
         val certTracks = det.certs.filter { it.entityType == EntityType.TRACK }.sortedByDescending { certRank(it) }
@@ -748,10 +760,16 @@ private fun PantheonPopup(artistId: Long, onDismiss: () -> Unit) {
 
         PopupSection("📈 Courbe d'écoutes (cumul)", color)
         val cumul = remember(det.series) { var acc = 0; det.series.map { acc += it.playCount; acc.toFloat() } }
-        val thresholds = PantheonStatus.entries.filter { it.playsThreshold <= (a.playCount * 1.6f) || it == (status?.let { s -> PantheonStatus.entries.getOrNull(s.ordinal + 1) } ?: PantheonStatus.STAR) }
-            .map { it.playsThreshold.toFloat() to pantheonColor(it) }
+        /* Deux lignes seulement : le statut atteint et le suivant. Les cinq seuils (425 / 1 500 / 5 000 /
+         * 12 000…) s'empilaient en bas du graphique et leurs libellés se recouvraient. */
+        val nextStatus = status?.let { s -> PantheonStatus.entries.getOrNull(s.ordinal + 1) }
+        val thresholds = listOfNotNull(
+            status?.let { it.playsThreshold.toFloat() to pantheonColor(it) },
+            nextStatus?.let { it.playsThreshold.toFloat() to pantheonColor(it) }
+        )
+        val axisDates = remember(det.series) { det.series.map { axisDate(it.date) } }
         if (cumul.isEmpty()) Text("Pas encore de données.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(130.dp), color = if (mythic) HoloColors[3] else color, thresholds = thresholds)
+        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(140.dp), color = if (mythic) HoloColors[3] else color, thresholds = thresholds, xLabels = axisDates)
 
         PopupSection("📊 Positions Stats", color)
         PositionsTable(det.statsRanks)
@@ -767,8 +785,16 @@ private fun certRank(c: ArtistCertRow): Int = (CertLevel.entries.firstOrNull { i
 @Composable
 private fun CertLine(c: ArtistCertRow) {
     val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
+    val theme = Nova.theme
+    // Temps mis par le titre / l'album pour atteindre ce palier (depuis sa première écoute).
+    val took = formatElapsed(c.timeToCertifyMs, c.certifiedAt.takeIf { it > 0 })
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(c.name ?: "—", color = Nova.theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(c.name ?: "—", color = theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            took?.let {
+                Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
         CertBadge(lvl, c.multiplier)
     }
 }
@@ -876,7 +902,8 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
             val maxPos = (det.positions.filterNotNull().maxOrNull() ?: 10).coerceAtLeast(5).toFloat()
             val peakIdx = s.peak?.let { pk -> det.anchors.indexOf(pk.date).takeIf { it >= 0 } }
             NovaCurveChart(det.positions.map { it?.toFloat() }, Modifier.fillMaxWidth().height(170.dp), color = color, invertY = true, minY = 1f, maxY = maxPos,
-                gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true)
+                gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true,
+                xLabels = det.anchors.map { axisDate(it.toString()) })
         }
 
         PopupSection("🎊 Historique complet de l'entrée", color)

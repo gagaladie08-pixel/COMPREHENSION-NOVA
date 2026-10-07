@@ -72,7 +72,11 @@ data class ArtistCertRow(
     @androidx.room.ColumnInfo(name = "entity_id") val entityId: Long,
     val level: String,
     val multiplier: Int,
-    val name: String?
+    val name: String?,
+    /** Date d'obtention du palier — affichée dans le pop-up Panthéon. */
+    @androidx.room.ColumnInfo(name = "certified_at") val certifiedAt: Long = 0,
+    /** Temps mis pour atteindre le palier depuis la première écoute (null si inconnu). */
+    @androidx.room.ColumnInfo(name = "time_to_certify_ms") val timeToCertifyMs: Long? = null
 )
 
 /** Ligne d'un record (Top 10) avec les infos d'affichage de l'entité. */
@@ -102,7 +106,7 @@ interface CertificationDao {
     @Query("SELECT level, COUNT(*) AS n FROM certifications WHERE entity_type = :type GROUP BY level") fun countsByLevel(type: String): Flow<List<LevelCount>>
     @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id IS NOT NULL")
     fun artistCertRows(): Flow<List<ArtistCertRow>>
-    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
     suspend fun certsOfArtist(artistId: Long): List<ArtistCertRow>
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM certification_history h ORDER BY h.certified_at DESC LIMIT :limit")

@@ -30,6 +30,9 @@ import java.util.Locale
 private val Gold = Color(0xFFFFD700)
 private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
 
+/** Libellé court pour l'axe X de la courbe (« 3 oct. ») — la forme longue débordait du graphique. */
+private val axisFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+
 /**
  * 4. 🏆 Popup Billboard (fiche historique, appui long sur une ligne) :
  * bordure / dégradé or fixe, bannière Titre/Artiste + Peak en grand, courbe (#1 en haut) + zone colorée + ⭐ au peak,
@@ -78,7 +81,8 @@ fun ChartHistoryDialog(h: EntityHistory, onDismiss: () -> Unit) {
         if (positions.isEmpty()) Text("Pas encore de parcours enregistré.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         else NovaCurveChart(
             positions, Modifier.fillMaxWidth().height(170.dp), color = Gold, invertY = true, minY = 1f, maxY = maxPos,
-            gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true
+            gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true,
+            xLabels = anchors.map { it.format(axisFmt) }
         )
         Spacer(Modifier.height(12.dp))
         // Badges

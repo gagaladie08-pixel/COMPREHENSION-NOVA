@@ -83,6 +83,37 @@ fun formatCount(n: Int): String = formatCount(n.toLong())
 fun formatCount(n: Long): String = String.format(Locale.FRANCE, "%,d", n).replace('\u00A0', ' ').replace('\u202F', ' ')
 
 /**
+ * « en 3 jours » — temps mis par un titre / album / artiste pour atteindre un palier de certification
+ * ou un statut du Panthéon (colonne `time_to_certify_ms` / `time_to_reach_ms`).
+ *
+ * [now] sert de repli quand la durée n'a pas été mémorisée (anciennes données) : on la recalcule
+ * depuis la date d'obtention. Renvoie `null` quand aucune des deux informations n'existe.
+ */
+fun formatElapsed(ms: Long?, certifiedAt: Long? = null, now: Long = System.currentTimeMillis()): String? {
+    val duration = ms ?: certifiedAt?.let { now - it } ?: return null
+    if (duration < 0) return null
+    val minutes = duration / 60_000L
+    return when {
+        minutes < 1 -> "en moins d'une minute"
+        minutes < 60 -> "en $minutes min"
+        minutes < 24 * 60 -> "en ${minutes / 60} h"
+        else -> {
+            val days = duration / 86_400_000L
+            when {
+                days < 14 -> "en $days jour${if (days > 1) "s" else ""}"
+                days < 60 -> "en ${days / 7} semaines"
+                days < 365 -> "en ${days / 30} mois"
+                else -> {
+                    val years = days / 365
+                    val rest = (days % 365) / 30
+                    if (rest > 0) "en $years an${if (years > 1) "s" else ""} et $rest mois" else "en $years an${if (years > 1) "s" else ""}"
+                }
+            }
+        }
+    }
+}
+
+/**
  * Affichage des positions (Stats) :
  * #1 🥇 · #2 🥈 · #3 🥉 · #4→#10 🔥 · #11→#300 nombre seul · non classé — · hors top 300 ▼ 300+
  */

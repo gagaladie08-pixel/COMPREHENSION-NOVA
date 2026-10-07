@@ -96,6 +96,12 @@ fun certColor(level: CertLevel?): Color = when (level) {
 
 private val longFmt = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)
 
+/** Libellé court pour l'axe X des courbes (« 3 oct. »). */
+private val axisFmt = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+
+/** Date ISO (`yyyy-MM-dd`) de `daily_plays` → libellé d'axe ; null si illisible. */
+internal fun axisDate(iso: String?): String? = iso?.let { runCatching { Dates.parse(it).format(axisFmt) }.getOrNull() }
+
 /** « depuis 3 jours / 2 semaines / 5 mois / 1 an ». */
 fun sinceLabel(ms: Long, now: Long = System.currentTimeMillis()): String {
     val days = ((now - ms) / 86_400_000L).coerceAtLeast(0)
@@ -359,20 +365,34 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
         det.history.forEach { h ->
             val lvl = CertLevel.entries.firstOrNull { it.dbName == h.level }
             val label = lvl?.let { Certification(it, h.multiplier).label() } ?: h.level
+            // Temps mis pour atteindre ce palier depuis la première écoute de l'élément.
+            val took = formatElapsed(h.timeToCertifyMs, h.certifiedAt)
             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(label, color = certColor(lvl), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                Text("le ${Dates.toLocalDate(h.certifiedAt).format(longFmt)} · ${sinceLabel(h.certifiedAt)}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    listOfNotNull("le ${Dates.toLocalDate(h.certifiedAt).format(longFmt)}", took, sinceLabel(h.certifiedAt))
+                        .joinToString(" · "),
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
             }
         }
 
         SectionLabel("📈 Courbe d'écoutes (cumul)")
         val cumul = remember(det.series) { var acc = 0; det.series.map { acc += it.playCount; acc.toFloat() } }
+        /* Deux lignes seulement : le palier le plus haut atteint et le prochain. Dessiner tous les paliers
+         * de l'historique les empilait en bas du graphique (25 / 100 / 500 face à un cumul de plusieurs
+         * milliers) et leurs libellés se recouvraient. Les autres paliers sont listés au-dessus. */
         val levelLines = remember(det.history, next) {
-            det.history.mapNotNull { h -> CertLevel.entries.firstOrNull { it.dbName == h.level }?.let { thresholds.required(Certification(it, h.multiplier)).toFloat() to certColor(it) } } +
+            // Le palier le plus haut atteint, avec son multiplicateur réel (un Diamant 3× n'est pas au seuil du Diamant 1×).
+            val reached = det.history
+                .mapNotNull { h -> CertLevel.entries.firstOrNull { it.dbName == h.level }?.let { h to it } }
+                .maxByOrNull { (_, lvl) -> lvl.ordinal * 100 + it.first.multiplier }
+            listOfNotNull(reached?.let { (h, lvl) -> thresholds.required(Certification(lvl, h.multiplier)).toFloat() to certColor(lvl) }) +
                 (need.toFloat() to certColor(next.level))
         }
+        val axisDates = remember(det.series) { det.series.map { axisDate(it.date) } }
         if (cumul.isEmpty()) Text("Pas encore de données.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(130.dp), color = color, thresholds = levelLines)
+        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(140.dp), color = color, thresholds = levelLines, xLabels = axisDates)
 
         SectionLabel("📊 Positions Stats")
         RanksRow(det.statsRanks)
