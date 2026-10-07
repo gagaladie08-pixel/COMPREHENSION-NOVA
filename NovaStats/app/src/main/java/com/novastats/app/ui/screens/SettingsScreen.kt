@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.BuildConfig
@@ -730,6 +731,33 @@ private fun DataPage() {
                     onClick = { BackupWorker.runNow(context); status = "💾 Sauvegarde lancée en arrière-plan" },
                     enabled = scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
                 ) { Text("💾 Sauvegarder maintenant") }
+                Spacer(Modifier.height(8.dp))
+                /* Les sauvegardes vivent dans Android/data/<pkg>/files/backups : ce dossier est supprimé
+                 * à la désinstallation. Sans export, une réinstallation perd donc tout l'historique —
+                 * d'où ce bouton, seul moyen de mettre les données à l'abri hors de l'appareil. */
+                OutlinedButton(
+                    onClick = {
+                        val file = files.firstOrNull()
+                        if (file == null) {
+                            status = "⚠️ Aucune sauvegarde à partager — lance d'abord « Sauvegarder maintenant »"
+                        } else runCatching {
+                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                putExtra(Intent.EXTRA_SUBJECT, file.name)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(send, "Exporter la sauvegarde").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            status = "📤 Sauvegarde « ${file.name} » prête à envoyer"
+                        }.onFailure { status = "⚠️ Export impossible : ${it.message ?: it.javaClass.simpleName}" }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("📤 Partager la dernière sauvegarde") }
+                Text(
+                    "Le dossier des sauvegardes est effacé à la désinstallation : exporte-les pour les conserver.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
             }
         }
 

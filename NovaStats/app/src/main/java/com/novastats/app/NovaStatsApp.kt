@@ -70,6 +70,8 @@ class NovaStatsApp : Application() {
         // Après bind() : le journal persisté est alors déjà rechargé en mémoire.
         appScope.launch(Dispatchers.IO) {
             runCatching { com.novastats.app.util.StartupRepair.run(this@NovaStatsApp) }
+            // 🐢 Une fois la réparation tentée : on alerte si le dernier recalcul était anormalement lent.
+            runCatching { com.novastats.app.util.StartupHealthAlert.run(this@NovaStatsApp) }
         }
         com.novastats.app.service.Watchdog.schedule(this)
         com.novastats.app.ui.theme.IconSwitcher.install(this)
