@@ -48,7 +48,9 @@ jobs:
       - name: Compiler l'APK debug
         id: build-apk
         if: always()
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --no-daemon --stacktrace 2>&1 | tee build-apk.log
         env:
           # Facultatif : si ces secrets existent, ils remplacent api_keys.properties
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
@@ -89,6 +91,18 @@ jobs:
             unit-test.log
             NovaStats/app/build/reports/
           retention-days: 7
+
+      # Les logs bruts ne sont pas téléchargeables hors de GitHub : remonter les erreurs de compilation
+      # et de test en annotations, lisibles via l'API check-runs.
+      - name: Publier les erreurs en annotations
+        if: always() && (steps.tests.outcome == 'failure' || steps.build-apk.outcome == 'failure')
+        run: |
+          {
+            grep -hE "^e: |: error: |error: |FAILED|Execution failed for task|Tests? .* FAILED" \
+              "$GITHUB_WORKSPACE/unit-test.log" build-apk.log 2>/dev/null || true
+          } | sort -u | head -60 | while IFS= read -r line; do
+            [ -n "$line" ] && echo "::error title=Build::${line}"
+          done
 
       # Publication dans "Releases" : lien direct téléchargeable depuis un téléphone, sans connexion GitHub.
       - name: Publier dans GitHub Releases
