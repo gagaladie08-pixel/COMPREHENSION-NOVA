@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -82,9 +83,10 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     val nowPlaying by db.nowPlayingDao().observe().collectAsStateWithLifecycle(initialValue = null)
     val thresholdSec by app.settings.thresholdSec.collectAsStateWithLifecycle(initialValue = ScrobbleRules.DEFAULT_THRESHOLD_SEC)
     val todayStats by db.dailyStatsDao().forDate(todayIso).collectAsStateWithLifecycle(initialValue = null)
-    val topTrack by db.trackDao().topForPeriod(todayIso, todayIso, 1).collectAsStateWithLifecycle(initialValue = emptyList())
-    val topArtist by db.artistDao().topForPeriod(todayIso, todayIso, 1).collectAsStateWithLifecycle(initialValue = emptyList())
-    val topAlbum by db.albumDao().topForPeriod(todayIso, todayIso, 1).collectAsStateWithLifecycle(initialValue = emptyList())
+    // Top 5 par catégorie : le #1 seul était trop pauvre pour un écran qui se veut premium.
+    val topTrack by db.trackDao().topForPeriod(todayIso, todayIso, 5).collectAsStateWithLifecycle(initialValue = emptyList())
+    val topArtist by db.artistDao().topForPeriod(todayIso, todayIso, 5).collectAsStateWithLifecycle(initialValue = emptyList())
+    val topAlbum by db.albumDao().topForPeriod(todayIso, todayIso, 5).collectAsStateWithLifecycle(initialValue = emptyList())
     val certNews by db.certificationDao().latestHistory(10).collectAsStateWithLifecycle(initialValue = emptyList())
     val pantheonNews by db.pantheonDao().latestHistory(10).collectAsStateWithLifecycle(initialValue = emptyList())
     val hofNews by db.hallOfFameDao().latest(10).collectAsStateWithLifecycle(initialValue = emptyList())
@@ -122,12 +124,6 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     val weekStats by db.dailyStatsDao().since(today.minusDays(6).format(Dates.ISO)).collectAsStateWithLifecycle(initialValue = emptyList())
     val yesterdayStats by db.dailyStatsDao().forDate(today.minusDays(1).format(Dates.ISO)).collectAsStateWithLifecycle(initialValue = null)
 
-    var rewindKey by remember { mutableStateOf<String?>(null) }
-    if (rewindKey != null) {
-        RewindScreen(rewindKey) { rewindKey = null }
-        return
-    }
-
     if (totalScrobbles == 0 && nowPlaying?.rawTitle == null) {
         FirstContactHome()
         return
@@ -158,8 +154,8 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             }
         }
 
-        /* ---------- 0b. Nova Rewind ---------- */
-        item { RewindEntryCard { rewindKey = it } }
+        /* Le Rewind n'est plus ici : il vit dans l'onglet Ton année (décision utilisateur).
+           L'Accueil se concentre sur aujourd'hui. */
 
         /* ---------- 1. En cours de lecture ---------- */
         item {
@@ -273,21 +269,32 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             }
         }
 
-        /* ---------- 3. Top du moment ---------- */
+        /* ---------- 3. Top du moment : titres, artistes, albums — top 5 ---------- */
         item {
             SectionTitle("Top du moment")
             NovaCard {
                 Column(Modifier.padding(vertical = 8.dp)) {
-                    topTrack.firstOrNull()?.let {
-                        RankRow(1, it.track.title, "Titre #1 du jour · ${it.artistName}", it.periodPlays, it.periodDurationMs, it.track.coverUrl, onClick = { detail = DetailTarget.Track(it.track.trackId) })
+                    if (topTrack.isEmpty() && topArtist.isEmpty() && topAlbum.isEmpty()) {
+                        Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
                     }
-                    topArtist.firstOrNull()?.let {
-                        RankRow(1, it.artist.name, "Artiste #1 du jour", it.periodPlays, it.periodDurationMs, it.artist.photoUrl, circle = true, onClick = { detail = DetailTarget.Artist(it.artist.artistId) })
+                    if (topTrack.isNotEmpty()) {
+                        Text("🎵 Titres", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                        topTrack.forEachIndexed { i, it ->
+                            RankRow(i + 1, it.track.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.track.coverUrl, onClick = { detail = DetailTarget.Track(it.track.trackId) })
+                        }
                     }
-                    topAlbum.firstOrNull()?.let {
-                        RankRow(1, it.album.title, "Album #1 du jour · ${it.artistName}", it.periodPlays, it.periodDurationMs, it.album.coverUrl, onClick = { detail = DetailTarget.Album(it.album.albumId) })
+                    if (topArtist.isNotEmpty()) {
+                        Text("🎤 Artistes", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                        topArtist.forEachIndexed { i, it ->
+                            RankRow(i + 1, it.artist.name, "Artiste du jour", it.periodPlays, it.periodDurationMs, it.artist.photoUrl, circle = true, onClick = { detail = DetailTarget.Artist(it.artist.artistId) })
+                        }
                     }
-                    if (topTrack.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
+                    if (topAlbum.isNotEmpty()) {
+                        Text("💿 Albums", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                        topAlbum.forEachIndexed { i, it ->
+                            RankRow(i + 1, it.album.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.album.coverUrl, onClick = { detail = DetailTarget.Album(it.album.albumId) })
+                        }
+                    }
                 }
             }
         }
@@ -523,7 +530,11 @@ private fun hofEntryLabel(type: String) = when (type) {
     else -> type
 }
 
-/** 📊 Sept barres, une par jour (les journées sans écoute n'existent pas en base : on les complète à 0). */
+/**
+ * 📊 Sept barres, une par jour (les journées sans écoute n'existent pas en base : on les complète à 0).
+ * Un appui sur un jour affiche son nombre d'écoutes au-dessus de sa barre (aujourd'hui par défaut) ;
+ * la colonne active est cerclée d'un fond léger pour montrer qu'elle est sélectionnée.
+ */
 @Composable
 private fun WeekSparkline(stats: List<DailyStatsEntity>, todayIso: String, theme: NovaTheme) {
     val byDate = stats.associateBy { it.date }
@@ -533,10 +544,23 @@ private fun WeekSparkline(stats: List<DailyStatsEntity>, todayIso: String, theme
         iso to (byDate[iso]?.playCount ?: 0)
     }
     val max = days.maxOf { it.second }.coerceAtLeast(1)
+    var selected by remember { mutableIntStateOf(6) }  // aujourd'hui, pour que le chiffre soit là tout de suite
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
-        days.forEach { (iso, plays) ->
+        days.forEachIndexed { idx, (iso, plays) ->
             val frac = plays.toFloat() / max
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            val on = idx == selected
+            Column(
+                Modifier.weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (on) theme.primary.copy(alpha = 0.10f) else Color.Transparent)
+                    .clickable { selected = idx }
+                    .padding(vertical = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Emplacement réservé : le compteur apparaît sans faire sauter la mise en page.
+                Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.BottomCenter) {
+                    if (on) Text(formatCount(plays), color = theme.text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
                 Box(
                     Modifier.fillMaxWidth()
                         .height((6 + (frac * 44).toInt()).dp)
@@ -546,8 +570,8 @@ private fun WeekSparkline(stats: List<DailyStatsEntity>, todayIso: String, theme
                 Spacer(Modifier.height(4.dp))
                 Text(
                     runCatching { Dates.parse(iso).format(dayFmt).take(2) }.getOrDefault(""),
-                    color = if (iso == todayIso) theme.primary else theme.textSecondary,
-                    style = MaterialTheme.typography.labelSmall, fontWeight = if (iso == todayIso) FontWeight.Bold else FontWeight.Normal
+                    color = if (on) theme.primary else if (iso == todayIso) theme.primary else theme.textSecondary,
+                    style = MaterialTheme.typography.labelSmall, fontWeight = if (on || iso == todayIso) FontWeight.Bold else FontWeight.Normal
                 )
             }
         }

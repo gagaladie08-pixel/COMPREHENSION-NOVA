@@ -91,77 +91,57 @@ private data class Winner(val name: String, val subtitle: String?, val imageUrl:
  */
 @Composable
 fun AwardsScreen() {
-    var segment by rememberSaveable { mutableIntStateOf(0) }
-    var rewindKey by remember { mutableStateOf<String?>(null) }
+    var inCeremony by rememberSaveable { mutableStateOf(false) }
+    var rewindOpen by remember { mutableStateOf(false) }
     var yearEndOpen by remember { mutableStateOf(false) }
 
-    // Pleins écrans prioritaires, comme sur l'Accueil : ils recouvrent tout, retour = l'onglet.
-    if (rewindKey != null) { RewindScreen(rewindKey) { rewindKey = null }; return }
+    // Pleins écrans prioritaires : ils recouvrent tout, retour = l'onglet.
+    // RewindScreen(null) affiche lui-même le sélecteur de périodes disponibles.
+    if (rewindOpen) { RewindScreen { rewindOpen = false }; return }
     if (yearEndOpen) { BackHandler { yearEndOpen = false }; YearEndScreen { yearEndOpen = false }; return }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    if (inCeremony) {
+        BackHandler { inCeremony = false }
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                "‹ Ton année", color = Nova.theme.primary, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { inCeremony = false }.padding(horizontal = 16.dp, vertical = 10.dp)
+            )
+            Box(Modifier.weight(1f)) { AwardsCeremony() }
+        }
+        return
+    }
+
+    // Trois grandes cartes qui remplissent l'écran : l'onglet est un portail, pas une liste.
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        YearBigCard("🏆", "Nova Awards", "La cérémonie de tes 9 récompenses annuelles — année en cours LIVE, années passées FINAL.", Nova.theme.primary) { inCeremony = true }
+        YearBigCard("🎬", "Nova Rewind", "Tes périodes en images : écoutes, artistes, records — et une carte à partager.", Nova.theme.secondary) { rewindOpen = true }
+        YearBigCard("📊", "Year-End Charts", "Le bilan complet de chaque année civile : classements titres, artistes et albums.", Nova.theme.accent) { yearEndOpen = true }
+    }
+}
+
+/** Grande carte d'entrée d'une expérience annuelle : poids égal, l'écran est rempli. */
+@Composable
+private fun YearBigCard(emoji: String, title: String, subtitle: String, tint: Color, onClick: () -> Unit) {
+    val theme = Nova.theme
+    NovaCard(Modifier.fillMaxWidth().weight(1f)) {
+        Box(
+            Modifier.fillMaxSize().clickable { onClick() }
+                .background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.30f), tint.copy(alpha = 0.10f), Color.Transparent)))
+                .padding(20.dp)
         ) {
-            listOf("🏆 Awards", "🎬 Rewind", "📊 Year-End").forEachIndexed { i, label ->
-                NovaFilterChip(
-                    flagKey = "tonannee$i", selected = segment == i, onClick = { segment = i },
-                    label = { Text(label, fontWeight = FontWeight.SemiBold) }
-                )
+            Column(Modifier.fillMaxSize()) {
+                Text(emoji, fontSize = 38.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(title, color = theme.text, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(4.dp))
+                Text(subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.weight(1f))
+                Text("Ouvrir →", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
             }
-        }
-        Box(Modifier.weight(1f)) {
-            when (segment) {
-                0 -> AwardsCeremony()
-                1 -> RewindSegment { rewindKey = it }
-                else -> YearEndSegment { yearEndOpen = true }
-            }
-        }
-    }
-}
-
-/** Segment 🎬 : le Rewind — une période en images, et sa carte à partager. */
-@Composable
-private fun RewindSegment(onOpen: (String) -> Unit) {
-    val theme = Nova.theme
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-        item {
-            Text("🎬 Nova Rewind", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)
-            Text("Une période en images : écoutes, artistes, records, récompenses — et une carte à partager.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(12.dp))
-            RewindEntryCard(onOpen)
-            Spacer(Modifier.height(10.dp))
-            Text("Un Rewind apparaît dès qu'une période a assez d'écoutes pour raconter quelque chose.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-}
-
-/** Segment 📊 : le bilan complet de chaque année civile (venu du Billboard). */
-@Composable
-private fun YearEndSegment(onOpen: () -> Unit) {
-    val theme = Nova.theme
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-        item {
-            Text("📊 Year-End Charts", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)
-            Text("Le bilan complet de chaque année civile : classements titres, artistes et albums.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(12.dp))
-            NovaCard {
-                Row(
-                    Modifier.fillMaxWidth().clickable { onOpen() }.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🏆", fontSize = 20.sp)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Ouvrir les Year-End Charts", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text("Choisis une année, retrouve ses n°1", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text("›", color = theme.primary, fontSize = 22.sp)
-                }
-            }
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
