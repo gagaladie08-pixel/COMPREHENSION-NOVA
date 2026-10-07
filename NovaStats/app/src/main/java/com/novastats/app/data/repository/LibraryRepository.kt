@@ -6,8 +6,14 @@ import com.novastats.app.data.db.entity.ArtistEntity
 import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackArtistEntity
 import com.novastats.app.data.db.entity.TrackEntity
+import com.novastats.app.data.db.entity.UserCorrectionEntity
 import com.novastats.app.domain.AlbumOwnership
 import com.novastats.app.domain.TitleNormalizer
+import com.novastats.app.util.runCatchingCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Résolution "métadonnées brutes → entités en base" (artiste / album / titre).
@@ -24,23 +30,27 @@ class LibraryRepository(private val db: NovaDatabase) {
     data class Resolved(val trackId: Long, val primaryArtistId: Long, val albumId: Long?, val artistIds: List<Long>)
 
     // Caches mémoire (clé normalisée) — évitent des milliers de requêtes lors d'un import.
-    private val artistCache = HashMap<String, Long>()
-    private val albumCache = HashMap<String, Long>()
+    // resolve() est sérialisé ; les caches restent concurrents car clearCaches()/peekTrackId() sont non suspendus.
+    private val resolutionMutex = Mutex()
+    private val cacheGeneration = AtomicLong(0L)
+    private val artistCache = ConcurrentHashMap<String, Long>()
+    private val albumCache = ConcurrentHashMap<String, Long>()
     /** Albums partagés résolus dans cette session : un titre déjà connu y est déplacé (règle 12). */
-    private val sharedAlbumIds = HashSet<Long>()
-    private val trackCache = HashMap<String, Resolved>()
+    private val sharedAlbumIds = ConcurrentHashMap.newKeySet<Long>()
+    private val trackCache = ConcurrentHashMap<String, Resolved>()
     /** Dernière résolution par (titre, artiste principal) — pour [peekTrackId] (lecture en cours). */
-    private val peekCache = HashMap<String, Resolved>()
+    private val peekCache = ConcurrentHashMap<String, Resolved>()
 
     /* ---------- Apprentissage éditeur : corrections mémorisées (user_corrections) ---------- */
 
-    private var corrections: Map<String, Map<String, com.novastats.app.data.db.entity.UserCorrectionEntity>> = emptyMap()
-    private var correctionsLoadedAt = 0L
+    @Volatile private var corrections: Map<String, Map<String, UserCorrectionEntity>> = emptyMap()
+    @Volatile private var correctionsLoadedAt = 0L
 
     private suspend fun corrections(): Map<String, Map<String, com.novastats.app.data.db.entity.UserCorrectionEntity>> {
         val now = System.currentTimeMillis()
         if (now - correctionsLoadedAt > 30_000L) {
-            corrections = db.editorDao().allCorrections().groupBy { it.correctionType }
+            // En cas d'ancien doublon normalisé, la correction la plus récente gagne de façon déterministe.
+            corrections = db.editorDao().allCorrections().sortedWith(compareBy<UserCorrectionEntity>({ it.createdAt }, { it.id })).groupBy { it.correctionType }
                 .mapValues { (_, rows) -> rows.associateBy { TitleNormalizer.normalizeKey(it.originalValue) } }
             correctionsLoadedAt = now
         }
@@ -51,7 +61,7 @@ class LibraryRepository(private val db: NovaDatabase) {
     private suspend fun corrected(type: String, raw: String?): String? {
         if (raw.isNullOrBlank()) return raw
         val c = corrections()[type]?.get(TitleNormalizer.normalizeKey(raw)) ?: return raw
-        if (c.correctedValue != c.originalValue) runCatching { db.editorDao().bumpCorrection(c.id) }
+        if (c.correctedValue != c.originalValue) runCatchingCancellable { db.editorDao().bumpCorrection(c.id) }
         return c.correctedValue
     }
 
@@ -86,7 +96,25 @@ class LibraryRepository(private val db: NovaDatabase) {
         genre: String? = null,
         albumArtist: String? = null,
         applyCorrections: Boolean = true
+    ): Resolved = resolutionMutex.withLock {
+        val generation = cacheGeneration.get()
+        try {
+            resolveLocked(rawTitleIn, rawArtistsIn, rawAlbumIn, durationMs, genre, albumArtist, applyCorrections)
+        } finally {
+            if (cacheGeneration.get() != generation) clearCacheEntries()
+        }
+    }
+
+    private suspend fun resolveLocked(
+        rawTitleIn: String,
+        rawArtistsIn: String,
+        rawAlbumIn: String?,
+        durationMs: Long?,
+        genre: String?,
+        albumArtist: String?,
+        applyCorrections: Boolean
     ): Resolved {
+        require(rawTitleIn.isNotBlank()) { "Titre vide : impossible de créer une piste" }
         val rawTitle = if (applyCorrections) corrected("TITLE", rawTitleIn) ?: rawTitleIn else rawTitleIn
         val rawArtists = if (applyCorrections) corrected("ARTIST", rawArtistsIn) ?: rawArtistsIn else rawArtistsIn
         val rawAlbum = if (applyCorrections) corrected("ALBUM", rawAlbumIn) else rawAlbumIn
@@ -113,7 +141,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         val guestKeys = guestIds.map { "#$it" }.toSet()
         // Album crédité uniquement s'il s'agit d'un album de l'artiste principal ; jamais pour une compilation
         val albumId = rawAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
-            ?.let { resolveAlbum(it, primaryArtistId, albumArtist, artistIds = artistIds) }
+            ?.let { resolveAlbumLocked(it, primaryArtistId, albumArtist, artistIds = artistIds) }
 
         // ---- 1. Remix / version AVEC artiste featuring (« Song (Remix) feat. Drake ») → titre distinct « Song (feat. Drake) », lié à l'original
         val isRemixFeat = normalized.isVersion && titleOnlyGuests.isNotEmpty()
@@ -221,7 +249,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         }
     }
 
-    suspend fun resolveArtist(rawName: String): Long {
+    private suspend fun resolveArtist(rawName: String): Long {
         val key = TitleNormalizer.normalizeKey(rawName)
         artistCache[key]?.let { return it }
         val name = rawName.trim()
@@ -244,7 +272,16 @@ class LibraryRepository(private val db: NovaDatabase) {
      * Album : clé (titre normalisé, artiste principal) — ou titre seul pour un album PARTAGÉ (BO, « Various Artists »,
      * marquage manuel) : un seul album sans propriétaire (`artist_id` NULL) auquel tous les titres se rattachent.
      */
-    suspend fun resolveAlbum(rawTitle: String, artistId: Long, albumArtist: String? = null, forceShared: Boolean? = null, artistIds: List<Long> = listOf(artistId)): Long {
+    suspend fun resolveAlbum(rawTitle: String, artistId: Long, albumArtist: String? = null, forceShared: Boolean? = null, artistIds: List<Long> = listOf(artistId)): Long = resolutionMutex.withLock {
+        val generation = cacheGeneration.get()
+        try {
+            resolveAlbumLocked(rawTitle, artistId, albumArtist, forceShared, artistIds)
+        } finally {
+            if (cacheGeneration.get() != generation) clearCacheEntries()
+        }
+    }
+
+    private suspend fun resolveAlbumLocked(rawTitle: String, artistId: Long, albumArtist: String?, forceShared: Boolean?, artistIds: List<Long>): Long {
         val title = TitleNormalizer.normalizeAlbumTitle(rawTitle) // Deluxe / Expanded / Japan Edition… fusionnés
         val shared = forceShared ?: isSharedAlbum(title, albumArtist)
         val allIds = (listOf(artistId) + artistIds).distinct()
@@ -284,7 +321,19 @@ class LibraryRepository(private val db: NovaDatabase) {
         return peekCache[TitleNormalizer.normalizeKey(normalized.title) + "|" + TitleNormalizer.normalizeKey(primary)]?.trackId
     }
 
-    fun clearCaches() { artistCache.clear(); albumCache.clear(); sharedAlbumIds.clear(); trackCache.clear(); peekCache.clear(); correctionsLoadedAt = 0L }
+    fun clearCaches() {
+        cacheGeneration.incrementAndGet()
+        clearCacheEntries()
+    }
+
+    private fun clearCacheEntries() {
+        artistCache.clear()
+        albumCache.clear()
+        sharedAlbumIds.clear()
+        trackCache.clear()
+        peekCache.clear()
+        correctionsLoadedAt = 0L
+    }
 
     /** Charge les noms protégés depuis la base (au démarrage et après édition) ; insère les valeurs par défaut la première fois. */
     suspend fun loadArtistExceptions(seedDefaults: Boolean) {
@@ -315,14 +364,14 @@ class LibraryRepository(private val db: NovaDatabase) {
                 val ids = listOf(r.artistId) + db.trackLinkDao().artistIdsForTrack(r.trackId).filter { it != r.artistId }
                 ids.mapNotNull { db.artistDao().getById(it)?.name }.joinToString(", ").ifBlank { "Artiste inconnu" }
             }
-            val resolved = runCatching { resolve(title, artist, r.rawAlbum) }.getOrNull() ?: return@forEachIndexed
+            val resolved = runCatchingCancellable { resolve(title, artist, r.rawAlbum) }.getOrNull() ?: return@forEachIndexed
             if (resolved.trackId != r.trackId || resolved.primaryArtistId != r.artistId || (resolved.albumId != null && resolved.albumId != r.albumId)) {
                 // UNIQUE(track_id, started_at) : si une écoute du titre cible existe déjà au même instant, celle-ci est un doublon → supprimée
                 val clash = if (resolved.trackId != r.trackId) db.scrobbleDao().findByTrackAndStart(resolved.trackId, r.startedAt) else null
                 if (clash != null && clash.scrobbleId != r.scrobbleId) {
                     db.scrobbleDao().delete(r.scrobbleId); duplicates++
                 } else {
-                    runCatching { db.scrobbleDao().relink(r.scrobbleId, resolved.trackId, resolved.primaryArtistId, resolved.albumId ?: r.albumId) }
+                    runCatchingCancellable { db.scrobbleDao().relink(r.scrobbleId, resolved.trackId, resolved.primaryArtistId, resolved.albumId ?: r.albumId) }
                         .onFailure { e -> if (e is android.database.sqlite.SQLiteConstraintException) { db.scrobbleDao().delete(r.scrobbleId); duplicates++ } else throw e }
                     moved++
                 }

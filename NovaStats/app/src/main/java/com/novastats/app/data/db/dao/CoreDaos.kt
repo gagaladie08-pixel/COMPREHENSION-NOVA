@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 
 data class TrackArtistPair(val trackId: Long, val artistId: Long)
 
+data class TrackCoverState(val trackId: Long, val coverUrl: String?, val coverSource: String?)
+
 data class RankedTrack(
     @Embedded val track: TrackEntity,
     @androidx.room.ColumnInfo(name = "artist_name") val artistName: String,
@@ -95,6 +97,10 @@ interface TrackDao {
     @Query("SELECT COUNT(*) FROM tracks")
     suspend fun count(): Int
 
+    /** Instantané utilisé uniquement par l'Undo atomique d'une correction manuelle. */
+    @Query("SELECT * FROM tracks")
+    suspend fun allList(): List<TrackEntity>
+
     /** Titres sans pochette, hors ceux déjà tentés récemment (cache négatif api_cache). Les plus écoutés d'abord. */
     @Query(
         """
@@ -112,8 +118,8 @@ interface TrackDao {
     @Query("SELECT DISTINCT t.title FROM tracks t JOIN track_artists ta ON ta.track_id = t.track_id JOIN artists a ON a.artist_id = ta.artist_id WHERE ta.artist_id = :artistId OR LOWER(a.name) LIKE '%' || LOWER(:name) || '%'")
     suspend fun titlesCreditedTo(artistId: Long, name: String): List<String>
     @Query("SELECT title FROM tracks WHERE album_id = :albumId") suspend fun titlesOfAlbum(albumId: Long): List<String>
-    /** « Tout ré-enrichir » : tous les titres sauf ceux dont la pochette a été choisie à la main. */
-    @Query("SELECT track_id FROM tracks WHERE cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
+    /** « Tout ré-enrichir » : tous les titres sauf ceux dont la pochette a été choisie à la main (ou héritée d'une pochette choisie pour l'album). */
+    @Query("SELECT track_id FROM tracks WHERE cover_url IS NULL OR cover_source IS NULL OR cover_source NOT IN ('USER', 'USER_ALBUM') ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
 
     /**
      * Classement Global (all-time). Tri : écoutes puis temps d'écoute (règle d'égalité).
@@ -306,6 +312,10 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE play_count > 0")
     suspend fun allPlayed(): List<TrackEntity>
 
+    /** Tous les titres de cet artiste, y compris les titres de catalogue pas encore écoutés. */
+    @Query("SELECT * FROM tracks WHERE artist_id = :artistId")
+    suspend fun allByArtistId(artistId: Long): List<TrackEntity>
+
     /* ---- Éditeur de données ---- */
     @Query("SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t ORDER BY t.play_count DESC, t.title LIMIT :limit")
     fun allForEditor(limit: Int = 2000): Flow<List<RankedTrack>>
@@ -325,9 +335,18 @@ interface TrackDao {
     /** 🔴 Titres dont les APIs sont épuisées avec un score < 70 (placeholder). */
     @Query("SELECT t.*, (SELECT name FROM artists WHERE artist_id = t.artist_id) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t WHERE t.confidence_score < 70 ORDER BY t.play_count DESC")
     fun lowConfidence(): Flow<List<RankedTrack>>
-    @Query("UPDATE tracks SET cover_url = :url, cover_source = 'USER' WHERE track_id = :id") suspend fun setCover(id: Long, url: String?)
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = CASE WHEN :url IS NULL OR TRIM(:url) = '' THEN NULL ELSE 'USER' END WHERE track_id = :id") suspend fun setCover(id: Long, url: String?)
+    /** Mise à jour atomique des métadonnées, sans écraser une image utilisateur concurrente. */
+    @Query("UPDATE tracks SET cover_url = CASE WHEN cover_source IN ('USER', 'USER_ALBUM') AND cover_url IS NOT NULL THEN cover_url ELSE :coverUrl END, cover_source = CASE WHEN cover_source IN ('USER', 'USER_ALBUM') AND cover_url IS NOT NULL THEN cover_source ELSE :coverSource END, duration_ms = COALESCE(duration_ms, :durationMs), genre = COALESCE(genre, :genre), mbid = COALESCE(mbid, :mbid), confidence_score = MIN(confidence_score, :confidenceScore), needs_review = CASE WHEN needs_review = 1 OR :needsReview THEN 1 ELSE 0 END WHERE track_id = :id AND NOT EXISTS (SELECT 1 FROM api_cache WHERE entity_type = 'TRACK' AND entity_id = :id AND data_type = 'COVER' AND cached_url = :coverUrl AND is_blacklisted = 1)")
+    suspend fun saveEnrichment(id: Long, coverUrl: String?, coverSource: String?, durationMs: Long?, genre: String?, mbid: String?, confidenceScore: Int, needsReview: Boolean)
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE track_id = :id AND cover_url IS NULL AND (cover_source IS NULL OR cover_source NOT IN ('USER', 'USER_ALBUM'))")
+    suspend fun applyAlbumCoverIfMissing(id: Long, url: String, source: String?)
+    @Query("SELECT COUNT(*) FROM tracks WHERE cover_url = :url") suspend fun coverReferenceCount(url: String): Int
     @Query("UPDATE tracks SET title = :title, album_id = :albumId WHERE track_id = :id") suspend fun setTitleAndAlbum(id: Long, title: String, albumId: Long?)
+    @Query("UPDATE tracks SET title = :title, title_raw = :titleRaw, artist_id = :artistId, album_id = :albumId, cover_url = :coverUrl, cover_source = :coverSource, confidence_score = :confidenceScore, needs_review = :needsReview, duration_ms = :durationMs, genre = :genre, is_remix = :isRemix, original_track_id = :originalTrackId WHERE track_id = :id")
+    suspend fun restoreEditorState(id: Long, title: String, titleRaw: String, artistId: Long, albumId: Long?, coverUrl: String?, coverSource: String?, confidenceScore: Int, needsReview: Boolean, durationMs: Long?, genre: String?, isRemix: Boolean, originalTrackId: Long?)
     @Query("DELETE FROM tracks WHERE track_id = :id") suspend fun delete(id: Long)
+    @Query("DELETE FROM tracks WHERE track_id = :id AND NOT EXISTS (SELECT 1 FROM scrobbles WHERE track_id = :id) AND NOT EXISTS (SELECT 1 FROM tracks WHERE original_track_id = :id)") suspend fun deleteIfUnused(id: Long): Int
 
     /** Recalcule les agrégats des titres à partir des scrobbles confirmés (après import / édition). */
     @Query(
@@ -460,6 +479,10 @@ interface ArtistDao {
     @Query("SELECT * FROM artists WHERE play_count > 0 ORDER BY play_count DESC, total_duration_ms DESC")
     fun allByPlays(): Flow<List<ArtistEntity>>
 
+    @Query("SELECT artist_id FROM artists") suspend fun allIds(): List<Long>
+    @Query("DELETE FROM artists WHERE artist_id = :id AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = :id) AND NOT EXISTS (SELECT 1 FROM track_artists WHERE artist_id = :id) AND NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = :id) AND NOT EXISTS (SELECT 1 FROM scrobbles WHERE artist_id = :id)")
+    suspend fun deleteIfUnused(id: Long): Int
+
     @Query(
         """
         SELECT * FROM artists WHERE photo_url IS NULL AND is_merged = 0 AND artist_id NOT IN
@@ -470,7 +493,7 @@ interface ArtistDao {
     suspend fun missingPhoto(now: Long, limit: Int): List<ArtistEntity>
 
     @Query("SELECT COUNT(*) FROM artists WHERE photo_url IS NULL AND is_merged = 0") fun missingPhotoCount(): Flow<Int>
-    @Query("SELECT artist_id FROM artists WHERE is_merged = 0 AND (photo_source IS NULL OR photo_source != 'USER') ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
+    @Query("SELECT artist_id FROM artists WHERE is_merged = 0 AND (photo_url IS NULL OR photo_source IS NULL OR photo_source != 'USER') ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
 
     @Query(
         """
@@ -554,11 +577,19 @@ interface ArtistDao {
     @Query("SELECT * FROM artists WHERE is_merged = 0 ORDER BY play_count DESC") suspend fun allPlayedList(): List<ArtistEntity>
 
     @Query("UPDATE artists SET name = :name WHERE artist_id = :id") suspend fun rename(id: Long, name: String)
-    @Query("UPDATE artists SET photo_url = :url, photo_source = 'USER' WHERE artist_id = :id") suspend fun setPhoto(id: Long, url: String?)
+    @Query("UPDATE artists SET photo_url = :url, photo_source = CASE WHEN :url IS NULL OR TRIM(:url) = '' THEN NULL ELSE 'USER' END WHERE artist_id = :id") suspend fun setPhoto(id: Long, url: String?)
+    /** Écrit l'enrichissement sans écraser une photo choisie manuellement pendant la requête réseau. */
+    @Query("UPDATE artists SET photo_url = CASE WHEN photo_source = 'USER' AND photo_url IS NOT NULL THEN photo_url ELSE :photoUrl END, photo_source = CASE WHEN photo_source = 'USER' AND photo_url IS NOT NULL THEN photo_source ELSE :photoSource END, bio = COALESCE(bio, :bio), mbid = COALESCE(mbid, :mbid), spotify_id = COALESCE(spotify_id, :spotifyId) WHERE artist_id = :id AND NOT EXISTS (SELECT 1 FROM api_cache WHERE entity_type = 'ARTIST' AND entity_id = :id AND data_type = 'PHOTO' AND cached_url = :photoUrl AND is_blacklisted = 1)")
+    suspend fun saveEnrichment(id: Long, photoUrl: String?, photoSource: String?, bio: String?, mbid: String?, spotifyId: String?)
+    @Query("SELECT COUNT(*) FROM artists WHERE photo_url = :url") suspend fun photoReferenceCount(url: String): Int
+    @Query("UPDATE artists SET photo_url = :url, photo_source = :source WHERE artist_id = :id") suspend fun restorePhoto(id: Long, url: String?, source: String?)
     @Query("UPDATE artists SET is_merged = 1, merged_into_id = :into, play_count = 0 WHERE artist_id = :from") suspend fun markMerged(from: Long, into: Long)
 
     @Query("UPDATE artists SET pantheon_status = :status, pantheon_date = :date WHERE artist_id = :artistId")
     suspend fun setPantheonStatus(artistId: Long, status: String, date: Long)
+
+    @Query("UPDATE artists SET pantheon_status = NULL, pantheon_date = NULL")
+    suspend fun clearPantheonStatus()
 }
 
 @Dao
@@ -610,12 +641,15 @@ interface AlbumDao {
     suspend fun missingCover(now: Long, limit: Int): List<AlbumEntity>
 
     @Query("SELECT COUNT(*) FROM albums WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
-    @Query("SELECT album_id FROM albums WHERE cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
-    /** Pochette d'album connue → appliquée aux titres de l'album qui n'en ont pas. */
-    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND cover_url IS NULL")
+    @Query("SELECT album_id FROM albums WHERE cover_url IS NULL OR cover_source IS NULL OR cover_source != 'USER' ORDER BY play_count DESC") suspend fun idsForRefresh(): List<Long>
+    /** Pochette d'album connue → appliquée aux titres qui n'en ont pas, seulement si l'album porte toujours cette image. */
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND cover_url IS NULL AND EXISTS (SELECT 1 FROM albums WHERE album_id = :albumId AND cover_url = :url AND cover_source = :source)")
     suspend fun propagateCoverToTracks(albumId: Long, url: String, source: String)
-    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND (cover_source IS NULL OR cover_source != 'USER')")
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = :source WHERE album_id = :albumId AND (cover_url IS NULL OR cover_source IS NULL OR cover_source NOT IN ('USER', 'USER_ALBUM')) AND EXISTS (SELECT 1 FROM albums WHERE album_id = :albumId AND cover_url = :url AND cover_source = :source)")
     suspend fun overwriteCoverOfTracks(albumId: Long, url: String, source: String)
+    /** Écriture atomique : les métadonnées réseau ne remplacent jamais une pochette utilisateur actuelle. */
+    @Query("UPDATE albums SET cover_url = CASE WHEN cover_source = 'USER' AND cover_url IS NOT NULL THEN cover_url ELSE :coverUrl END, cover_source = CASE WHEN cover_source = 'USER' AND cover_url IS NOT NULL THEN cover_source ELSE :coverSource END, release_date = COALESCE(release_date, :releaseDate), mbid = COALESCE(mbid, :mbid) WHERE album_id = :id AND NOT EXISTS (SELECT 1 FROM api_cache WHERE entity_type = 'ALBUM' AND entity_id = :id AND data_type = 'COVER' AND cached_url = :coverUrl AND is_blacklisted = 1)")
+    suspend fun saveEnrichment(id: Long, coverUrl: String?, coverSource: String?, releaseDate: String?, mbid: String?)
     /** Tous les titres d'un album portent la pochette de l'album (sauf pochette choisie par l'utilisateur) — après fusions / déplacements. */
     @Query(
         """
@@ -623,12 +657,24 @@ interface AlbumDao {
             cover_url = (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id),
             cover_source = (SELECT a.cover_source FROM albums a WHERE a.album_id = tracks.album_id)
         WHERE album_id IS NOT NULL
-          AND (cover_source IS NULL OR cover_source != 'USER')
+          AND (cover_source IS NULL OR cover_source NOT IN ('USER', 'USER_ALBUM'))
           AND (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id) IS NOT NULL
           AND IFNULL(cover_url, '') != (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id)
         """
     )
     suspend fun alignTrackCovers(): Int
+
+    /** Les pochettes propagées depuis un choix utilisateur suivent les changements d'album du titre. */
+    @Query(
+        """
+        UPDATE tracks SET
+            cover_url = (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id),
+            cover_source = CASE WHEN (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id) IS NULL THEN NULL ELSE 'USER_ALBUM' END
+        WHERE cover_source = 'USER_ALBUM'
+          AND (album_id IS NULL OR cover_url IS NOT (SELECT a.cover_url FROM albums a WHERE a.album_id = tracks.album_id))
+        """
+    )
+    suspend fun alignUserAlbumTrackCovers(): Int
 
     @Query("SELECT COUNT(*) FROM albums")
     fun countFlow(): Flow<Int>
@@ -709,9 +755,23 @@ interface AlbumDao {
     fun allForEditor(): Flow<List<RankedAlbum>>
 
     @Query("UPDATE albums SET title = :title WHERE album_id = :id") suspend fun rename(id: Long, title: String)
-    @Query("UPDATE albums SET cover_url = :url, cover_source = 'USER' WHERE album_id = :id") suspend fun setCover(id: Long, url: String?)
+    @Query("UPDATE albums SET cover_url = :url, cover_source = CASE WHEN :url IS NULL OR TRIM(:url) = '' THEN NULL ELSE 'USER' END WHERE album_id = :id") suspend fun setCover(id: Long, url: String?)
+    @Query("SELECT COUNT(*) FROM albums WHERE cover_url = :url") suspend fun coverReferenceCount(url: String): Int
+    @Query("UPDATE albums SET cover_url = :url, cover_source = :source WHERE album_id = :id") suspend fun restoreCover(id: Long, url: String?, source: String?)
+    @Query("SELECT track_id AS trackId, cover_url AS coverUrl, cover_source AS coverSource FROM tracks WHERE album_id = :id AND (cover_url IS NULL OR cover_source = 'USER_ALBUM')")
+    suspend fun tracksForUserCoverUpdate(id: Long): List<TrackCoverState>
+    @Query("SELECT track_id AS trackId, cover_url AS coverUrl, cover_source AS coverSource FROM tracks WHERE album_id = :id AND cover_source = 'USER_ALBUM'")
+    suspend fun tracksForUserCoverRemoval(id: Long): List<TrackCoverState>
+    @Query("UPDATE tracks SET cover_url = :url, cover_source = 'USER_ALBUM' WHERE album_id = :id AND (cover_url IS NULL OR cover_source = 'USER_ALBUM')")
+    suspend fun applyUserAlbumCoverToTracks(id: Long, url: String)
+    @Query("UPDATE tracks SET cover_url = NULL, cover_source = NULL WHERE album_id = :id AND cover_source = 'USER_ALBUM'")
+    suspend fun clearUserAlbumCoverFromTracks(id: Long)
+    @Query("UPDATE tracks SET cover_url = :coverUrl, cover_source = :coverSource WHERE track_id = :trackId AND ((:appliedUrl IS NULL AND cover_url IS NULL AND cover_source IS NULL) OR (:appliedUrl IS NOT NULL AND cover_url = :appliedUrl AND cover_source = 'USER_ALBUM'))")
+    suspend fun restoreUserAlbumTrackCover(trackId: Long, coverUrl: String?, coverSource: String?, appliedUrl: String?)
     @Query("UPDATE albums SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
     @Query("DELETE FROM albums WHERE album_id = :id") suspend fun delete(id: Long)
+    @Query("DELETE FROM albums WHERE album_id = :id AND NOT EXISTS (SELECT 1 FROM tracks WHERE album_id = :id) AND NOT EXISTS (SELECT 1 FROM track_albums WHERE album_id = :id) AND NOT EXISTS (SELECT 1 FROM scrobbles WHERE album_id = :id)")
+    suspend fun deleteIfUnused(id: Long): Int
 
     /** Écoutes d'un album = somme des écoutes de tous ses titres. */
     @Query(
@@ -738,12 +798,21 @@ interface TrackLinkDao {
     @Query("SELECT artist_id FROM track_artists WHERE track_id = :trackId ORDER BY is_primary DESC")
     suspend fun artistIdsForTrack(trackId: Long): List<Long>
 
+    @Query("SELECT * FROM track_artists WHERE track_id = :trackId ORDER BY is_primary DESC, id")
+    suspend fun trackArtistsForTrack(trackId: Long): List<TrackArtistEntity>
+
     @Query("SELECT * FROM track_artists") suspend fun allTrackArtists(): List<TrackArtistEntity>
+    @Query("SELECT * FROM track_albums") suspend fun allTrackAlbums(): List<TrackAlbumEntity>
     /** Titres crédités à un artiste (principal + featuring) + titres dont il est l'artiste principal. */
     @Query("SELECT track_id FROM track_artists WHERE artist_id = :artistId UNION SELECT track_id FROM tracks WHERE artist_id = :artistId")
     suspend fun trackIdsForArtist(artistId: Long): List<Long>
     @Query("DELETE FROM track_artists WHERE artist_id = :from AND track_id IN (SELECT track_id FROM track_artists WHERE artist_id = :into)") suspend fun dropDuplicateLinks(from: Long, into: Long)
     @Query("UPDATE track_artists SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
+    /** Après fusion d'artistes, la ligne track_artists du nouvel artiste principal doit rester marquée principale. */
+    @Query("UPDATE track_artists SET is_primary = CASE WHEN artist_id = :artistId THEN 1 ELSE 0 END, role = CASE WHEN artist_id = :artistId THEN 'main' WHEN role = 'main' THEN 'featured' ELSE role END WHERE track_id IN (SELECT track_id FROM tracks WHERE artist_id = :artistId)")
+    suspend fun normalizePrimaryLinksForArtist(artistId: Long)
+    @Query("INSERT OR IGNORE INTO track_artists (track_id, artist_id, is_primary, role) SELECT track_id, artist_id, 1, 'main' FROM tracks WHERE artist_id = :artistId")
+    suspend fun ensurePrimaryLinksForArtist(artistId: Long)
     @Query("DELETE FROM track_artists WHERE track_id = :trackId") suspend fun clearTrackArtists(trackId: Long)
     @Query("INSERT OR IGNORE INTO track_artists (track_id, artist_id, is_primary, role) SELECT :into, artist_id, 0, 'featured' FROM track_artists WHERE track_id = :from AND artist_id NOT IN (SELECT artist_id FROM track_artists WHERE track_id = :into)")
     suspend fun copyArtistLinks(from: Long, into: Long)

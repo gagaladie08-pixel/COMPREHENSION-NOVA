@@ -7,6 +7,7 @@ import com.novastats.app.domain.Chart
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.YearEndRules
+import com.novastats.app.util.runCatchingCancellable
 import kotlinx.coroutines.flow.first
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -61,14 +62,14 @@ data class YearEndData(
     val topTrack: YearEndRow? get() = tracks.firstOrNull()
     val topArtist: YearEndRow? get() = artists.firstOrNull()
     val topAlbum: YearEndRow? get() = albums.firstOrNull()
-    val playsDelta: Int get() = summary.playCount - previous.playCount
+    val playsDelta: Long get() = summary.playCount - previous.playCount
     val playsDeltaPct: Int get() =
-        if (previous.playCount > 0) ((summary.playCount - previous.playCount) * 100 / previous.playCount) else 0
+        if (previous.playCount > 0L) (((summary.playCount.toDouble() - previous.playCount.toDouble()) * 100.0 / previous.playCount.toDouble()).coerceIn(Int.MIN_VALUE.toDouble(), Int.MAX_VALUE.toDouble())).toInt() else 0
     val avgPerDay: Float get() = if (summary.activeDays > 0) summary.playCount.toFloat() / summary.activeDays else 0f
 
     /** Libellé de la fenêtre comptée. */
     val windowLabel: String get() {
-        fun pretty(iso: String): String = runCatching {
+        fun pretty(iso: String): String = runCatchingCancellable {
             val d = LocalDate.parse(iso)
             "${d.dayOfMonth} ${MOIS[d.monthValue - 1]} ${d.year}"
         }.getOrDefault(iso)
@@ -115,14 +116,17 @@ class YearEndRepository(private val db: NovaDatabase) {
 
         // Bornes réelles : on ne compte pas au-delà d'aujourd'hui
         val today = Dates.today()
-        val lastWeekStart = winTo.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val countedTo = minOf(winTo, today)
+        val countedToIso = countedTo.format(Dates.ISO)
+        val lastWeekStart = countedTo.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
         /* ---------- 1. Les semaines de la fenêtre Year-End locale ---------- */
         val weeks = mutableListOf<Pair<String, String>>()
         var monday = winFrom.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         while (!monday.isAfter(lastWeekStart)) {
-            val sunday = monday.plusDays(6)
-            if (!monday.isAfter(today)) weeks += monday.format(Dates.ISO) to sunday.format(Dates.ISO)
+            val weekFrom = maxOf(monday, winFrom)
+            val weekTo = minOf(monday.plusDays(6), winTo, today)
+            if (!weekFrom.isAfter(weekTo)) weeks += weekFrom.format(Dates.ISO) to weekTo.format(Dates.ISO)
             monday = monday.plusWeeks(1)
         }
 
@@ -132,7 +136,7 @@ class YearEndRepository(private val db: NovaDatabase) {
         val accAlbums = HashMap<Long, Acc>()
 
         for ((from, to) in weeks) {
-            val rankedTracks = runCatching { db.billboardDao().rankTracks(from, to, Chart.HOT_100.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
+            val rankedTracks = runCatchingCancellable { db.billboardDao().rankTracks(from, to, Chart.HOT_100.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
             rankedTracks.forEachIndexed { i, e ->
                 val position = i + 1
                 val acc = accTracks.getOrPut(e.entityId) { Acc() }
@@ -148,14 +152,14 @@ class YearEndRepository(private val db: NovaDatabase) {
                 }
                 acc.add(position, YearEndRules.pointsFor(position, Chart.HOT_100.limit(Period.WEEKLY)), e.plays, e.durationMs)
             }
-            val rankedArtists = runCatching { db.billboardDao().rankArtists(from, to, Chart.ARTIST_50.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
+            val rankedArtists = runCatchingCancellable { db.billboardDao().rankArtists(from, to, Chart.ARTIST_50.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
             rankedArtists.forEachIndexed { i, e ->
                 accArtists.getOrPut(e.entityId) { Acc() }.apply {
                     distinct = maxOf(distinct, e.distinctTracks)
                     add(i + 1, Chart.ARTIST_50.limit(Period.WEEKLY) + 1 - (i + 1), e.plays, e.durationMs)
                 }
             }
-            val rankedAlbums = runCatching { db.billboardDao().rankAlbums(from, to, Chart.ALBUMS_75.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
+            val rankedAlbums = runCatchingCancellable { db.billboardDao().rankAlbums(from, to, Chart.ALBUMS_75.limit(Period.WEEKLY)) }.getOrDefault(emptyList())
             rankedAlbums.forEachIndexed { i, e ->
                 accAlbums.getOrPut(e.entityId) { Acc() }.apply {
                     distinct = maxOf(distinct, e.distinctTracks)
@@ -167,10 +171,10 @@ class YearEndRepository(private val db: NovaDatabase) {
         /* ---------- 3. Résolution des noms / pochettes ---------- */
         val tracks = resolve(accTracks, Chart.HOT_100.limit(Period.WEEKLY)) { ids ->
             if (ids.isEmpty()) return@resolve emptyMap()
-            val map = runCatching { db.trackDao().byIds(ids) }.getOrDefault(emptyList()).associateBy { it.trackId }
+            val map = runCatchingCancellable { db.trackDao().byIds(ids) }.getOrDefault(emptyList()).associateBy { it.trackId }
             val artistIds = map.values.map { it.artistId }.distinct()
             val artistNames = if (artistIds.isEmpty()) emptyMap()
-            else runCatching { db.artistDao().byIds(artistIds) }.getOrDefault(emptyList())
+            else runCatchingCancellable { db.artistDao().byIds(artistIds) }.getOrDefault(emptyList())
                 .associate { it.artistId to it.name }
             ids.mapNotNull { id ->
                 val t = map[id] ?: return@mapNotNull null
@@ -179,17 +183,17 @@ class YearEndRepository(private val db: NovaDatabase) {
         }
         val artists = resolve(accArtists, Chart.ARTIST_50.limit(Period.WEEKLY)) { ids ->
             if (ids.isEmpty()) return@resolve emptyMap()
-            runCatching { db.artistDao().byIds(ids) }.getOrDefault(emptyList())
+            runCatchingCancellable { db.artistDao().byIds(ids) }.getOrDefault(emptyList())
                 .associate { a ->
                     a.artistId to Triple(a.name, plural(accArtists[a.artistId]?.distinct ?: 0), a.photoUrl)
                 }
         }
         val albums = resolve(accAlbums, Chart.ALBUMS_75.limit(Period.WEEKLY)) { ids ->
             if (ids.isEmpty()) return@resolve emptyMap()
-            val map = runCatching { db.albumDao().byIds(ids) }.getOrDefault(emptyList()).associateBy { it.albumId }
+            val map = runCatchingCancellable { db.albumDao().byIds(ids) }.getOrDefault(emptyList()).associateBy { it.albumId }
             val artistIds = map.values.mapNotNull { it.artistId }.distinct()
             val names = if (artistIds.isEmpty()) emptyMap()
-            else runCatching { db.artistDao().byIds(artistIds) }.getOrDefault(emptyList())
+            else runCatchingCancellable { db.artistDao().byIds(artistIds) }.getOrDefault(emptyList())
                 .associate { it.artistId to it.name }
             ids.mapNotNull { id ->
                 val al = map[id] ?: return@mapNotNull null
@@ -199,16 +203,19 @@ class YearEndRepository(private val db: NovaDatabase) {
         }
 
         /* ---------- 4. Synthèse, comparaison, faits marquants ---------- */
-        val summary = runCatching { db.dailyPlayDao().yearSummary(fromIso, toIso) }.getOrDefault(EMPTY)
-        val previous = runCatching {
+        val summary = runCatchingCancellable { db.dailyPlayDao().yearSummary(fromIso, countedToIso) }.getOrDefault(EMPTY)
+        val previous = runCatchingCancellable {
             val p = window(year - 1, calendarYear)
-            db.dailyPlayDao().yearSummary(p.first.format(Dates.ISO), p.second.format(Dates.ISO))
+            val previousTo = minOf(p.second, today)
+            if (p.first.isAfter(previousTo)) EMPTY
+            else db.dailyPlayDao().yearSummary(p.first.format(Dates.ISO), previousTo.format(Dates.ISO))
         }.getOrDefault(EMPTY)
-        val bestDay = runCatching { db.dailyPlayDao().bestDayBetween(fromIso, toIso) }.getOrNull()
-        val newArtists = runCatching {
+        val bestDay = runCatchingCancellable { db.dailyPlayDao().bestDayBetween(fromIso, countedToIso) }.getOrNull()
+        val newArtists = runCatchingCancellable {
             db.artistDao().allByPlays().first().count { a ->
                 val first = a.firstPlayedAt ?: return@count false
-                Dates.toLocalDate(first).year == year
+                val date = Dates.toLocalDate(first)
+                date in winFrom..countedTo
             }
         }.getOrDefault(0)
 
@@ -225,7 +232,7 @@ class YearEndRepository(private val db: NovaDatabase) {
             bestDay = bestDay,
             newArtists = newArtists,
             weeksCounted = weeks.size,
-            inProgress = !winTo.isBefore(today)
+            inProgress = !today.isBefore(winFrom) && !today.isAfter(winTo)
         )
     }
 
@@ -289,7 +296,7 @@ class YearEndRepository(private val db: NovaDatabase) {
     companion object {
         fun pointsFor(position: Int, limit: Int): Int = YearEndRules.pointsFor(position, limit)
 
-        val EMPTY = PeriodSummary(0, 0, 0, 0, 0, 0)
+        val EMPTY = PeriodSummary(0L, 0L, 0, 0, 0, 0)
     }
 }
 

@@ -79,7 +79,8 @@ fun formatDuration(ms: Long): String {
     return if (h > 0) "${h}h ${String.format(Locale.FRANCE, "%02d", m)}min" else "${m}min"
 }
 
-fun formatCount(n: Int): String = String.format(Locale.FRANCE, "%,d", n).replace('\u00A0', ' ').replace('\u202F', ' ')
+fun formatCount(n: Int): String = formatCount(n.toLong())
+fun formatCount(n: Long): String = String.format(Locale.FRANCE, "%,d", n).replace('\u00A0', ' ').replace('\u202F', ' ')
 
 /**
  * Affichage des positions (Stats) :

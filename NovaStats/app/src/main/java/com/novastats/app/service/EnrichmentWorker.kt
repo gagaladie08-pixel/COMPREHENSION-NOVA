@@ -16,10 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.api.EnrichmentState
 import com.novastats.app.data.api.MetadataEnricher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,7 +32,16 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
         if (mode == MODE_BATCH && !manual && !app.settings.autoEnrich.first()) return Result.success()
 
         // Ré-enrichissement (long) : service de premier plan WorkManager pour ne pas être tué après 10 min
-        if (mode != MODE_BATCH) runCatching { setForeground(foregroundInfo(mode)) }
+        if (mode != MODE_BATCH) {
+            try {
+                setForeground(foregroundInfo(mode))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                EnrichmentState.log("⚠️ Impossible de démarrer le premier plan : ${failure.message ?: failure.javaClass.simpleName}")
+                return Result.failure()
+            }
+        }
 
         val result = try {
             when (mode) {
@@ -79,7 +85,7 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
         private const val MODE_BATCH = "batch"
         private const val MODE_ALL = "all"
         private const val MODE_SELECTED = "selected"
-        private const val NOTIF_ID = 4242
+        private const val NOTIF_ID = 4243
 
         /** « Tout ré-enrichir » (artistes → albums → titres, hors images choisies à la main). */
         fun enqueueRefreshAll(context: Context) = enqueueRefresh(context, MODE_ALL, emptyArray())
@@ -105,14 +111,20 @@ class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWo
         fun enqueue(context: Context, manual: Boolean = false, delayMinutes: Long = 0) {
             val appContext = context.applicationContext
             val app = appContext as NovaStatsApp
-            CoroutineScope(Dispatchers.IO).launch {
-                val wifiOnly = runCatching { app.settings.enrichWifiOnly.first() }.getOrDefault(false)
-                val request = OneTimeWorkRequestBuilder<EnrichmentWorker>()
-                    .setConstraints(Constraints.Builder().setRequiredNetworkType(if (wifiOnly && !manual) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
-                    .setInputData(workDataOf(KEY_MANUAL to manual))
-                    .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
-                    .build()
-                WorkManager.getInstance(appContext).enqueueUniqueWork(UNIQUE_NOW, if (manual) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+            app.launchIoTask {
+                try {
+                    val wifiOnly = app.settings.enrichWifiOnly.first()
+                    val request = OneTimeWorkRequestBuilder<EnrichmentWorker>()
+                        .setConstraints(Constraints.Builder().setRequiredNetworkType(if (wifiOnly && !manual) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
+                        .setInputData(workDataOf(KEY_MANUAL to manual))
+                        .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
+                        .build()
+                    WorkManager.getInstance(appContext).enqueueUniqueWork(UNIQUE_NOW, if (manual) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    EnrichmentState.log("⚠️ Planification impossible : ${failure.message ?: failure.javaClass.simpleName}")
+                }
             }
         }
 

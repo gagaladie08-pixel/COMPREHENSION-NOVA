@@ -61,7 +61,7 @@ data class BestTrackDay(
 )
 
 data class PeriodSummary(
-    @androidx.room.ColumnInfo(name = "play_count") val playCount: Int,
+    @androidx.room.ColumnInfo(name = "play_count") val playCount: Long,
     @androidx.room.ColumnInfo(name = "total_duration_ms") val totalDurationMs: Long,
     @androidx.room.ColumnInfo(name = "distinct_tracks") val distinctTracks: Int,
     @androidx.room.ColumnInfo(name = "distinct_artists") val distinctArtists: Int,
@@ -134,6 +134,9 @@ interface ScrobbleDao {
 
     @Query("UPDATE scrobbles SET needs_review = 1, review_reason = :reason WHERE scrobble_id IN (:ids)")
     suspend fun reflag(ids: List<Long>, reason: String)
+
+    @Query("UPDATE scrobbles SET track_id = :trackId, artist_id = :artistId, album_id = :albumId, confidence_score = :confidenceScore, needs_review = :needsReview, review_reason = :reviewReason WHERE scrobble_id = :scrobbleId")
+    suspend fun restoreReviewFixState(scrobbleId: Long, trackId: Long, artistId: Long, albumId: Long?, confidenceScore: Int, needsReview: Boolean, reviewReason: String?)
 
     @Query("DELETE FROM scrobbles WHERE scrobble_id IN (:ids)")
     suspend fun deleteMany(ids: List<Long>)

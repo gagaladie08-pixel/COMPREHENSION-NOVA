@@ -183,7 +183,7 @@ fun YearEndScreen(onBack: () -> Unit) {
                         }
                     }
                 }
-                data == null || data!!.summary.playCount == 0 -> {
+                data == null || data!!.summary.playCount == 0L -> {
                     Appear(delay = 60) {
                         Column(Modifier.padding(horizontal = 30.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("🏆", fontSize = 46.sp)
@@ -254,12 +254,12 @@ fun YearEndScreen(onBack: () -> Unit) {
                                 YeValue("Jours actifs", formatCount(d.summary.activeDays), theme.primary, Modifier.weight(1f))
                                 YeValue("Moyenne / jour", String.format(Locale.FRANCE, "%.1f", d.avgPerDay), theme.secondary, Modifier.weight(1f))
                             }
-                            if (d.previous.playCount > 0) {
+                            if (d.previous.playCount > 0L) {
                                 Spacer(Modifier.height(10.dp))
-                                val sign = if (d.playsDelta >= 0) "+" else ""
+                                val sign = if (d.playsDelta >= 0L) "+" else ""
                                 Text(
-                                    "$sign${formatCount(d.playsDelta)} écoutes (${if (d.playsDelta >= 0) "+" else ""}${d.playsDeltaPct} %) par rapport à ${d.year - 1}",
-                                    color = if (d.playsDelta >= 0) Color(0xFF4ADE80) else Color(0xFFFF6B6B),
+                                    "$sign${formatCount(d.playsDelta)} écoutes (${if (d.playsDelta >= 0L) "+" else ""}${d.playsDeltaPct} %) par rapport à ${d.year - 1}",
+                                    color = if (d.playsDelta >= 0L) Color(0xFF4ADE80) else Color(0xFFFF6B6B),
                                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center
                                 )

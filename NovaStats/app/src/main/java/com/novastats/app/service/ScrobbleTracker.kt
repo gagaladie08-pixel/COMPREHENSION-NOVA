@@ -110,20 +110,24 @@ class ScrobbleTracker(
     fun updateThreshold(sec: Int) { thresholdSec = sec }
 
     /** Appelé quand le player signale un nouveau titre (metadata). */
-    fun onTrackChanged(key: TrackKey, isPlaying: Boolean, positionMs: Long = 0, source: String): List<Event> {
+    fun onTrackChanged(key: TrackKey, isPlaying: Boolean, positionMs: Long? = null, source: String): List<Event> {
         val now = clock()
         val events = mutableListOf<Event>()
         events += syncClock(now)
         val cur = current
         if (cur != null && cur.key == key) {
             // Même titre : détecter le loop (retour en début alors qu'on était avancé)
-            val looped = positionMs < 3_000 && cur.lastPositionMs > 15_000 && (cur.key.durationMs == null || cur.lastPositionMs > cur.key.durationMs / 2)
+            val looped = positionMs != null && positionMs < 3_000 && cur.lastPositionMs > 15_000 && (cur.key.durationMs == null || cur.lastPositionMs > cur.key.durationMs / 2)
             if (!looped) { cur.observePosition(positionMs, now); return events }
             events += end(cur, now)
         } else if (cur != null) {
             events += end(cur, now) // crossfade / changement : clôture de A
         }
-        val s = Session(key = key, startedAt = now, playingSince = if (isPlaying) now else null, pausedAt = if (isPlaying) null else now, lastPositionMs = positionMs, lastPositionAt = now, detectionSource = source)
+        val s = Session(
+            key = key, startedAt = now, playingSince = if (isPlaying) now else null, pausedAt = if (isPlaying) null else now,
+            lastPositionMs = positionMs?.coerceAtLeast(0L) ?: 0L, lastPositionAt = if (positionMs != null) now else 0L,
+            detectionSource = source
+        )
         s.observePosition(positionMs, now)
         current = s
         events += Event.Started(s)

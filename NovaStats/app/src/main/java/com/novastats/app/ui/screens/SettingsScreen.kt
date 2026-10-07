@@ -610,7 +610,7 @@ private fun DataPage() {
                     val version = BackupExporter.formatVersion(text)
                     if (BackupExporter.isNewerThanSupported(version)) error("Ce fichier vient d'une version plus récente de NovaStats ($version). Mets à jour l'app avant d'importer.")
                     val backup = LegacyBackupImporter.parse(text.byteInputStream())
-                    LegacyBackupImporter.import(app.database, backup, threshold) { status = it }
+                    LegacyBackupImporter.import(app.database, backup, threshold, library = app.library) { status = it }
                 }
                 EnrichmentWorker.enqueue(context)
                 status = report.summary()

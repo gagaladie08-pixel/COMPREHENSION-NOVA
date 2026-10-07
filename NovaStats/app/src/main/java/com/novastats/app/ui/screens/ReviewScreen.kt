@@ -125,7 +125,7 @@ fun buildRedItems(groups: List<ReviewGroup>, lowConfidence: List<RankedTrack>): 
 fun buildYellowItems(flagged: List<RankedTrack>, proposals: Map<Long, String>): List<ReviewItem> = flagged.map { t ->
     ReviewItem(
         ReviewKind.YELLOW, t.track.trackId, t.track.title, t.artistName, t.albumTitle, t.track.coverUrl, t.track.confidenceScore, null, null,
-        proposals[t.track.trackId] ?: "Pochette ${t.track.coverSource ?: "API"} (${t.track.confidenceScore} %)", t.periodPlays, t.track.lastPlayedAt,
+        proposals[t.track.trackId] ?: "Pochette ${if (t.track.coverSource == "USER" || t.track.coverSource == "USER_ALBUM") "👤 toi" else t.track.coverSource ?: "API"} (${t.track.confidenceScore} %)", t.periodPlays, t.track.lastPlayedAt,
         t.track.titleRaw, null, null, t.track.durationMs, flaggedOnly = false
     )
 }

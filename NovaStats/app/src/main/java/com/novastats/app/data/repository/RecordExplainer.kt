@@ -216,7 +216,10 @@ class RecordExplainer(private val db: NovaDatabase) {
                         "${al.playCount} écoutes pour ${tracks.size} titres : « $name » de $artist est un disque que tu reviens chercher$rankTxt."
                     )
                 )
-                if (top != null && al.playCount > 0) sb.append(" Son titre moteur : « ${top.track.title} » (${top.track.playCount} ▶, ${100 * top.track.playCount / al.playCount} % des écoutes de l'album).")
+                if (top != null && al.playCount > 0) {
+                    val share = (100L * top.track.playCount.toLong() / al.playCount.toLong()).coerceAtMost(100L)
+                    sb.append(" Son titre moteur : « ${top.track.title} » (${top.track.playCount} ▶, $share % des écoutes de l'album).")
+                }
                 db.certificationDao().current(id, EntityType.ALBUM)?.let { c ->
                     val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
                     sb.append(" Certifié ${lvl?.emoji ?: ""} ${lvl?.label ?: c.level}${if (c.multiplier > 1) " ×${c.multiplier}" else ""}.")
@@ -357,7 +360,10 @@ class RecordExplainer(private val db: NovaDatabase) {
                 val inChart = s.sumOf { it.plays }
                 when (cat) {
                     RecordCategory.TRACK -> db.trackDao().getById(id)?.let { t ->
-                        if (t.playCount > 0) sb.append("Sur ses ${t.playCount} écoutes au total, $inChart (${(100 * inChart / t.playCount).coerceAtMost(100)} %) ont eu lieu pendant ses périodes classées. ")
+                        if (t.playCount > 0) {
+                            val chartShare = (100L * inChart.toLong() / t.playCount.toLong()).coerceIn(0L, 100L)
+                            sb.append("Sur ses ${t.playCount} écoutes au total, $inChart ($chartShare %) ont eu lieu pendant ses périodes classées. ")
+                        }
                         if (t.bestStreak >= 2) sb.append("Sa meilleure série d'écoute quotidienne : ${t.bestStreak} jours. ")
                     }
                     RecordCategory.ARTIST -> {

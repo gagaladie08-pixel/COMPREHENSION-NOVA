@@ -25,6 +25,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Service de détection NovaStats.
@@ -38,6 +40,8 @@ class NovaListenerService : NotificationListenerService() {
 
     private val tag = "NovaListener"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Room writes triggered by separate MediaSession callbacks must never race or reorder. */
+    private val persistenceMutex = Mutex()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tracker = ScrobbleTracker()
     private var tickJob: Job? = null
@@ -118,11 +122,13 @@ class NovaListenerService : NotificationListenerService() {
         DetectionState.log("Service détruit")
         unbindAll()
         tickJob?.cancel()
-        // Clôture synchrone de l'écoute en cours (le scope va être annulé)
-        tracker.onPlayerGone().let { events ->
-            if (events.isNotEmpty()) runCatching { kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeout(3_000) { handleNow(events) } } }
-        }
+        // Arrête d'abord les écritures du scope; la clôture finale est alors persistée sans concurrence.
         scope.cancel()
+        tracker.onPlayerGone().let { events ->
+            if (events.isNotEmpty()) runCatching {
+                kotlinx.coroutines.runBlocking(Dispatchers.IO) { kotlinx.coroutines.withTimeout(3_000) { handleNow(events) } }
+            }
+        }
         super.onDestroy()
     }
 
@@ -218,7 +224,7 @@ class NovaListenerService : NotificationListenerService() {
                 sourceApp = c.packageName,
                 albumArtist = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             )
-            val position = realPosition(state) ?: 0L
+            val position = realPosition(state)
             if (tracker.current?.key != key) {
                 DetectionState.lastTrack(key.display)
                 DetectionState.log("▶ ${key.display} [${c.packageName}] ${stateName(state)}")
@@ -319,7 +325,7 @@ class NovaListenerService : NotificationListenerService() {
                         isPlaying = cur.playingSince != null, sourceApp = cur.key.sourceApp,
                         scrobbleStatus = if (cur.isValidated) "VALIDATED" else "PENDING"
                     )
-                    scope.launch { runCatching { persistNowPlaying(snap) }.onFailure { e -> DetectionState.error(e) } }
+                    scope.launch(Dispatchers.Main.immediate) { runCatching { persistNowPlaying(snap) }.onFailure { e -> DetectionState.error(e) } }
                 }
             }
         }
@@ -329,38 +335,45 @@ class NovaListenerService : NotificationListenerService() {
 
     private fun handle(events: List<ScrobbleTracker.Event>) {
         if (events.isEmpty()) return
-        scope.launch { handleNow(events) }
+        // Tous les appels proviennent du thread principal : démarrer ici conserve leur ordre
+        // avant que les suspendus Room ne s'entrelacent sur IO.
+        scope.launch(Dispatchers.Main.immediate) { handleNow(events) }
     }
 
-    private suspend fun handleNow(events: List<ScrobbleTracker.Event>) {
-        run {
-            for (e in events) {
-                try {
-                    when (e) {
-                        is ScrobbleTracker.Event.Started -> updateNowPlaying(e.session)
-                        is ScrobbleTracker.Event.Validated -> {
-                            DetectionState.log("✅ Validé : ${e.session.key.display}")
-                            persist(e.session, ended = false)
-                        }
-                        is ScrobbleTracker.Event.Ended -> {
-                            if (e.wasValidated) persist(e.session, ended = true)
-                            else DetectionState.log("⏭ Skip avant seuil (${e.listenedMs / 1000}s) : ${e.session.key.display}")
+    private suspend fun handleNow(events: List<ScrobbleTracker.Event>) = persistenceMutex.withLock {
+        for ((eventIndex, e) in events.withIndex()) {
+            try {
+                when (e) {
+                    is ScrobbleTracker.Event.Started -> updateNowPlaying(e.session)
+                    is ScrobbleTracker.Event.Validated -> {
+                        DetectionState.log("✅ Validé : ${e.session.key.display}")
+                        persist(e.session, ended = false)
+                    }
+                    is ScrobbleTracker.Event.Ended -> {
+                        if (e.wasValidated) persist(e.session, ended = true)
+                        else DetectionState.log("⏭ Skip avant seuil (${e.listenedMs / 1000}s) : ${e.session.key.display}")
+                        // Changement direct A→B : ne publie pas un état vide entre l'ancienne fin et le nouveau départ.
+                        val startedLaterInBatch = events.drop(eventIndex + 1).any { it is ScrobbleTracker.Event.Started }
+                        val newerSessionAlreadyActive = tracker.current?.let { it !== e.session } == true
+                        if (!startedLaterInBatch && !newerSessionAlreadyActive) {
                             app.database.nowPlayingDao().upsert(NowPlayingEntity(scrobbleStatus = "IDLE"))
                         }
-                        is ScrobbleTracker.Event.Gap -> DetectionState.log("🧊 Trou de ${e.gapMs / 1000}s non compté (service gelé / déconnecté) : ${e.session.key.display}")
-                        ScrobbleTracker.Event.None -> Unit
                     }
-                } catch (t: Throwable) {
-                    Log.e(tag, "handle $e", t)
-                    DetectionState.error(t)
+                    is ScrobbleTracker.Event.Gap -> DetectionState.log("🧊 Trou de ${e.gapMs / 1000}s non compté (service gelé / déconnecté) : ${e.session.key.display}")
+                    ScrobbleTracker.Event.None -> Unit
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.e(tag, "handle $e", failure)
+                DetectionState.error(failure)
             }
         }
     }
 
     private suspend fun updateNowPlaying(s: ScrobbleTracker.Session) {
         val now = System.currentTimeMillis()
-        persistNowPlaying(
+        writeNowPlaying(
             NowPlayingEntity(
                 trackId = null,
                 rawTitle = s.key.title, rawArtist = s.key.artist, rawAlbum = s.key.album, startedAt = s.startedAt,
@@ -371,7 +384,12 @@ class NovaListenerService : NotificationListenerService() {
         )
     }
 
-    private suspend fun persistNowPlaying(snap: NowPlayingEntity) {
+    private suspend fun persistNowPlaying(snap: NowPlayingEntity) = persistenceMutex.withLock {
+        writeNowPlaying(snap)
+    }
+
+    /** Caller owns [persistenceMutex], except the final onDestroy drain which runs after scope cancellation. */
+    private suspend fun writeNowPlaying(snap: NowPlayingEntity) {
         val trackId = if (snap.scrobbleStatus == "VALIDATED") app.library.peekTrackId(snap.rawTitle ?: return, snap.rawArtist ?: "Artiste inconnu") else null
         app.database.nowPlayingDao().upsert(snap.copy(trackId = trackId))
     }
@@ -425,12 +443,17 @@ class NovaListenerService : NotificationListenerService() {
      */
     private fun scheduleRebuild() {
         rebuildJob?.cancel()
-        rebuildJob = scope.launch {
+        val application = app
+        val context = applicationContext
+        // Le recalcul survit à la destruction/recréation du service : sinon la clôture finale pouvait écrire
+        // l'écoute puis annuler le seul recalcul avec scope.cancel(), laissant l'interface dérivée périmée.
+        rebuildJob = application.launchIoTask {
             delay(5_000)
             try {
-                val news = app.rebuilder.rebuildAll(fullBillboard = false)
-                runCatching { AchievementNotifier.notify(this@NovaListenerService, news) }.onFailure { DetectionState.error(it) }
-                EnrichmentWorker.enqueue(this@NovaListenerService)
+                val news = application.rebuilder.rebuildAll(fullBillboard = false)
+                com.novastats.app.util.runCatchingCancellable { AchievementNotifier.notify(context, news) }
+                    .onFailure { DetectionState.error(it) }
+                EnrichmentWorker.enqueue(context)
             } catch (t: kotlinx.coroutines.CancellationException) {
                 throw t
             } catch (t: Throwable) {

@@ -111,10 +111,11 @@ object LegacyBackupImporter {
         db: NovaDatabase,
         backup: LegacyBackup,
         thresholdSec: Int = ScrobbleRules.DEFAULT_THRESHOLD_SEC,
+        library: LibraryRepository = LibraryRepository(db),
         onProgress: (String) -> Unit = {}
     ): ImportReport {
         val t0 = System.currentTimeMillis()
-        val library = LibraryRepository(db)
+        library.clearCaches()
         // Noms protégés du backup (+ défauts) → chargés avant de découper « HUNTR/X & … »
         backup.artist_exceptions.filter { it.isNotBlank() }.forEach { n ->
             db.artistExceptionDao().insert(com.novastats.app.data.db.entity.ArtistExceptionEntity(name = n.trim(), nameKey = TitleNormalizer.normalizeKey(n)))
@@ -129,6 +130,7 @@ object LegacyBackupImporter {
 
         onProgress("Résolution de ${backup.songs.size} titres…")
         val trackBySongId = HashMap<Long, LibraryRepository.Resolved>(backup.songs.size * 2)
+        try {
         db.withTransaction {
             backup.songs.forEachIndexed { i, song ->
                 trackBySongId[song.id] = library.resolve(
@@ -151,6 +153,9 @@ object LegacyBackupImporter {
                 if (rootId != version.trackId) db.trackDao().linkToRoot(version.trackId, rootId)
             }
             db.trackDao().flattenRoots()
+        }
+        } finally {
+            library.clearCaches()
         }
 
         onProgress("Import de ${backup.plays.size} écoutes…")

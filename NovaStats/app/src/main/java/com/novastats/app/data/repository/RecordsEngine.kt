@@ -98,9 +98,17 @@ class RecordsEngine(private val db: NovaDatabase) {
     private fun row(type: String, period: Period?, cat: RecordCategory, sub: String?, r: RecordResult, now: Long) =
         RecordCacheEntity(recordType = type, periodType = period?.dbName, category = cat.dbName, subcategory = sub, entityId = r.entityId, value = r.value, valueDate = r.date, extraData = r.extra, calculatedAt = now)
 
-    /** Top 10 ; égalités départagées par la date la plus ancienne. */
-    private fun top(results: List<RecordResult>, asc: Boolean = false): List<RecordResult> =
-        (if (asc) results.sortedWith(compareBy<RecordResult> { it.value }.thenBy { it.date ?: "~" }) else results.sortedWith(compareByDescending<RecordResult> { it.value }.thenBy { it.date ?: "~" })).take(10)
+    /** Top 10, en conservant tous les ex æquo à la frontière ; date la plus ancienne pour l'ordre d'affichage. */
+    private fun top(results: List<RecordResult>, asc: Boolean = false): List<RecordResult> {
+        val sorted = if (asc) {
+            results.sortedWith(compareBy<RecordResult> { it.value }.thenBy { it.date ?: "~" })
+        } else {
+            results.sortedWith(compareByDescending<RecordResult> { it.value }.thenBy { it.date ?: "~" })
+        }
+        if (sorted.size <= 10) return sorted
+        val cutoff = sorted[9].value
+        return sorted.takeWhile { if (asc) it.value <= cutoff else it.value >= cutoff }
+    }
 
     private fun emit(out: MutableList<RecordCacheEntity>, type: String, period: Period?, cat: RecordCategory, sub: String?, results: List<RecordResult>, now: Long, asc: Boolean = false) {
         top(results.filter { it.value > 0 }, asc).forEach { out += row(type, period, cat, sub, it, now) }

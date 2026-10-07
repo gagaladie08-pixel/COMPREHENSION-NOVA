@@ -45,6 +45,9 @@ class NovaStatsApp : Application() {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** Tâches courtes liées à la durée de vie du processus (la file WorkManager prend ensuite le relais). */
+    fun launchIoTask(block: suspend CoroutineScope.() -> Unit) = appScope.launch(Dispatchers.IO, block = block)
+
     override fun onCreate() {
         super.onCreate()
         instance = this

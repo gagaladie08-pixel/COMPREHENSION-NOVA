@@ -5,12 +5,17 @@ import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.entity.AlbumEntity
 import com.novastats.app.data.db.entity.ArtistEntity
 import com.novastats.app.data.db.entity.EditHistoryEntity
+import com.novastats.app.data.db.entity.ScrobbleEntity
+import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackArtistEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.data.db.entity.UserCorrectionEntity
 import com.novastats.app.domain.TitleNormalizer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 🛠️ Éditeur de données — logique métier (singleton par application).
@@ -24,6 +29,7 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     val status: StateFlow<String?> = _status
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy
+    private val operationMutex = Mutex()
 
     object Type {
         const val RENAME = "RENAME"; const val MERGE = "MERGE"; const val COVER_CHANGE = "COVER_CHANGE"
@@ -37,38 +43,47 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         db.editorDao().trimTo50()
     }
 
-    private suspend fun <T> perform(message: String, rebuild: Boolean, block: suspend () -> T): T {
+    private suspend fun <T> perform(message: String, rebuild: Boolean, block: suspend () -> T): T = operationMutex.withLock {
         _busy.value = true
         try {
             val r = runCatching { block() }
+            r.exceptionOrNull()?.takeIf { it is CancellationException }?.let { throw it }
             // Les caches de résolution peuvent pointer vers des entités fusionnées/supprimées → toujours vidés
             library?.clearCaches()
             // Recalcul même en cas d'échec partiel (lot de fusions) pour ne jamais laisser des stats incohérentes
             if (rebuild) { _status.value = "$message · recalcul…"; rebuilder.rebuildAll(fullBillboard = true) }
             r.onFailure { t -> _status.value = "❌ ${t.message ?: t.javaClass.simpleName}"; throw t }
             _status.value = "✅ $message"
-            return r.getOrThrow()
+            r.getOrThrow()
         } finally { _busy.value = false }
     }
 
     /* ---------------- Renommer ---------------- */
 
     suspend fun renameArtist(id: Long, newName: String) = perform("Artiste renommé", rebuild = false) {
-        val a = db.artistDao().getById(id) ?: error("Artiste introuvable")
-        val name = newName.trim(); require(name.isNotEmpty()) { "Nom vide" }
-        db.artistDao().findByNameNoCase(name)?.takeIf { it.artistId != id }?.let { error("« $name » existe déjà — utilise Fusionner") }
-        db.artistDao().rename(id, name)
-        db.editorDao().upsertCorrection(UserCorrectionEntity(originalValue = a.name, correctedValue = name, correctionType = "ARTIST"))
-        log(Type.RENAME, "ARTIST", id, a.name, name)
+        db.withTransaction {
+            val a = db.artistDao().getById(id) ?: error("Artiste introuvable")
+            val name = newName.trim(); require(name.isNotEmpty()) { "Nom vide" }
+            db.artistDao().findByNameNoCase(name)?.takeIf { it.artistId != id }?.let { error("« $name » existe déjà — utilise Fusionner") }
+            val corrections = snapshotCorrections(listOf("ARTIST" to a.name))
+            db.artistDao().rename(id, name)
+            saveCorrection(a.name, name, "ARTIST")
+            log(Type.RENAME, "ARTIST", id, a.name, name, extra = withRowsExtra(null, "corrections", corrections))
+        }
     }
 
     suspend fun renameAlbum(id: Long, newTitle: String) = perform("Album renommé", rebuild = false) {
-        val al = db.albumDao().getById(id) ?: error("Album introuvable")
-        val title = newTitle.trim(); require(title.isNotEmpty()) { "Titre vide" }
-        val clash = al.artistId?.let { db.albumDao().findByTitleAndArtist(title, it) } ?: if (al.artistId == null) db.albumDao().findShared(title) else null
-        clash?.takeIf { it.albumId != id }?.let { error("« $title » existe déjà pour cet artiste — utilise Fusionner") }
-        db.albumDao().rename(id, title)
-        log(Type.RENAME, "ALBUM", id, al.title, title)
+        db.withTransaction {
+            val al = db.albumDao().getById(id) ?: error("Album introuvable")
+            val title = newTitle.trim(); require(title.isNotEmpty()) { "Titre vide" }
+            val clash = al.artistId?.let { db.albumDao().findByTitleAndArtist(title, it) } ?: if (al.artistId == null) db.albumDao().findShared(title) else null
+            clash?.takeIf { it.albumId != id }?.let { error("« $title » existe déjà pour cet artiste — utilise Fusionner") }
+            val entries = listOf("ALBUM" to al.title, "ALBUM" to al.titleRaw)
+            val corrections = snapshotCorrections(entries)
+            db.albumDao().rename(id, title)
+            entries.forEach { (type, original) -> saveCorrection(original, title, type) }
+            log(Type.RENAME, "ALBUM", id, al.title, title, extra = withRowsExtra(null, "corrections", corrections))
+        }
     }
 
     /**
@@ -77,33 +92,59 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
      * redécoupé par artiste principal — et tout est recalculé.
      */
     suspend fun setAlbumShared(id: Long, shared: Boolean) = perform(if (shared) "Album marqué multi-artistes" else "Marque multi-artistes retirée", rebuild = true) {
-        val al = db.albumDao().getById(id) ?: error("Album introuvable")
-        saveCorrection(TitleNormalizer.normalizeKey(al.title), if (shared) "1" else "0", LibraryRepository.CORRECTION_ALBUM_SHARED)
-        library?.clearCaches()
-        AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
-        log(Type.ALBUM_SHARED, "ALBUM", id, if (shared) "normal" else "multi-artistes", if (shared) "multi-artistes" else "normal")
+        db.withTransaction {
+            val al = db.albumDao().getById(id) ?: error("Album introuvable")
+            val original = TitleNormalizer.normalizeKey(al.title)
+            val corrections = snapshotCorrections(listOf(LibraryRepository.CORRECTION_ALBUM_SHARED to original))
+            saveCorrection(original, if (shared) "1" else "0", LibraryRepository.CORRECTION_ALBUM_SHARED)
+            library?.clearCaches()
+            AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
+            log(
+                Type.ALBUM_SHARED, "ALBUM", id,
+                if (shared) "normal" else "multi-artistes", if (shared) "multi-artistes" else "normal",
+                withRowsExtra(null, "corrections", corrections)
+            )
+        }
     }
 
     suspend fun renameTrack(id: Long, newTitle: String) = perform("Titre renommé", rebuild = false) {
-        val t = db.trackDao().getById(id) ?: error("Titre introuvable")
-        val title = newTitle.trim(); require(title.isNotEmpty()) { "Titre vide" }
-        db.trackDao().findByTitleAndArtist(title, t.artistId)?.takeIf { it.trackId != id }?.let { error("« $title » existe déjà pour cet artiste — utilise Fusionner") }
-        db.trackDao().rename(id, title)
-        db.editorDao().upsertCorrection(UserCorrectionEntity(originalValue = t.title, correctedValue = title, correctionType = "TRACK"))
-        log(Type.RENAME, "TRACK", id, t.title, title)
+        db.withTransaction {
+            val t = db.trackDao().getById(id) ?: error("Titre introuvable")
+            val title = newTitle.trim(); require(title.isNotEmpty()) { "Titre vide" }
+            db.trackDao().findByTitleAndArtist(title, t.artistId)?.takeIf { it.trackId != id }?.let { error("« $title » existe déjà pour cet artiste — utilise Fusionner") }
+            val entries = listOf("TITLE" to t.title, "TITLE" to t.titleRaw)
+            val corrections = snapshotCorrections(entries)
+            db.trackDao().rename(id, title)
+            entries.forEach { (type, original) -> saveCorrection(original, title, type) }
+            log(Type.RENAME, "TRACK", id, t.title, title, extra = withRowsExtra(null, "corrections", corrections))
+        }
     }
 
     /* ---------------- Images (galerie / web) ---------------- */
 
     suspend fun setArtistPhoto(id: Long, url: String?) = perform("Photo mise à jour", rebuild = false) {
-        val a = db.artistDao().getById(id) ?: error("Artiste introuvable")
-        db.artistDao().setPhoto(id, url); log(Type.COVER_CHANGE, "ARTIST", id, a.photoUrl, url)
+        val cleanedUrl = url?.takeIf(String::isNotBlank)
+        db.withTransaction {
+            val a = db.artistDao().getById(id) ?: error("Artiste introuvable")
+            db.artistDao().setPhoto(id, cleanedUrl)
+            val extra = withRowsExtra(null, "previousSource", listOf(listOf(a.photoSource)))
+            log(Type.COVER_CHANGE, "ARTIST", id, a.photoUrl, cleanedUrl, extra)
+        }
     }
 
     suspend fun setAlbumCover(id: Long, url: String?) = perform("Pochette mise à jour", rebuild = false) {
-        val al = db.albumDao().getById(id) ?: error("Album introuvable")
-        db.albumDao().setCover(id, url); db.albumDao().propagateCoverToTracks(id, url ?: "", "USER")
-        log(Type.COVER_CHANGE, "ALBUM", id, al.coverUrl, url)
+        db.withTransaction {
+            val al = db.albumDao().getById(id) ?: error("Album introuvable")
+            val affected = if (url.isNullOrBlank()) db.albumDao().tracksForUserCoverRemoval(id)
+                else db.albumDao().tracksForUserCoverUpdate(id)
+            db.albumDao().setCover(id, url?.takeIf(String::isNotBlank))
+            if (url.isNullOrBlank()) db.albumDao().clearUserAlbumCoverFromTracks(id)
+            else db.albumDao().applyUserAlbumCoverToTracks(id, url)
+            var extra = withRowsExtra(null, "previousSource", listOf(listOf(al.coverSource)))
+            extra = withRowsExtra(extra, "trackCovers", affected.map { listOf(it.trackId.toString(), it.coverUrl, it.coverSource) })
+            extra = withRowsExtra(extra, "appliedCover", listOf(listOf(url?.takeIf(String::isNotBlank))))
+            log(Type.COVER_CHANGE, "ALBUM", id, al.coverUrl, url?.takeIf(String::isNotBlank), extra)
+        }
     }
 
     /* ---------------- Fusions ---------------- */
@@ -134,13 +175,15 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         }
         db.albumDao().moveArtist(from, into)
         // Titres homonymes → fusion des écoutes
-        for (t in db.trackDao().allPlayed().filter { it.artistId == from }) {
+        for (t in db.trackDao().allByArtistId(from)) {
             val existing = db.trackDao().findByTitleAndArtist(t.title, into)
             if (existing != null && existing.trackId != t.trackId) mergeTracksInternal(t.trackId, existing.trackId)
         }
         db.trackDao().moveArtist(from, into)
         db.trackLinkDao().dropDuplicateLinks(from, into)
         db.trackLinkDao().moveArtist(from, into)
+        db.trackLinkDao().normalizePrimaryLinksForArtist(into)
+        db.trackLinkDao().ensurePrimaryLinksForArtist(into)
         db.scrobbleDao().moveArtist(from, into)
         db.artistDao().markMerged(from, into)
         db.editorDao().upsertCorrection(UserCorrectionEntity(originalValue = a.name, correctedValue = b.name, correctionType = "ARTIST"))
@@ -160,14 +203,21 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     suspend fun mergeAlbumsBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) d'albums", rebuild = true) {
         // Une transaction PAR paire : un échec n'annule pas les autres fusions
         val errors = ArrayList<String>()
+        var succeeded = 0
         for ((from, into) in pairs) {
             if (from == into) continue
             val a = db.albumDao().getById(from) ?: continue
             val b = db.albumDao().getById(into) ?: continue
-            runCatching { db.withTransaction { mergeAlbumsInternal(from, into); log(Type.MERGE, "ALBUM", from, a.title, b.title, extra = into.toString()) } }
-                .onFailure { errors += "${a.title} : ${it.message ?: it.javaClass.simpleName}" }
+            try {
+                db.withTransaction { mergeAlbumsInternal(from, into); log(Type.MERGE, "ALBUM", from, a.title, b.title, extra = into.toString()) }
+                succeeded++
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                errors += "${a.title} : ${failure.message ?: failure.javaClass.simpleName}"
+            }
         }
-        if (errors.isNotEmpty()) error("${pairs.size - errors.size} fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
+        if (errors.isNotEmpty()) error("$succeeded fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
     }
 
     private suspend fun mergeAlbumsInternal(from: Long, into: Long) {
@@ -200,14 +250,21 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     suspend fun mergeTracksBatch(pairs: List<Pair<Long, Long>>) = perform("${pairs.size} fusion(s) de titres", rebuild = true) {
         // Une transaction PAR paire : un échec n'annule pas les autres fusions
         val errors = ArrayList<String>()
+        var succeeded = 0
         for ((from, into) in pairs) {
             if (from == into) continue
             val a = db.trackDao().getById(from) ?: continue
             val b = db.trackDao().getById(into) ?: continue
-            runCatching { db.withTransaction { mergeTracksInternal(from, into); log(Type.MERGE, "TRACK", from, a.title, b.title, extra = into.toString()) } }
-                .onFailure { errors += "${a.title} : ${it.message ?: it.javaClass.simpleName}" }
+            try {
+                db.withTransaction { mergeTracksInternal(from, into); log(Type.MERGE, "TRACK", from, a.title, b.title, extra = into.toString()) }
+                succeeded++
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                errors += "${a.title} : ${failure.message ?: failure.javaClass.simpleName}"
+            }
         }
-        if (errors.isNotEmpty()) error("${pairs.size - errors.size} fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
+        if (errors.isNotEmpty()) error("$succeeded fusion(s) faite(s), ${errors.size} échec(s) — ${errors.first()}")
     }
 
     /** Lie une fiche de version/remix à son original sans fusionner ni déplacer ses écoutes. */
@@ -251,10 +308,20 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         db.scrobbleDao().moveTrack(from, into)
         // Les artistes du doublon (featurings) rejoignent la cible
         db.trackLinkDao().artistIdsForTrack(from).forEach { db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = into, artistId = it, isPrimary = it == target.artistId)) }
+        db.trackLinkDao().copyAlbumLinks(from, into)
+        target.albumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = into, albumId = it)) }
         db.trackLinkDao().clearTrackArtists(from)
         db.trackLinkDao().clearTrackAlbums(from)
         if (source != null) {
-            if (target.coverUrl == null && source.coverUrl != null) db.trackDao().update(target.copy(coverUrl = source.coverUrl, coverSource = source.coverSource))
+            val mergedTarget = target.copy(
+                albumId = target.albumId ?: source.albumId,
+                durationMs = target.durationMs ?: source.durationMs,
+                genre = target.genre ?: source.genre,
+                coverUrl = target.coverUrl ?: source.coverUrl,
+                coverSource = if (target.coverUrl == null) source.coverSource else target.coverSource
+            )
+            if (mergedTarget != target) db.trackDao().update(mergedTarget)
+            mergedTarget.albumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = into, albumId = it)) }
             // Mémorisé : la prochaine écoute arrivant sous l'ancien libellé retombe sur la cible (sinon le doublon renaît)
             if (source.title != target.title) saveCorrection(source.title, target.title, "TITLE")
             if (source.titleRaw != source.title && source.titleRaw != target.title) saveCorrection(source.titleRaw, target.title, "TITLE")
@@ -265,40 +332,78 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     /* ---------------- Changer artiste / album d'un titre ---------------- */
 
     suspend fun setTrackArtist(trackId: Long, artistId: Long) = perform("Artiste du titre modifié", rebuild = true) {
+        db.withTransaction { setTrackArtistInternal(trackId, artistId) }
+    }
+
+    private suspend fun setTrackArtistInternal(trackId: Long, artistId: Long) {
         val t = db.trackDao().getById(trackId) ?: error("Titre introuvable")
-        db.withTransaction {
-            db.trackDao().findByTitleAndArtist(t.title, artistId)?.takeIf { it.trackId != trackId }?.let { error("Ce titre existe déjà chez cet artiste — utilise Fusionner") }
-            db.trackDao().setPrimaryArtist(trackId, artistId)
-            db.trackLinkDao().clearTrackArtists(trackId)
-            db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = trackId, artistId = artistId, isPrimary = true))
-            db.scrobbleDao().setArtistForTrack(trackId, artistId)
-            log(Type.ARTIST_CHANGE, "TRACK", trackId, t.artistId.toString(), artistId.toString())
+        val newArtist = db.artistDao().getById(artistId) ?: error("Artiste introuvable")
+        db.trackDao().findByTitleAndArtist(t.title, artistId)?.takeIf { it.trackId != trackId }?.let { error("Ce titre existe déjà chez cet artiste — utilise Fusionner") }
+        val previousLinks = db.trackLinkDao().trackArtistsForTrack(trackId)
+        val rawArtists = db.scrobbleDao().allOfTrack(trackId).mapNotNull { it.rawArtist?.takeIf(String::isNotBlank) }.distinct()
+        val oldArtistName = db.artistDao().getById(t.artistId)?.name
+        val correctionEntries = (rawArtists.ifEmpty { listOfNotNull(oldArtistName) }).map { "ARTIST" to it }
+        val correctionStates = snapshotCorrections(correctionEntries)
+
+        db.trackDao().setPrimaryArtist(trackId, artistId)
+        db.trackLinkDao().clearTrackArtists(trackId)
+        db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = trackId, artistId = artistId, isPrimary = true))
+        previousLinks.filter { !it.isPrimary && it.artistId != artistId }.forEach { link ->
+            db.trackLinkDao().insertTrackArtist(link.copy(id = 0, artistId = link.artistId, isPrimary = false))
         }
+        db.scrobbleDao().setArtistForTrack(trackId, artistId)
+        correctionEntries.forEach { (_, raw) -> saveCorrection(raw, newArtist.name, "ARTIST") }
+
+        var extra = withRowsExtra(
+            null, "artistLinks", previousLinks.map { listOf(it.artistId.toString(), it.isPrimary.toString(), it.role) }
+        )
+        extra = withRowsExtra(extra, "corrections", correctionStates)
+        log(Type.ARTIST_CHANGE, "TRACK", trackId, t.artistId.toString(), artistId.toString(), extra)
     }
 
     suspend fun setTrackAlbum(trackId: Long, albumId: Long?) = perform("Album du titre modifié", rebuild = true) {
+        db.withTransaction { setTrackAlbumInternal(trackId, albumId) }
+    }
+
+    private suspend fun setTrackAlbumInternal(trackId: Long, albumId: Long?) {
         val t = db.trackDao().getById(trackId) ?: error("Titre introuvable")
+        val targetAlbum = albumId?.let { db.albumDao().getById(it) ?: error("Album introuvable") }
+        val rawAlbums = db.scrobbleDao().allOfTrack(trackId).mapNotNull { it.rawAlbum?.takeIf(String::isNotBlank) }.distinct()
+        val oldAlbumTitle = t.albumId?.let { db.albumDao().getById(it)?.title }
+        val correctionEntries = (rawAlbums.ifEmpty { listOfNotNull(oldAlbumTitle) }).map { "ALBUM" to it }
+        val correctionStates = snapshotCorrections(correctionEntries)
+
+        db.trackDao().setAlbum(trackId, albumId)
+        t.albumId?.let { db.trackLinkDao().unlinkTrackAlbum(trackId, it) }
+        albumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = trackId, albumId = it)) }
+        db.scrobbleDao().setAlbumForTrack(trackId, albumId)
+        correctionEntries.forEach { (_, raw) -> saveCorrection(raw, targetAlbum?.title.orEmpty(), "ALBUM") }
+        val extra = withRowsExtra(null, "corrections", correctionStates)
+        log(Type.ALBUM_CHANGE, "TRACK", trackId, t.albumId?.toString(), albumId?.toString(), extra)
+    }
+
+    /** Crée un album pour cet artiste (ou le réutilise) puis l'affecte au titre, atomiquement. */
+    suspend fun setTrackAlbumByName(trackId: Long, albumTitle: String) = perform("Album du titre modifié", rebuild = true) {
         db.withTransaction {
-            db.trackDao().setAlbum(trackId, albumId)
-            db.scrobbleDao().setAlbumForTrack(trackId, albumId)
-            log(Type.ALBUM_CHANGE, "TRACK", trackId, t.albumId?.toString(), albumId?.toString())
+            val t = db.trackDao().getById(trackId) ?: error("Titre introuvable")
+            val rawTitle = albumTitle.trim(); require(rawTitle.isNotEmpty()) { "Titre d'album vide" }
+            val title = TitleNormalizer.normalizeAlbumTitle(rawTitle)
+            require(title.isNotEmpty()) { "Titre d'album invalide" }
+            val id = db.albumDao().findByTitleAndArtist(title, t.artistId)?.albumId
+                ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = rawTitle, artistId = t.artistId))
+            setTrackAlbumInternal(trackId, id)
         }
     }
 
-    /** Crée un album pour cet artiste (ou le réutilise) puis l'affecte au titre. */
-    suspend fun setTrackAlbumByName(trackId: Long, albumTitle: String) {
-        val t = db.trackDao().getById(trackId) ?: error("Titre introuvable")
-        val title = TitleNormalizer.normalizeAlbumTitle(albumTitle)
-        val id = db.albumDao().findByTitleAndArtist(title, t.artistId)?.albumId
-            ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = albumTitle, artistId = t.artistId))
-        setTrackAlbum(trackId, id)
-    }
-
-    /** Crée l'artiste s'il n'existe pas, puis l'affecte au titre. */
-    suspend fun setTrackArtistByName(trackId: Long, artistName: String) {
-        val name = artistName.trim(); require(name.isNotEmpty()) { "Nom vide" }
-        val id = db.artistDao().findByNameNoCase(name)?.artistId ?: db.artistDao().insert(ArtistEntity(name = name, nameRaw = name))
-        setTrackArtist(trackId, id)
+    /** Crée l'artiste s'il n'existe pas, puis l'affecte au titre, atomiquement. */
+    suspend fun setTrackArtistByName(trackId: Long, artistName: String) = perform("Artiste du titre modifié", rebuild = true) {
+        db.withTransaction {
+            db.trackDao().getById(trackId) ?: error("Titre introuvable")
+            val name = artistName.trim(); require(name.isNotEmpty()) { "Nom d'artiste vide" }
+            val id = db.artistDao().findByNameNoCase(name)?.artistId
+                ?: db.artistDao().insert(ArtistEntity(name = name, nameRaw = name))
+            setTrackArtistInternal(trackId, id)
+        }
     }
 
     /* ---------------- ⚠️ À corriger (révision par écoute) ---------------- */
@@ -306,11 +411,87 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     /** Mémorise une règle « avant → après » (ou une valeur confirmée si avant == après). Idempotent. */
     private suspend fun saveCorrection(original: String, corrected: String, type: String) {
         val o = original.trim(); val c = corrected.trim()
-        if (o.isEmpty() || c.isEmpty()) return
-        val existing = db.editorDao().correction(o, type)
-        db.editorDao().upsertCorrection(UserCorrectionEntity(id = existing?.id ?: 0, originalValue = o, correctedValue = c, correctionType = type, timesApplied = existing?.timesApplied ?: 0))
+        if (o.isEmpty() || (c.isEmpty() && type != "ALBUM")) return
+        val existing = findCorrection(o, type)
+        db.editorDao().upsertCorrection(
+            UserCorrectionEntity(
+                id = existing?.id ?: 0,
+                originalValue = existing?.originalValue ?: o,
+                correctedValue = c,
+                correctionType = type,
+                timesApplied = existing?.timesApplied ?: 0,
+                createdAt = System.currentTimeMillis()
+            )
+        )
         library?.invalidateCorrections()
     }
+
+    private suspend fun findCorrection(original: String, type: String): UserCorrectionEntity? {
+        db.editorDao().correction(original, type)?.let { return it }
+        val key = TitleNormalizer.normalizeKey(original)
+        return db.editorDao().correctionsOfType(type)
+            .filter { TitleNormalizer.normalizeKey(it.originalValue) == key }
+            .maxByOrNull { it.createdAt }
+    }
+
+    /** Sauvegarde l'état antérieur des règles exactement touchées, pour que Undo soit réellement réversible. */
+    private suspend fun snapshotCorrections(entries: List<Pair<String, String>>): List<List<String?>> {
+        val result = ArrayList<List<String?>>()
+        val seen = HashSet<Pair<String, String>>()
+        for ((type, raw) in entries) {
+            val original = raw.trim()
+            if (original.isEmpty() || !seen.add(type to TitleNormalizer.normalizeKey(original))) continue
+            val previous = findCorrection(original, type)
+            result += listOf(
+                type, original, if (previous == null) "0" else "1", previous?.id?.toString(),
+                previous?.originalValue, previous?.correctedValue, previous?.timesApplied?.toString(), previous?.createdAt?.toString()
+            )
+        }
+        return result
+    }
+
+    private suspend fun restoreCorrectionSnapshots(rows: List<List<String?>>) {
+        for (row in rows) {
+            val type = row.getOrNull(0) ?: continue
+            val requestedOriginal = row.getOrNull(1) ?: continue
+            if (row.getOrNull(2) != "1") {
+                db.editorDao().deleteCorrection(requestedOriginal, type)
+                continue
+            }
+            val id = row.getOrNull(3)?.toLongOrNull() ?: continue
+            val previousOriginal = row.getOrNull(4) ?: continue
+            val previousCorrected = row.getOrNull(5) ?: continue
+            val timesApplied = row.getOrNull(6)?.toIntOrNull() ?: 0
+            val createdAt = row.getOrNull(7)?.toLongOrNull() ?: System.currentTimeMillis()
+            db.editorDao().upsertCorrection(
+                UserCorrectionEntity(
+                    id = id, originalValue = previousOriginal, correctedValue = previousCorrected,
+                    correctionType = type, timesApplied = timesApplied, createdAt = createdAt
+                )
+            )
+        }
+        library?.invalidateCorrections()
+    }
+
+    private fun withRowsExtra(base: String?, key: String, rows: List<List<String?>>): String? {
+        if (rows.isEmpty()) return base
+        return listOfNotNull(base?.takeIf { it.isNotBlank() }, "$key=${EditorUndoCodec.encodeRows(rows)}").joinToString(";")
+    }
+
+    private fun parseExtraData(extra: String?): Map<String, String> = (extra ?: "").split(";").mapNotNull { part ->
+        part.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
+    }.toMap()
+
+    private fun trackStateRow(track: TrackEntity): List<String?> = listOf(
+        track.trackId.toString(), track.title, track.albumId?.toString(), track.coverUrl, track.coverSource,
+        track.confidenceScore.toString(), track.needsReview.toString(), track.durationMs?.toString(), track.genre,
+        track.titleRaw, track.artistId.toString(), track.isRemix.toString(), track.originalTrackId?.toString()
+    )
+
+    private fun scrobbleStateRow(scrobble: ScrobbleEntity): List<String?> = listOf(
+        scrobble.scrobbleId.toString(), scrobble.trackId.toString(), scrobble.artistId.toString(),
+        scrobble.albumId?.toString(), scrobble.confidenceScore.toString(), scrobble.needsReview.toString(), scrobble.reviewReason
+    )
 
     data class ReviewFix(
         val trackId: Long, val scrobbleIds: List<Long>, val allChecked: Boolean,
@@ -328,36 +509,98 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         require(fix.scrobbleIds.isNotEmpty()) { "Aucune écoute cochée" }
         val title = fix.title.trim(); require(title.isNotEmpty()) { "Titre vide" }
         val artists = fix.artists.trim().ifEmpty { "Artiste inconnu" }
+        val album = fix.album?.trim()?.takeIf { it.isNotEmpty() }
         val lib = library ?: error("Bibliothèque indisponible")
-        val old = db.trackDao().getById(fix.trackId) ?: error("Titre introuvable")
-        val oldArtistName = db.artistDao().getById(old.artistId)?.name ?: ""
-        val oldAlbumTitle = old.albumId?.let { db.albumDao().getById(it)?.title }
         db.withTransaction {
-            val target = lib.resolve(title, artists, fix.album?.takeIf { it.isNotBlank() }, old.durationMs, old.genre, applyCorrections = false)
-            val mode: String
-            if (target.trackId == old.trackId) {
-                // Même identité (titre normalisé + artiste principal) : mise à jour sur place (affichage du titre, album)
-                mode = "INPLACE"
-                db.trackDao().setTitleAndAlbum(old.trackId, title, target.albumId)
-                db.scrobbleDao().moveScrobbles(fix.scrobbleIds, old.trackId, target.primaryArtistId, target.albumId)
-            } else {
-                mode = "MOVE"
-                db.scrobbleDao().moveScrobbles(fix.scrobbleIds, target.trackId, target.primaryArtistId, target.albumId)
+            val old = db.trackDao().getById(fix.trackId) ?: error("Titre introuvable")
+            val tracksBefore = db.trackDao().allList().associateBy { it.trackId }
+            val artistIdsBefore = db.artistDao().allIds().toSet()
+            val albumIdsBefore = db.albumDao().all().map { it.albumId }.toSet()
+            val artistLinksBefore = db.trackLinkDao().allTrackArtists().groupBy { it.trackId }
+            val albumLinksBefore = db.trackLinkDao().allTrackAlbums().groupBy { it.trackId }
+            val requestedIds = fix.scrobbleIds.distinct()
+            require(requestedIds.size == fix.scrobbleIds.size) { "Une écoute est sélectionnée plusieurs fois" }
+            val selectedPlays = db.scrobbleDao().byIds(requestedIds)
+            require(selectedPlays.size == requestedIds.size) { "Une ou plusieurs écoutes sont introuvables" }
+            require(selectedPlays.all { it.trackId == fix.trackId }) { "Les écoutes sélectionnées ne correspondent pas à ce titre" }
+            val scrobbleStates = selectedPlays.map(::scrobbleStateRow)
+            val oldArtistName = db.artistDao().getById(old.artistId)?.name ?: ""
+            val oldAlbumTitle = old.albumId?.let { db.albumDao().getById(it)?.title }
+
+            val correctionEntries = mutableListOf<Pair<String, String>>()
+            if (fix.allChecked) {
+                fix.rawTitle?.takeIf { it.trim() != title }?.let { correctionEntries += "TITLE" to it }
+                fix.rawArtist?.takeIf { it.isNotBlank() && it.trim() != artists }?.let { correctionEntries += "ARTIST" to it }
+                fix.rawAlbum?.takeIf { it.isNotBlank() && it.trim() != album.orEmpty() }?.let { correctionEntries += "ALBUM" to it }
             }
+            val correctionKeys = correctionEntries + album?.let {
+                LibraryRepository.CORRECTION_ALBUM_SHARED to TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(it))
+            }.orEmpty()
+            val correctionStates = snapshotCorrections(correctionKeys)
+            val target = lib.resolve(title, artists, album, old.durationMs, old.genre, applyCorrections = false)
+            val mode = if (target.trackId == old.trackId) "INPLACE" else "MOVE"
+
+            if (mode == "INPLACE") {
+                // Même identité (titre normalisé + artiste principal) : mise à jour sur place.
+                db.trackDao().setTitleAndAlbum(old.trackId, title, target.albumId)
+                if (old.albumId != target.albumId) {
+                    old.albumId?.let { db.trackLinkDao().unlinkTrackAlbum(old.trackId, it) }
+                    target.albumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = old.trackId, albumId = it)) }
+                }
+            }
+            db.scrobbleDao().moveScrobbles(fix.scrobbleIds, target.trackId, target.primaryArtistId, target.albumId)
             if (!fix.coverUrl.isNullOrBlank()) db.trackDao().setCover(target.trackId, fix.coverUrl)
             db.scrobbleDao().clearReview(fix.scrobbleIds)
             if (fix.allChecked) {
+                // Le statut est porté à la fois par les écoutes et par la fiche titre. En cas de déplacement,
+                // il faut donc aussi libérer la fiche source, sinon elle reste bloquée dans la file.
+                db.trackDao().markReviewed(old.trackId)
                 db.trackDao().markReviewed(target.trackId)
-                fix.rawTitle?.takeIf { it.trim() != title }?.let { saveCorrection(it, title, "TITLE") }
-                fix.rawArtist?.takeIf { it.isNotBlank() && it.trim() != artists }?.let { saveCorrection(it, artists, "ARTIST") }
-                val album = fix.album?.trim().orEmpty()
-                fix.rawAlbum?.takeIf { it.isNotBlank() && album.isNotEmpty() && it.trim() != album }?.let { saveCorrection(it, album, "ALBUM") }
+                correctionEntries.forEach { (type, raw) ->
+                    val corrected = when (type) {
+                        "TITLE" -> title
+                        "ARTIST" -> artists
+                        else -> album.orEmpty()
+                    }
+                    saveCorrection(raw, corrected, type)
+                }
             }
+
+            // Capturer après toutes les mutations : resolve(), la modification INPLACE, les liens, la pochette,
+            // le déplacement des écoutes et leur validation doivent tous être réversibles par une seule Undo.
+            val tracksAfter = db.trackDao().allList().associateBy { it.trackId }
+            val changedTracks = tracksBefore.values.filter { before -> tracksAfter[before.trackId]?.let { it != before } == true }
+            val newTrackIds = (tracksAfter.keys - tracksBefore.keys).sorted()
+            val newArtistIds = (db.artistDao().allIds().toSet() - artistIdsBefore).sorted()
+            val newAlbumIds = (db.albumDao().all().map { it.albumId }.toSet() - albumIdsBefore).sorted()
+            val artistLinksAfter = db.trackLinkDao().allTrackArtists().groupBy { it.trackId }
+            val albumLinksAfter = db.trackLinkDao().allTrackAlbums().groupBy { it.trackId }
+            val changedArtistLinkTrackIds = tracksBefore.keys.filter { artistLinksBefore[it].orEmpty() != artistLinksAfter[it].orEmpty() }.sorted()
+            val changedAlbumLinkTrackIds = tracksBefore.keys.filter { albumLinksBefore[it].orEmpty() != albumLinksAfter[it].orEmpty() }.sorted()
+            val trackArtistRows = changedArtistLinkTrackIds.flatMap { trackId ->
+                artistLinksBefore[trackId].orEmpty().map { link -> listOf(trackId.toString(), link.artistId.toString(), link.isPrimary.toString(), link.role) }
+            }
+            val trackAlbumRows = changedAlbumLinkTrackIds.flatMap { trackId ->
+                albumLinksBefore[trackId].orEmpty().map { link -> listOf(trackId.toString(), link.albumId.toString(), link.trackNumber?.toString(), link.isPrimary.toString()) }
+            }
+            val trackStates = changedTracks.map(::trackStateRow)
+
+            var extra = "mode=$mode;ids=${fix.scrobbleIds.joinToString(",")};artist=${old.artistId};album=${old.albumId ?: ""};title=${EditorUndoCodec.encodeRows(listOf(listOf(old.title)))}"
+            extra = withRowsExtra(extra, "corrections", correctionStates) ?: extra
+            extra = withRowsExtra(extra, "scrobbles", scrobbleStates) ?: extra
+            extra = withRowsExtra(extra, "tracks", trackStates) ?: extra
+            extra = withRowsExtra(extra, "trackArtistTrackIds", changedArtistLinkTrackIds.map { listOf(it.toString()) }) ?: extra
+            extra = withRowsExtra(extra, "trackArtistLinks", trackArtistRows) ?: extra
+            extra = withRowsExtra(extra, "trackAlbumTrackIds", changedAlbumLinkTrackIds.map { listOf(it.toString()) }) ?: extra
+            extra = withRowsExtra(extra, "trackAlbumLinks", trackAlbumRows) ?: extra
+            extra = withRowsExtra(extra, "newTrackIds", newTrackIds.map { listOf(it.toString()) }) ?: extra
+            extra = withRowsExtra(extra, "newAlbumIds", newAlbumIds.map { listOf(it.toString()) }) ?: extra
+            extra = withRowsExtra(extra, "newArtistIds", newArtistIds.map { listOf(it.toString()) }) ?: extra
             log(
                 Type.REVIEW_FIX, "TRACK", old.trackId,
                 before = "${old.title} — $oldArtistName${oldAlbumTitle?.let { " · $it" } ?: ""}",
-                after = "$title — $artists${fix.album?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}",
-                extra = "mode=$mode;ids=${fix.scrobbleIds.joinToString(",")};artist=${old.artistId};album=${old.albumId ?: ""};title=${old.title}"
+                after = "$title — $artists${album?.let { " · $it" } ?: ""}",
+                extra = extra
             )
         }
         lib.clearCaches()
@@ -401,86 +644,245 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     /* ---------------- Undo ---------------- */
 
     /** Annule la dernière action (renommage complet ; fusion : nom restauré uniquement ; suppression : irréversible). */
-    suspend fun undo(): String {
-        val last = db.editorDao().last() ?: return "Rien à annuler"
-        val msg = when (last.type) {
-            Type.RENAME -> {
-                when (last.entityType) {
-                    "ARTIST" -> db.artistDao().rename(last.entityId, last.before ?: "")
-                    "ALBUM" -> db.albumDao().rename(last.entityId, last.before ?: "")
-                    else -> db.trackDao().rename(last.entityId, last.before ?: "")
-                }
-                "↩️ Renommage annulé (« ${last.before} »)"
-            }
-            Type.COVER_CHANGE -> {
-                if (last.entityType == "ARTIST") db.artistDao().setPhoto(last.entityId, last.before) else db.albumDao().setCover(last.entityId, last.before)
-                "↩️ Image restaurée"
-            }
-            Type.MERGE -> {
-                if (last.entityType == "ARTIST") {
-                    // Le nom est restauré (artiste réactivé, sans ses titres — limite documentée)
-                    db.artistDao().getById(last.entityId)?.let { db.artistDao().update(it.copy(isMerged = false, mergedIntoId = null)) }
-                    "↩️ Nom « ${last.before} » restauré — les titres restent fusionnés"
-                } else "⚠️ Une fusion d'${if (last.entityType == "ALBUM") "albums" else "titres"} ne peut pas être annulée"
-            }
-            Type.LINK_VERSION -> {
-                val version = db.trackDao().getById(last.entityId)
-                if (version == null) "⚠️ Lien non annulable : le titre version n'existe plus"
-                else {
-                    val extra = (last.extraData ?: "").split(";").mapNotNull { part ->
-                        part.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
-                    }.toMap()
-                    val oldRootId = last.before?.takeUnless { it == "ROOT" }?.toLongOrNull()
-                    val oldIsRemix = extra["wasRemix"] == "1"
-                    val childIds = extra["children"]?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
+    suspend fun undo(): String = operationMutex.withLock {
+        _busy.value = true
+        try {
+            val last = db.editorDao().last() ?: return@withLock "Rien à annuler"
+            val msg = when (last.type) {
+                Type.RENAME -> {
+                    val extra = parseExtraData(last.extraData)
                     db.withTransaction {
-                        db.trackDao().setVersionLink(version.trackId, oldRootId, oldIsRemix)
-                        childIds.forEach { childId ->
-                            db.trackDao().getById(childId)?.let { child -> db.trackDao().setVersionLink(childId, version.trackId, child.isRemix) }
+                        when (last.entityType) {
+                            "ARTIST" -> db.artistDao().rename(last.entityId, last.before ?: "")
+                            "ALBUM" -> db.albumDao().rename(last.entityId, last.before ?: "")
+                            else -> db.trackDao().rename(last.entityId, last.before ?: "")
                         }
-                        db.trackDao().flattenRoots()
+                        restoreCorrectionSnapshots(EditorUndoCodec.decodeRows(extra["corrections"]))
                     }
-                    library?.clearCaches()
-                    rebuilder.rebuildAll(fullBillboard = true)
-                    "↩️ Lien entre les titres annulé"
+                    "↩️ Renommage annulé (« ${last.before} »)"
                 }
-            }
-            Type.ARTIST_CHANGE -> { last.before?.toLongOrNull()?.let { setTrackArtist(last.entityId, it) }; "↩️ Artiste restauré" }
-            Type.ALBUM_SHARED -> {
-                // L'album d'origine peut avoir été fusionné / supprimé : on inverse la correction sur le titre, puis on reconsolide
-                val title = db.editorDao().correctionsOfType(LibraryRepository.CORRECTION_ALBUM_SHARED).firstOrNull { it.correctedValue == (if (last.after == "multi-artistes") "1" else "0") && last.createdAt - it.createdAt < 5 * 60_000L }?.originalValue
-                if (title == null) "⚠️ Marquage non annulable" else {
-                    saveCorrection(title, if (last.after == "multi-artistes") "0" else "1", LibraryRepository.CORRECTION_ALBUM_SHARED)
-                    library?.clearCaches()
-                    AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
-                    "↩️ Marquage multi-artistes ${if (last.after == "multi-artistes") "retiré" else "rétabli"}"
-                }
-            }
-            Type.ALBUM_CHANGE -> { setTrackAlbum(last.entityId, last.before?.toLongOrNull()); "↩️ Album restauré" }
-            Type.REVIEWED, Type.REVIEW_IGNORE -> "ℹ️ Marquage « correct / ignoré » conservé"
-            Type.REVIEW_FIX -> {
-                val kv = (last.extraData ?: "").split(";").mapNotNull { it.split("=", limit = 2).takeIf { p -> p.size == 2 }?.let { p -> p[0] to p[1] } }.toMap()
-                val ids = kv["ids"]?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
-                val oldArtist = kv["artist"]?.toLongOrNull()
-                val oldAlbum = kv["album"]?.toLongOrNull()
-                val oldTrack = db.trackDao().getById(last.entityId)
-                if (ids.isEmpty() || oldTrack == null || oldArtist == null) "⚠️ Correction non annulable (titre d'origine disparu)"
-                else {
-                    db.withTransaction {
-                        if (kv["mode"] == "INPLACE") db.trackDao().setTitleAndAlbum(oldTrack.trackId, kv["title"] ?: oldTrack.title, oldAlbum)
-                        db.scrobbleDao().moveScrobbles(ids, oldTrack.trackId, oldArtist, oldAlbum)
-                        db.scrobbleDao().reflag(ids, "Correction annulée")
+                Type.COVER_CHANGE -> {
+                    val extra = parseExtraData(last.extraData)
+                    val hasPreviousSource = extra.containsKey("previousSource")
+                    val previousSource = EditorUndoCodec.decodeRows(extra["previousSource"]).firstOrNull()?.firstOrNull()
+                    if (last.entityType == "ARTIST") {
+                        if (hasPreviousSource) db.artistDao().restorePhoto(last.entityId, last.before, previousSource)
+                        else db.artistDao().setPhoto(last.entityId, last.before)
+                    } else {
+                        db.withTransaction {
+                            if (hasPreviousSource) db.albumDao().restoreCover(last.entityId, last.before, previousSource)
+                            else db.albumDao().setCover(last.entityId, last.before)
+                            val applied = EditorUndoCodec.decodeRows(extra["appliedCover"]).firstOrNull()?.firstOrNull()
+                            if (extra.containsKey("appliedCover")) {
+                                EditorUndoCodec.decodeRows(extra["trackCovers"]).forEach { row ->
+                                    val trackId = row.getOrNull(0)?.toLongOrNull() ?: return@forEach
+                                    db.albumDao().restoreUserAlbumTrackCover(
+                                        trackId, row.getOrNull(1), row.getOrNull(2), applied
+                                    )
+                                }
+                            }
+                        }
                     }
-                    library?.clearCaches()
-                    rebuilder.rebuildAll(fullBillboard = true)
-                    "↩️ Correction annulée — ${ids.size} écoute(s) de retour dans ⚠️ À corriger"
+                    "↩️ Image restaurée"
                 }
+                Type.MERGE -> {
+                    if (last.entityType == "ARTIST") {
+                        // Le nom est restauré (artiste réactivé, sans ses titres — limite documentée)
+                        db.artistDao().getById(last.entityId)?.let { db.artistDao().update(it.copy(isMerged = false, mergedIntoId = null)) }
+                        "↩️ Nom « ${last.before} » restauré — les titres restent fusionnés"
+                    } else "⚠️ Une fusion d'${if (last.entityType == "ALBUM") "albums" else "titres"} ne peut pas être annulée"
+                }
+                Type.LINK_VERSION -> {
+                    val version = db.trackDao().getById(last.entityId)
+                    if (version == null) "⚠️ Lien non annulable : le titre version n'existe plus"
+                    else {
+                        val extra = (last.extraData ?: "").split(";").mapNotNull { part ->
+                            part.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
+                        }.toMap()
+                        val oldRootId = last.before?.takeUnless { it == "ROOT" }?.toLongOrNull()
+                        val oldIsRemix = extra["wasRemix"] == "1"
+                        val childIds = extra["children"]?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
+                        db.withTransaction {
+                            db.trackDao().setVersionLink(version.trackId, oldRootId, oldIsRemix)
+                            childIds.forEach { childId ->
+                                db.trackDao().getById(childId)?.let { child -> db.trackDao().setVersionLink(childId, version.trackId, child.isRemix) }
+                            }
+                            db.trackDao().flattenRoots()
+                        }
+                        library?.clearCaches()
+                        rebuilder.rebuildAll(fullBillboard = true)
+                        "↩️ Lien entre les titres annulé"
+                    }
+                }
+                Type.ARTIST_CHANGE -> {
+                    val oldArtist = last.before?.toLongOrNull()
+                    if (oldArtist == null || db.trackDao().getById(last.entityId) == null) "⚠️ Artiste non restaurable"
+                    else {
+                        val links = EditorUndoCodec.decodeRows(parseExtraData(last.extraData)["artistLinks"])
+                        db.withTransaction {
+                            db.trackDao().setPrimaryArtist(last.entityId, oldArtist)
+                            db.scrobbleDao().setArtistForTrack(last.entityId, oldArtist)
+                            db.trackLinkDao().clearTrackArtists(last.entityId)
+                            var hasPrimary = false
+                            links.forEach { row ->
+                                val artistId = row.getOrNull(0)?.toLongOrNull() ?: return@forEach
+                                val primary = artistId == oldArtist
+                                db.trackLinkDao().insertTrackArtist(
+                                    TrackArtistEntity(
+                                        trackId = last.entityId, artistId = artistId, isPrimary = primary,
+                                        role = if (primary) "main" else row.getOrNull(2) ?: "featured"
+                                    )
+                                )
+                                if (artistId == oldArtist) hasPrimary = true
+                            }
+                            if (!hasPrimary) db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = last.entityId, artistId = oldArtist, isPrimary = true))
+                            restoreCorrectionSnapshots(EditorUndoCodec.decodeRows(parseExtraData(last.extraData)["corrections"]))
+                        }
+                        library?.clearCaches()
+                        rebuilder.rebuildAll(fullBillboard = true)
+                        "↩️ Artiste restauré"
+                    }
+                }
+                Type.ALBUM_SHARED -> {
+                    val snapshots = EditorUndoCodec.decodeRows(parseExtraData(last.extraData)["corrections"])
+                    if (snapshots.isNotEmpty()) {
+                        db.withTransaction {
+                            restoreCorrectionSnapshots(snapshots)
+                            library?.clearCaches()
+                            AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
+                        }
+                        "↩️ Marquage multi-artistes ${if (last.after == "multi-artistes") "retiré" else "rétabli"}"
+                    } else {
+                        // Compatibilité avec les anciennes entrées d'historique qui ne contiennent pas d'instantané.
+                        val title = db.editorDao().correctionsOfType(LibraryRepository.CORRECTION_ALBUM_SHARED).firstOrNull {
+                            it.correctedValue == (if (last.after == "multi-artistes") "1" else "0") && last.createdAt - it.createdAt in 0L until 5 * 60_000L
+                        }?.originalValue
+                        if (title == null) "⚠️ Marquage non annulable" else {
+                            saveCorrection(title, if (last.after == "multi-artistes") "0" else "1", LibraryRepository.CORRECTION_ALBUM_SHARED)
+                            library?.clearCaches()
+                            AlbumSharing.consolidate(db, library ?: LibraryRepository(db))
+                            "↩️ Marquage multi-artistes ${if (last.after == "multi-artistes") "retiré" else "rétabli"}"
+                        }
+                    }
+                }
+                Type.ALBUM_CHANGE -> {
+                    val oldAlbum = last.before?.toLongOrNull()
+                    val currentTrack = db.trackDao().getById(last.entityId)
+                    if (currentTrack == null) "⚠️ Album non restaurable"
+                    else {
+                        db.withTransaction {
+                            db.trackDao().setAlbum(last.entityId, oldAlbum)
+                            currentTrack.albumId?.let { db.trackLinkDao().unlinkTrackAlbum(last.entityId, it) }
+                            oldAlbum?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = last.entityId, albumId = it)) }
+                            db.scrobbleDao().setAlbumForTrack(last.entityId, oldAlbum)
+                            restoreCorrectionSnapshots(EditorUndoCodec.decodeRows(parseExtraData(last.extraData)["corrections"]))
+                        }
+                        library?.clearCaches()
+                        rebuilder.rebuildAll(fullBillboard = true)
+                        "↩️ Album restauré"
+                    }
+                }
+                Type.REVIEWED, Type.REVIEW_IGNORE -> "ℹ️ Marquage « correct / ignoré » conservé"
+                Type.REVIEW_FIX -> {
+                    val kv = parseExtraData(last.extraData)
+                    val ids = kv["ids"]?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
+                    val oldArtist = kv["artist"]?.toLongOrNull()
+                    val oldAlbum = kv["album"]?.toLongOrNull()
+                    val oldTitle = EditorUndoCodec.decodeRows(kv["title"]).firstOrNull()?.firstOrNull() ?: kv["title"]
+                    val scrobbleStates = EditorUndoCodec.decodeRows(kv["scrobbles"])
+                    val trackStates = EditorUndoCodec.decodeRows(kv["tracks"])
+                    val artistLinkTrackIds = EditorUndoCodec.decodeRows(kv["trackArtistTrackIds"]).mapNotNull { it.firstOrNull()?.toLongOrNull() }
+                    val artistLinkRows = EditorUndoCodec.decodeRows(kv["trackArtistLinks"])
+                    val albumLinkTrackIds = EditorUndoCodec.decodeRows(kv["trackAlbumTrackIds"]).mapNotNull { it.firstOrNull()?.toLongOrNull() }
+                    val albumLinkRows = EditorUndoCodec.decodeRows(kv["trackAlbumLinks"])
+                    val newTrackIds = EditorUndoCodec.decodeRows(kv["newTrackIds"]).mapNotNull { it.firstOrNull()?.toLongOrNull() }
+                    val newAlbumIds = EditorUndoCodec.decodeRows(kv["newAlbumIds"]).mapNotNull { it.firstOrNull()?.toLongOrNull() }
+                    val newArtistIds = EditorUndoCodec.decodeRows(kv["newArtistIds"]).mapNotNull { it.firstOrNull()?.toLongOrNull() }
+                    val oldTrack = db.trackDao().getById(last.entityId)
+                    if (ids.isEmpty() || oldTrack == null || (scrobbleStates.isEmpty() && oldArtist == null)) "⚠️ Correction non annulable (titre d'origine disparu)"
+                    else {
+                        db.withTransaction {
+                            if (trackStates.isNotEmpty()) {
+                                trackStates.forEach { row ->
+                                    val trackId = row.getOrNull(0)?.toLongOrNull() ?: return@forEach
+                                    val title = row.getOrNull(1) ?: return@forEach
+                                    val current = db.trackDao().getById(trackId)
+                                    val titleRaw = row.getOrNull(9) ?: title
+                                    val artistId = row.getOrNull(10)?.toLongOrNull() ?: current?.artistId ?: oldTrack.artistId
+                                    val confidence = row.getOrNull(5)?.toIntOrNull() ?: 100
+                                    val needsReview = row.getOrNull(6)?.toBooleanStrictOrNull() ?: false
+                                    val isRemix = row.getOrNull(11)?.toBooleanStrictOrNull() ?: current?.isRemix ?: false
+                                    val originalTrackId = if (row.size > 12) row.getOrNull(12)?.toLongOrNull() else current?.originalTrackId
+                                    db.trackDao().restoreEditorState(
+                                        trackId, title, titleRaw, artistId, row.getOrNull(2)?.toLongOrNull(), row.getOrNull(3), row.getOrNull(4), confidence, needsReview,
+                                        row.getOrNull(7)?.toLongOrNull(), row.getOrNull(8), isRemix, originalTrackId
+                                    )
+                                }
+                            } else if (kv["mode"] == "INPLACE") {
+                                db.trackDao().setTitleAndAlbum(oldTrack.trackId, oldTitle ?: oldTrack.title, oldAlbum)
+                            }
+
+                            artistLinkTrackIds.forEach { db.trackLinkDao().clearTrackArtists(it) }
+                            artistLinkRows.forEach { row ->
+                                val trackId = row.getOrNull(0)?.toLongOrNull() ?: return@forEach
+                                val artistId = row.getOrNull(1)?.toLongOrNull() ?: return@forEach
+                                val primary = row.getOrNull(2)?.toBooleanStrictOrNull() ?: false
+                                val role = row.getOrNull(3) ?: if (primary) "main" else "featured"
+                                db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = trackId, artistId = artistId, isPrimary = primary, role = role))
+                            }
+                            albumLinkTrackIds.forEach { db.trackLinkDao().clearTrackAlbums(it) }
+                            albumLinkRows.forEach { row ->
+                                val trackId = row.getOrNull(0)?.toLongOrNull() ?: return@forEach
+                                val albumId = row.getOrNull(1)?.toLongOrNull() ?: return@forEach
+                                val trackNumber = row.getOrNull(2)?.toIntOrNull()
+                                val primary = row.getOrNull(3)?.toBooleanStrictOrNull() ?: true
+                                db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = trackId, albumId = albumId, trackNumber = trackNumber, isPrimary = primary))
+                            }
+
+                            if (scrobbleStates.isNotEmpty()) {
+                                scrobbleStates.forEach { row ->
+                                    val scrobbleId = row.getOrNull(0)?.toLongOrNull() ?: return@forEach
+                                    val trackId = row.getOrNull(1)?.toLongOrNull() ?: return@forEach
+                                    val artistId = row.getOrNull(2)?.toLongOrNull() ?: return@forEach
+                                    val confidence = row.getOrNull(4)?.toIntOrNull() ?: 100
+                                    val needsReview = row.getOrNull(5)?.toBooleanStrictOrNull() ?: false
+                                    db.scrobbleDao().restoreReviewFixState(
+                                        scrobbleId, trackId, artistId, row.getOrNull(3)?.toLongOrNull(), confidence, needsReview, row.getOrNull(6)
+                                    )
+                                }
+                            } else {
+                                db.scrobbleDao().moveScrobbles(ids, oldTrack.trackId, oldArtist!!, oldAlbum)
+                                db.scrobbleDao().reflag(ids, "Correction annulée")
+                            }
+                            val pendingTracks = newTrackIds.toMutableSet()
+                            while (pendingTracks.isNotEmpty()) {
+                                var deletedAny = false
+                                for (trackId in pendingTracks.toList().asReversed()) {
+                                    if (db.trackDao().deleteIfUnused(trackId) > 0) {
+                                        pendingTracks.remove(trackId)
+                                        deletedAny = true
+                                    }
+                                }
+                                if (!deletedAny) break // Une entité devenue utilisée depuis la correction est conservée.
+                            }
+                            newAlbumIds.forEach { db.albumDao().deleteIfUnused(it) }
+                            newArtistIds.forEach { db.artistDao().deleteIfUnused(it) }
+                            restoreCorrectionSnapshots(EditorUndoCodec.decodeRows(kv["corrections"]))
+                        }
+                        library?.clearCaches()
+                        rebuilder.rebuildAll(fullBillboard = true)
+                        "↩️ Correction annulée — ${ids.size} écoute(s) restaurée(s)"
+                    }
+                }
+                else -> "⚠️ La suppression d'une écoute est irréversible"
             }
-            else -> "⚠️ La suppression d'une écoute est irréversible"
+            library?.clearCaches()
+            db.editorDao().deleteEdit(last.id)
+            _status.value = msg
+            msg
+        } finally {
+            _busy.value = false
         }
-        db.editorDao().deleteEdit(last.id)
-        _status.value = msg
-        return msg
     }
 
     /* ---------------- Suggestions de fusion ---------------- */

@@ -338,6 +338,7 @@ interface EditorDao {
     @Query("DELETE FROM edit_history WHERE id NOT IN (SELECT id FROM edit_history ORDER BY created_at DESC LIMIT 50)") suspend fun trimTo50()
     @Upsert suspend fun upsertCorrection(row: UserCorrectionEntity)
     @Query("SELECT * FROM user_corrections WHERE original_value = :original AND correction_type = :type") suspend fun correction(original: String, type: String): UserCorrectionEntity?
+    @Query("DELETE FROM user_corrections WHERE original_value = :original AND correction_type = :type") suspend fun deleteCorrection(original: String, type: String)
     @Query("UPDATE user_corrections SET times_applied = times_applied + 1 WHERE id = :id") suspend fun bumpCorrection(id: Long)
     @Query("SELECT * FROM user_corrections") suspend fun allCorrections(): List<UserCorrectionEntity>
     @Query("SELECT * FROM user_corrections WHERE correction_type = :type ORDER BY created_at DESC") suspend fun correctionsOfType(type: String): List<UserCorrectionEntity>

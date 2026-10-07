@@ -9,6 +9,8 @@ import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.PantheonStatusEntity
 import com.novastats.app.data.db.entity.SessionEntity
+import com.novastats.app.data.db.entity.TrackAlbumEntity
+import com.novastats.app.util.runCatchingCancellable
 import com.novastats.app.domain.ArtistCertSummary
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
@@ -18,6 +20,8 @@ import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.domain.StreakCalculator
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Recalcule toutes les tables dérivées à partir des scrobbles confirmés.
@@ -31,6 +35,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
     /** Nouveauté détectée après un recalcul (pour les notifications). */
     data class Achievement(val kind: String, val entityType: String, val entityId: Long, val level: String, val name: String)
 
+    companion object {
+        /** Une seule reconstruction globale à la fois, même si plusieurs composants créent leur propre Rebuilder. */
+        private val rebuildMutex = Mutex()
+    }
+
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
     private suspend fun recomputeRootAggregatesFromScrobbles() {
         val totals = db.trackDao().rootAggregatesFromScrobbles()
@@ -40,40 +49,52 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         }
     }
 
+    /** À appeler dans une transaction pour ne publier aucune fenêtre avec des compteurs partiellement recalculés. */
+    private suspend fun recomputeEntityAggregatesInTransaction() {
+        db.trackDao().recomputeAggregates()
+        db.trackDao().recomputeDiscoveryRanks()
+        db.artistDao().recomputeAggregates()
+        db.albumDao().recomputeAggregates()
+        db.albumDao().alignTrackCovers()
+        db.albumDao().alignUserAlbumTrackCovers()
+    }
+
+    /** Rebuild les vues qui dépendent directement des écoutes, à appeler dans la transaction de leur source. */
+    private suspend fun recomputeDailyAggregatesInTransaction() {
+        db.dailyPlayDao().clear()
+        db.dailyPlayDao().rebuildFromScrobbles()
+        db.dailyStatsDao().clear()
+        db.dailyStatsDao().rebuildFromScrobbles()
+        recomputeRootAggregatesFromScrobbles()
+    }
+
     /**
      * @param fullBillboard true = reconstruit tous les snapshots (import) ; false = ne recalcule que la période
      *                      courante (après une écoute).
      * @return les nouvelles certifications / statuts Panthéon / entrées Hall of Fame apparus pendant ce recalcul
      *         (vide après un import complet, pour ne pas inonder de notifications).
      */
-    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> {
+    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> = rebuildMutex.withLock {
         val certsBefore: Map<Pair<String, Long>, Int> = if (fullBillboard) emptyMap() else db.certificationDao().allCurrent().associate { (it.entityType to it.entityId) to it.toDomain().rank }
         val pantheonBefore: Map<Long, String> = if (fullBillboard) emptyMap() else db.pantheonDao().allCurrent().associate { it.artistId to it.currentStatus }
         val hofBefore: Set<List<String>> = if (fullBillboard) emptySet() else db.hallOfFameDao().all().map { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }.toSet()
 
-        onProgress("Versions…")
-        collapseEmptyRoots()
-        // Règle 13 : un duo arrivé avant les titres solo a créé un album homonyme chez le partenaire → fusion continue
-        if (runCatching { AlbumSharing.mergeDuoSplits(db) }.getOrDefault(0) > 0) library?.clearCaches()
-
-        onProgress("Agrégats titres / artistes / albums…")
+        onProgress("Versions, agrégats titres et écoutes quotidiennes…")
+        // Le repli d'une version déplace les scrobbles du root et supprime parfois le dernier titre visible.
+        // Publier les compteurs + daily_plays dans la même transaction évite que les listes paraissent vides.
         db.withTransaction {
-            db.trackDao().recomputeAggregates()
-            db.trackDao().recomputeDiscoveryRanks()
-            db.artistDao().recomputeAggregates()
-            db.albumDao().recomputeAggregates()
-            // Les titres portent la pochette de leur album (après fusions, déplacements, albums partagés) — sauf pochette perso
-            db.albumDao().alignTrackCovers()
+            collapseEmptyRootsInTransaction()
+            recomputeEntityAggregatesInTransaction()
+            recomputeDailyAggregatesInTransaction()
         }
-
-        onProgress("Écoutes quotidiennes…")
-        db.withTransaction {
-            db.dailyPlayDao().clear()
-            db.dailyPlayDao().rebuildFromScrobbles()
-            db.dailyStatsDao().clear()
-            db.dailyStatsDao().rebuildFromScrobbles()
-            // Le cumul all-time est calculé en un scan groupé des scrobbles confirmés.
-            recomputeRootAggregatesFromScrobbles()
+        // Règle 13 : un duo arrivé avant les titres solo a créé un album homonyme chez le partenaire → fusion continue.
+        // Les play_count sont déjà à jour pour choisir le bon album à conserver.
+        if (runCatchingCancellable { AlbumSharing.mergeDuoSplits(db) }.getOrDefault(0) > 0) {
+            library?.clearCaches()
+            db.withTransaction {
+                recomputeEntityAggregatesInTransaction()
+                recomputeDailyAggregatesInTransaction()
+            }
         }
 
         onProgress("Streaks…")
@@ -98,7 +119,7 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         onProgress("Nova Awards…")
         if (fullBillboard) AwardsEngine(db).rebuildAll() else AwardsEngine(db).refreshAll()
 
-        if (fullBillboard) return emptyList()
+        if (fullBillboard) return@withLock emptyList()
         val news = ArrayList<Achievement>()
         for (c in db.certificationDao().allCurrent()) {
             val rank = c.toDomain().rank
@@ -122,11 +143,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
                 news += Achievement("HALL_OF_FAME", h.entityType, h.entityId, h.entryType, name ?: "—")
             }
         }
-        return news
+        news
     }
 
     /** Répare rapidement les totaux depuis les scrobbles confirmés, sans re-résoudre chaque écoute ni reconstruire les charts. */
-    suspend fun repairTrackRootTotals() {
+    suspend fun repairTrackRootTotals() = rebuildMutex.withLock {
         db.withTransaction {
             db.dailyPlayDao().clear()
             db.dailyPlayDao().rebuildFromScrobbles()
@@ -143,21 +164,24 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
      * version solo : les versions sont repliées dans le root (écoutes + artistes + albums), qui redevient un titre unique
      * crédité à tous les artistes. L'identifiant du root est conservé (certifications, historique Billboard, records).
      */
-    suspend fun collapseEmptyRoots() {
+    /** Caller owns the Room transaction so moving scrobbles and deleting their version rows stays atomic. */
+    private suspend fun collapseEmptyRootsInTransaction() {
         val roots = db.trackDao().emptyRootsWithVersions()
-        if (roots.isEmpty()) return
-        db.withTransaction {
-            for (root in roots) {
-                val versions = db.trackDao().versionsOf(root.trackId)
-                for (v in versions) {
-                    db.scrobbleDao().dropDuplicatesAgainst(v.trackId, root.trackId)
-                    db.scrobbleDao().moveAll(v.trackId, root.trackId)
-                    db.trackLinkDao().copyArtistLinks(v.trackId, root.trackId)
-                    db.trackLinkDao().copyAlbumLinks(v.trackId, root.trackId)
-                    if (root.albumId == null && v.albumId != null) db.trackDao().update(root.copy(albumId = v.albumId))
-                    db.trackDao().fillCover(root.trackId, v.coverUrl, v.coverSource)
-                    db.trackDao().delete(v.trackId) // track_artists / track_albums en cascade
+        for (root in roots) {
+            val versions = db.trackDao().versionsOf(root.trackId)
+            var rootAlbumId = root.albumId
+            for (v in versions) {
+                db.scrobbleDao().dropDuplicatesAgainst(v.trackId, root.trackId)
+                db.scrobbleDao().moveAll(v.trackId, root.trackId)
+                db.trackLinkDao().copyArtistLinks(v.trackId, root.trackId)
+                db.trackLinkDao().copyAlbumLinks(v.trackId, root.trackId)
+                if (rootAlbumId == null && v.albumId != null) {
+                    db.trackDao().setAlbum(root.trackId, v.albumId)
+                    rootAlbumId = v.albumId
                 }
+                rootAlbumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = root.trackId, albumId = it)) }
+                db.trackDao().fillCover(root.trackId, v.coverUrl, v.coverSource)
+                db.trackDao().delete(v.trackId) // track_artists / track_albums en cascade
             }
         }
     }
@@ -276,6 +300,9 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         db.withTransaction {
             db.pantheonDao().clear()
             db.pantheonDao().clearHistory()
+            // Le statut est aussi dénormalisé dans artists pour les classements et pop-ups : efface les valeurs
+            // précédentes avant le recalcul, notamment quand une suppression fait retomber un artiste sous le seuil.
+            db.artistDao().clearPantheonStatus()
             for (a in artists) {
                 val summary = ArtistCertSummary(tracksByArtist[a.artistId].orEmpty(), albumsByArtist[a.artistId].orEmpty())
                 val eval = PantheonRules.evaluate(a.playCount, summary)

@@ -188,7 +188,9 @@ object TitleNormalizer {
         return title.ifBlank { raw.trim() }
     }
 
-    private val junkWords = listOf("™", "®", "official", "Official")
+    // Les mots de version officiels sont déjà retirés par les suffixes (« Official Video/Audio »).
+    // Ne jamais supprimer « official » en plein milieu d'un vrai titre (ex. « Officially Missing You »).
+    private val junkWords = listOf("™", "®")
 
     private val bracketRegex = Regex("""\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]""")
     private val dashSuffixRegex = Regex("""\s+[-–—]\s+(.+)$""")

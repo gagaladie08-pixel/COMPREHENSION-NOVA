@@ -38,6 +38,9 @@ class ScrobbleTrackerTest {
         tracker.onTrackChanged(a, isPlaying = true, source = "MEDIA_SESSION")
         advance(10_000)
         val ev = tracker.onTrackChanged(b, isPlaying = true, source = "MEDIA_SESSION")
+        assertEquals(2, ev.size)
+        assertTrue(ev[0] is Event.Ended)
+        assertTrue(ev[1] is Event.Started)
         val ended = ev.filterIsInstance<Event.Ended>().single()
         assertEquals(false, ended.wasValidated)
         assertEquals(10_000, ended.listenedMs)
@@ -77,6 +80,16 @@ class ScrobbleTrackerTest {
         val ev = tracker.onTrackChanged(a, isPlaying = true, positionMs = 500, source = "MEDIA_SESSION")
         assertTrue(ev.any { it is Event.Ended && it.wasValidated })
         assertTrue(ev.any { it is Event.Started })
+    }
+
+    @Test
+    fun `position inconnue sur meme titre ne declenche pas un faux loop`() {
+        tracker.onTrackChanged(a, isPlaying = true, positionMs = 0, source = "MEDIA_SESSION")
+        for (i in 1..190) { now += 1_000; tracker.onTick(positionMs = i * 1_000L) }
+        val current = tracker.current
+        val events = tracker.onTrackChanged(a, isPlaying = true, positionMs = null, source = "MEDIA_SESSION")
+        assertTrue(events.none { it is Event.Ended || it is Event.Started })
+        assertEquals(current, tracker.current)
     }
 
     @Test

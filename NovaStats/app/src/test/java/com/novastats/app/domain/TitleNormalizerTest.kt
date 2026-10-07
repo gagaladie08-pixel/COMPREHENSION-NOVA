@@ -100,8 +100,10 @@ class TitleNormalizerTest {
     }
 
     @Test
-    fun `emojis conserves et mots indesirables nettoyes`() {
+    fun `emojis conserves et marques commerciales nettoyees sans couper un vrai titre`() {
         assertEquals("Butter 🧈", TitleNormalizer.normalizeTitle("Butter 🧈 ™").title)
+        assertEquals("Officially Missing You", TitleNormalizer.normalizeTitle("Officially Missing You").title)
+        assertEquals("Song", TitleNormalizer.normalizeTitle("Song (Official Video)").title)
     }
 
     @Test

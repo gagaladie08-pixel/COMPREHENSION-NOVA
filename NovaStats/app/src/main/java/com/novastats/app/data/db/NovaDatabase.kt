@@ -32,7 +32,7 @@ import com.novastats.app.data.db.dao.TrackLinkDao
 import com.novastats.app.data.db.entity.*
 
 /**
- * Base de données NovaStats — 34 tables (cf. docs/DATABASE.md).
+ * Base de données NovaStats — 35 tables (cf. docs/DATABASE.md).
  */
 @Database(
     entities = [

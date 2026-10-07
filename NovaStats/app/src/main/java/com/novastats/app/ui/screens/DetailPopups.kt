@@ -240,7 +240,10 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
                 "Ce total inclut ${versions.size - 1} version${if (versions.size > 2) "s" else ""} liée${if (versions.size > 2) "s" else ""} à ce titre (remix featuring / version avec invité). Répartition des ${formatCount(t.playCount)} écoutes :",
                 color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
             )
-            versions.forEach { (label, n) -> PopupInfoRow(label, "${formatCount(n)} ▶" + if (t.playCount > 0) "  (${100 * n / t.playCount} %)" else "") }
+            versions.forEach { (label, n) ->
+                val share = if (t.playCount > 0) (100L * n.toLong() / t.playCount.toLong()).coerceAtMost(100L) else null
+                PopupInfoRow(label, "${formatCount(n)} ▶" + (share?.let { "  ($it %)" } ?: ""))
+            }
         }
         PopupSection(if (scoped) "🏅 Certification (cumul all time)" else "🏅 Certification")
         val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }

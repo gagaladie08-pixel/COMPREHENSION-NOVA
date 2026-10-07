@@ -1,5 +1,6 @@
 package com.novastats.app.data.repository
 
+import androidx.room.withTransaction
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.dao.IdCount
 import com.novastats.app.data.db.entity.CertificationEntity
@@ -128,11 +129,14 @@ class AwardsEngine(private val db: NovaDatabase) {
                 "Le ${Dates.toLocalDate(s.startedAt).format(dayFmt)} — ${hm(s.totalDurationMs)} de musique non-stop 🎧 (${s.trackCount} titres)")
         }
 
-        db.novaAwardDao().clearYear(year)
-        out.forEach { db.novaAwardDao().upsert(it) }
-        if (final) {
-            val now = System.currentTimeMillis()
-            out.forEach { db.novaAwardDao().insertHistory(NovaAwardHistoryEntity(year = it.year, category = it.category, winnerId = it.winnerId, winnerType = it.winnerType, value = it.value, message = it.message, finalizedAt = now)) }
+        // Publication atomique : les observers ne voient jamais l'année disparaître pendant le recalcul.
+        db.withTransaction {
+            db.novaAwardDao().clearYear(year)
+            out.forEach { db.novaAwardDao().upsert(it) }
+            if (final) {
+                val now = System.currentTimeMillis()
+                out.forEach { db.novaAwardDao().insertHistory(NovaAwardHistoryEntity(year = it.year, category = it.category, winnerId = it.winnerId, winnerType = it.winnerType, value = it.value, message = it.message, finalizedAt = now)) }
+            }
         }
     }
 

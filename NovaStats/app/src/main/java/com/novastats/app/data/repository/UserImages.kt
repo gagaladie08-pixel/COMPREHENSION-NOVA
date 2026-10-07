@@ -11,11 +11,16 @@ import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.entity.EntityType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URLEncoder
+import java.util.UUID
 
 /**
  * Images choisies par l'utilisateur (photo d'artiste / pochette d'album) :
@@ -31,6 +36,7 @@ object UserImages {
 
     /** Incrémenté après chaque changement d'image → les popups ouverts rechargent leur entité. */
     val version = MutableStateFlow(0)
+    private val imageMutex = Mutex()
 
     data class Pending(val type: String, val id: Long, val name: String, val launchedAt: Long)
 
@@ -76,35 +82,104 @@ object UserImages {
         setPending(ctx, type, id, name)
         val url = "https://www.google.com/search?tbm=isch&q=" + URLEncoder.encode(query, "UTF-8")
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { ctx.startActivity(intent) }.isSuccess
+        return try {
+            ctx.startActivity(intent)
+            true
+        } catch (_: android.content.ActivityNotFoundException) {
+            clearPending(ctx)
+            false
+        } catch (_: SecurityException) {
+            clearPending(ctx)
+            false
+        }
     }
 
     // ---------- Import / application ----------
     /** Copie une image (galerie, partage, téléchargement) dans le stockage privé ; renvoie une URL file:// stable. */
     suspend fun importUri(ctx: Context, uri: Uri, prefix: String): String? = withContext(Dispatchers.IO) {
-        runCatching {
+        var out: File? = null
+        try {
             val dir = File(ctx.filesDir, "images").apply { mkdirs() }
-            val out = File(dir, "${prefix}_${System.currentTimeMillis()}.img")
-            ctx.contentResolver.openInputStream(uri)?.use { input -> out.outputStream().use { input.copyTo(it) } } ?: return@runCatching null
-            if (out.length() < 1024) { out.delete(); return@runCatching null }
-            Uri.fromFile(out).toString()
-        }.getOrNull()
+            if (!dir.isDirectory) return@withContext null
+            val safePrefix = prefix.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(60).ifBlank { "image" }
+            val outputFile = File(dir, "${safePrefix}_${UUID.randomUUID()}.img")
+            out = outputFile
+            val input = ctx.contentResolver.openInputStream(uri) ?: run {
+                outputFile.delete()
+                return@withContext null
+            }
+            input.use { source ->
+                outputFile.outputStream().use { target ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 25L * 1024 * 1024) throw java.io.IOException("Image trop volumineuse (maximum 25 Mo)")
+                        target.write(buffer, 0, count)
+                    }
+                }
+            }
+            if (outputFile.length() < 1024) { outputFile.delete(); null } else Uri.fromFile(outputFile).toString()
+        } catch (cancelled: CancellationException) {
+            out?.delete()
+            throw cancelled
+        } catch (_: Exception) {
+            out?.delete()
+            null
+        }
     }
 
     /** Applique une URL (file:// ou http) à l'artiste / l'album, en 👤 USER ; supprime l'ancien fichier privé s'il y en avait un. */
-    suspend fun apply(app: NovaStatsApp, type: String, id: Long, url: String): Boolean {
+    suspend fun apply(app: NovaStatsApp, type: String, id: Long, url: String): Boolean = imageMutex.withLock {
+        if (type != EntityType.ARTIST && type != EntityType.ALBUM) return@withLock false
+        val cleanedUrl = url.takeIf(String::isNotBlank) ?: return@withLock false
         val old = when (type) {
             EntityType.ARTIST -> app.database.artistDao().getById(id)?.photoUrl
             else -> app.database.albumDao().getById(id)?.coverUrl
         }
-        val ok = runCatching {
-            if (type == EntityType.ARTIST) app.editor.setArtistPhoto(id, url) else app.editor.setAlbumCover(id, url)
-        }.isSuccess
-        if (ok) {
-            if (old != null && old.startsWith("file://") && old != url) runCatching { File(Uri.parse(old).path ?: "").delete() }
-            version.value = version.value + 1
+        try {
+            if (type == EntityType.ARTIST) app.editor.setArtistPhoto(id, cleanedUrl) else app.editor.setAlbumCover(id, cleanedUrl)
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) { cleanupIfUnreferenced(app, cleanedUrl) }
+            throw cancelled
+        } catch (_: Exception) {
+            cleanupIfUnreferenced(app, cleanedUrl)
+            return@withLock false
         }
-        return ok
+        if (old != null && old.startsWith("file://") && old != cleanedUrl) cleanupIfUnreferenced(app, old)
+        version.value = version.value + 1
+        true
+    }
+
+    private suspend fun cleanupIfUnreferenced(app: NovaStatsApp, url: String) {
+        if (!url.startsWith("file://")) return
+        val db = app.database
+        val references = try {
+            db.artistDao().photoReferenceCount(url) + db.albumDao().coverReferenceCount(url) + db.trackDao().coverReferenceCount(url)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return // En cas de doute, garder le fichier plutôt que casser une image encore référencée.
+        }
+        if (references == 0) deletePrivateImage(app, url)
+    }
+
+    /** Ne supprime que les fichiers `.img` créés dans le répertoire privé de l'app, jamais un chemin file:// arbitraire. */
+    private fun deletePrivateImage(ctx: Context, url: String) {
+        try {
+            val uri = Uri.parse(url)
+            if (uri.scheme != "file") return
+            val path = uri.path ?: return
+            val imageDir = File(ctx.filesDir, "images").canonicalFile
+            val file = File(path).canonicalFile
+            if (file.isFile && file.extension == "img" && file.parentFile == imageDir) file.delete()
+        } catch (_: java.io.IOException) {
+            // Nettoyage opportuniste : une erreur de fichier ne doit pas invalider le changement déjà sauvegardé.
+        } catch (_: SecurityException) {
+            // Même principe pour un stockage temporairement inaccessible.
+        }
     }
 
     /**
@@ -116,8 +191,9 @@ object UserImages {
         if (!canReadImages(app)) return null
         val uri = withContext(Dispatchers.IO) { newestImageSince(app, p.launchedAt / 1000) } ?: return null
         val url = importUri(app, uri, "${p.type.lowercase()}_${p.id}") ?: return "⚠️ Image téléchargée illisible"
-        clearPending(app)
-        return if (apply(app, p.type, p.id, url)) "📷 ${if (p.type == EntityType.ARTIST) "Photo" else "Pochette"} de ${p.name} remplacée par l'image téléchargée"
+        val applied = apply(app, p.type, p.id, url)
+        if (applied) clearPending(app)
+        return if (applied) "📷 ${if (p.type == EntityType.ARTIST) "Photo" else "Pochette"} de ${p.name} remplacée par l'image téléchargée"
         else "⚠️ Impossible d'appliquer l'image à ${p.name}"
     }
 
@@ -146,7 +222,8 @@ object UserImages {
             text != null && text.startsWith("http") && !text.contains(' ') -> text
             else -> null
         } ?: return "⚠️ Image partagée illisible"
-        clearPending(app)
-        return if (apply(app, p.type, p.id, url)) "📷 ${if (p.type == EntityType.ARTIST) "Photo" else "Pochette"} de ${p.name} remplacée" else "⚠️ Impossible d'appliquer l'image à ${p.name}"
+        val applied = apply(app, p.type, p.id, url)
+        if (applied) clearPending(app)
+        return if (applied) "📷 ${if (p.type == EntityType.ARTIST) "Photo" else "Pochette"} de ${p.name} remplacée" else "⚠️ Impossible d'appliquer l'image à ${p.name}"
     }
 }

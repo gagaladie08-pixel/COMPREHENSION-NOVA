@@ -17,6 +17,7 @@ import com.novastats.app.domain.Dates
 import com.novastats.app.domain.MetaCandidate
 import com.novastats.app.domain.MetadataMatching
 import com.novastats.app.domain.ScoredCandidate
+import com.novastats.app.util.runCatchingCancellable
 import com.novastats.app.domain.TitleNormalizer
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -24,7 +25,9 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** État observable de l'enrichissement (affiché dans Réglages → APIs). */
@@ -46,8 +49,8 @@ object EnrichmentState {
 
     private val _state = MutableStateFlow(Snapshot())
     val state: StateFlow<Snapshot> = _state
-    private val fmt = SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
-    private val dayFmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+    private val fmt = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.FRANCE).withZone(ZoneId.systemDefault())
+    private val dayFmt = DateTimeFormatter.ofPattern("dd/MM HH:mm", Locale.FRANCE).withZone(ZoneId.systemDefault())
     private var prefs: android.content.SharedPreferences? = null
 
     /** Branche la persistance des dernières erreurs (SharedPreferences) — appelé par NovaStatsApp. */
@@ -60,7 +63,7 @@ object EnrichmentState {
 
     /** Une source vient d'échouer (exception réseau / HTTP) : mémorise une explication lisible. */
     fun error(sourceLabel: String, t: Throwable) {
-        val text = "${dayFmt.format(System.currentTimeMillis())} · ${describe(t)}"
+        val text = "${dayFmt.format(Instant.ofEpochMilli(System.currentTimeMillis()))} · ${describe(t)}"
         _state.update { it.copy(errors = it.errors + (sourceLabel to text)) }
         prefs?.edit()?.putString(sourceLabel, text)?.apply()
     }
@@ -101,7 +104,7 @@ object EnrichmentState {
     fun stop() = _state.update { it.copy(running = false, current = null, mode = null, lastRunAt = System.currentTimeMillis()) }
     fun log(msg: String) {
         Log.d("NovaEnrich", msg)
-        _state.update { it.copy(log = (listOf("${fmt.format(System.currentTimeMillis())} $msg") + it.log).take(40)) }
+        _state.update { it.copy(log = (listOf("${fmt.format(Instant.ofEpochMilli(System.currentTimeMillis()))} $msg") + it.log).take(40)) }
     }
 }
 
@@ -148,7 +151,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val api = apis[c.source] ?: return null
         val key = "${c.source.name}|$id"
         tracklistCache.get(key)?.let { return it.takeIf { l -> l !== NONE } }
-        val list = runCatching { api.albumTracks(id) }.getOrNull()
+        val list = runCatchingCancellable { api.albumTracks(id) }.getOrNull()
         tracklistCache.put(key, list ?: NONE)
         return list
     }
@@ -159,8 +162,8 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val api = apis[c.source] ?: return null
         val key = "${c.source.name}|$id"
         artistTitlesCache.get(key)?.let { return it.takeIf { l -> l !== NONE } }
-        var list = runCatching { api.artistTitles(id) }.getOrNull()
-        if (list == null && c.mbid != null) list = runCatching { musicBrainz.artistTitles(c.mbid) }.getOrNull()
+        var list = runCatchingCancellable { api.artistTitles(id) }.getOrNull()
+        if (list == null && c.mbid != null) list = runCatchingCancellable { musicBrainz.artistTitles(c.mbid) }.getOrNull()
         artistTitlesCache.put(key, list ?: NONE)
         return list
     }
@@ -191,7 +194,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.artistPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.artistPriority }.take(7)
         val queries = listOf(name) + (if (keywords.isBlank()) emptyList() else listOf("$name $keywords"))
         val results: List<MetaCandidate> = coroutineScope {
-            sources.flatMap { s -> queries.map { q -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchArtist(q) }.getOrDefault(emptyList()) } ?: emptyList() } } }.map { it.await() }
+            sources.flatMap { s -> queries.map { q -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatchingCancellable { apis.getValue(s).searchArtist(q) }.getOrDefault(emptyList()) } ?: emptyList() } } }.map { it.await() }
         }.flatten().filter { !it.imageUrl.isNullOrBlank() }
         val top = results.map { c -> keywordBoost(MetadataMatching.scoreArtist(c, name), keywords) }
             .filter { it.score >= 50 }
@@ -209,7 +212,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.albumPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.albumPriority }.take(7)
         val queries = listOf(title) + (if (keywords.isBlank()) emptyList() else listOf("$title $keywords"))
         val results: List<MetaCandidate> = coroutineScope {
-            sources.flatMap { s -> queries.map { q -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchAlbum(q, artist) }.getOrDefault(emptyList()) } ?: emptyList() } } }.map { it.await() }
+            sources.flatMap { s -> queries.map { q -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatchingCancellable { apis.getValue(s).searchAlbum(q, artist) }.getOrDefault(emptyList()) } ?: emptyList() } } }.map { it.await() }
         }.flatten().filter { !it.imageUrl.isNullOrBlank() }
         val consensus = MetadataMatching.consensusSet(results)
         val top = results.map { c -> keywordBoost(MetadataMatching.scoreAlbum(c, title, artist, c in consensus), keywords) }
@@ -236,7 +239,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val wanted = TitleNormalizer.normalizeKey(title)
         val sources = ApiSource.entries.filter { !it.retired && !it.isLastResort && it.trackPriority > 0 && hasKey(it) && apis.containsKey(it) }.sortedBy { it.trackPriority }.take(6)
         val results: List<MetaCandidate> = coroutineScope {
-            sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatching { apis.getValue(s).searchTrack(title, artist.ifBlank { "" }) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
+            sources.map { s -> async { kotlinx.coroutines.withTimeoutOrNull(8_000L) { runCatchingCancellable { apis.getValue(s).searchTrack(title, artist.ifBlank { "" }) }.getOrDefault(emptyList()) } ?: emptyList() } }.map { it.await() }
         }.flatten()
         val consensus = MetadataMatching.consensusSet(results)
         val top = results.map { c -> MetadataMatching.scoreTrack(c, title, artist, album, durationMs, c in consensus) }
@@ -266,7 +269,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         try {
             db.artistDao().missingPhoto(now, artists).forEach { a ->
                 EnrichmentState.current("🎤 ${a.name}")
-                val ok = runCatching { enrichArtist(a) }.getOrElse { EnrichmentState.log("⚠️ ${a.name} : ${it.message}"); false }
+                val ok = runCatchingCancellable { enrichArtist(a) }.getOrElse { EnrichmentState.log("⚠️ ${a.name} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)
             }
             db.albumDao().missingCover(now, albums).forEach { al ->
@@ -275,14 +278,14 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                     ?: db.trackDao().inAlbum(al.albumId).maxByOrNull { it.playCount }?.let { t -> db.artistDao().getById(t.artistId)?.name })
                     ?: return@forEach
                 EnrichmentState.current("💿 ${al.title}")
-                val ok = runCatching { enrichAlbum(al, artist) }.getOrElse { EnrichmentState.log("⚠️ ${al.title} : ${it.message}"); false }
+                val ok = runCatchingCancellable { enrichAlbum(al, artist) }.getOrElse { EnrichmentState.log("⚠️ ${al.title} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)
             }
             db.trackDao().missingCover(now, tracks).forEach { t ->
                 val artist = db.artistDao().getById(t.artistId)?.name ?: return@forEach
                 val album = t.albumId?.let { db.albumDao().getById(it) }
                 EnrichmentState.current("🎵 ${t.title}")
-                val ok = runCatching { enrichTrack(t, artist, album) }.getOrElse { EnrichmentState.log("⚠️ ${t.title} : ${it.message}"); false }
+                val ok = runCatchingCancellable { enrichTrack(t, artist, album) }.getOrElse { EnrichmentState.log("⚠️ ${t.title} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)
             }
         } finally {
@@ -375,12 +378,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         )
         if (best == null) { negativeCache(EntityType.ARTIST, a.artistId, DataType.PHOTO); return false }
         val c = best.candidate
-        db.artistDao().update(
-            a.copy(
-                photoUrl = c.imageUrl, photoSource = c.source.label,
-                bio = a.bio ?: c.bio, mbid = a.mbid ?: c.mbid, spotifyId = a.spotifyId ?: c.spotifyId
-            )
-        )
+        db.artistDao().saveEnrichment(a.artistId, c.imageUrl, c.source.label, c.bio, c.mbid, c.spotifyId)
         // Une bio peut venir d'une autre source que la photo (Last.fm / TheAudioDB) — on la récupère si absente
         if (a.bio == null && c.bio == null) fetchBio(a)
         positiveCache(EntityType.ARTIST, a.artistId, DataType.PHOTO, best)
@@ -391,7 +389,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     private suspend fun fetchBio(a: ArtistEntity) {
         for (s in listOf(ApiSource.THEAUDIODB, ApiSource.LASTFM)) {
             if (!hasKey(s)) continue
-            val bio = runCatching { apis.getValue(s).searchArtist(a.name) }.getOrNull()
+            val bio = runCatchingCancellable { apis.getValue(s).searchArtist(a.name) }.getOrNull()
                 ?.firstOrNull { MetadataMatching.similarity(it.name, a.name) >= 0.85 && !it.bio.isNullOrBlank() }?.bio
             if (bio != null) { db.artistDao().getById(a.artistId)?.let { db.artistDao().update(it.copy(bio = bio)) }; return }
         }
@@ -411,7 +409,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         )
         if (best == null || best.candidate.imageUrl == null) { negativeCache(EntityType.ALBUM, al.albumId, DataType.COVER); return false }
         val c = best.candidate
-        db.albumDao().update(al.copy(coverUrl = c.imageUrl, coverSource = c.source.label, releaseDate = al.releaseDate ?: c.releaseDate, mbid = al.mbid ?: c.mbid))
+        db.albumDao().saveEnrichment(al.albumId, c.imageUrl, c.source.label, c.releaseDate, c.mbid)
         if (overwriteTracks) db.albumDao().overwriteCoverOfTracks(al.albumId, c.imageUrl, c.source.label)
         else db.albumDao().propagateCoverToTracks(al.albumId, c.imageUrl, c.source.label)
         positiveCache(EntityType.ALBUM, al.albumId, DataType.COVER, best)
@@ -427,13 +425,13 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         //    de l'album héritent de la même pochette, et un album déjà résolu n'appelle aucune API.
         if (album != null) {
             if (album.coverUrl != null && t.coverUrl == null) {
-                db.trackDao().update(t.copy(coverUrl = album.coverUrl, coverSource = album.coverSource))
+                db.trackDao().applyAlbumCoverIfMissing(t.trackId, album.coverUrl, album.coverSource)
                 EnrichmentState.log("✅ ${t.title} → pochette de l'album « ${album.title} » (déjà résolue)")
                 return true
             }
             if (album.coverUrl == null && enrichAlbum(album, artistName, mustContain = t.title)) {
                 val resolved = db.albumDao().getById(album.albumId)
-                if (resolved?.coverUrl != null) db.trackDao().update(t.copy(coverUrl = resolved.coverUrl, coverSource = resolved.coverSource))
+                if (resolved?.coverUrl != null) db.trackDao().applyAlbumCoverIfMissing(t.trackId, resolved.coverUrl, resolved.coverSource)
                 return true
             }
         }
@@ -448,17 +446,19 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         )
         if (best == null || best.candidate.imageUrl == null) { negativeCache(EntityType.TRACK, t.trackId, DataType.COVER); return false }
         val c = best.candidate
-        db.trackDao().update(
-            t.copy(
-                coverUrl = c.imageUrl, coverSource = c.source.label,
-                durationMs = t.durationMs ?: c.durationMs, genre = t.genre ?: c.genre, mbid = t.mbid ?: c.mbid,
-                confidenceScore = minOf(t.confidenceScore, best.score),
-                needsReview = t.needsReview || best.score < MetadataMatching.TRUSTED
-            )
+        db.trackDao().saveEnrichment(
+            id = t.trackId,
+            coverUrl = c.imageUrl,
+            coverSource = c.source.label,
+            durationMs = c.durationMs,
+            genre = c.genre,
+            mbid = c.mbid,
+            confidenceScore = best.score,
+            needsReview = best.score < MetadataMatching.TRUSTED
         )
         // L'album du titre n'a pas de pochette et la source confirme le même album → on la lui donne aussi
         if (album != null && album.coverUrl == null && c.album != null && MetadataMatching.similarity(c.album, album.title) >= 0.85) {
-            db.albumDao().update(album.copy(coverUrl = c.imageUrl, coverSource = c.source.label))
+            db.albumDao().saveEnrichment(album.albumId, c.imageUrl, c.source.label, null, null)
             db.albumDao().propagateCoverToTracks(album.albumId, c.imageUrl, c.source.label)
             positiveCache(EntityType.ALBUM, album.albumId, DataType.COVER, best)
         }
@@ -504,7 +504,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
         for (group in order.chunked(3)) {
             val results: List<Pair<ApiSource, Result<List<MetaCandidate>>>> = coroutineScope {
-                group.map { s -> async { s to runCatching { query(apis.getValue(s)) } } }.map { it.await() }
+                group.map { s -> async { s to runCatchingCancellable { query(apis.getValue(s)) } } }.map { it.await() }
             }
             results.forEach { (s, r) ->
                 val e = r.exceptionOrNull()

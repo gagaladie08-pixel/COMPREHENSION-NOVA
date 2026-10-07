@@ -22,7 +22,13 @@ fun apiKey(name: String): String {
     val value = System.getenv(name)?.takeIf { it.isNotBlank() }
         ?: localProps.getProperty(name)?.takeIf { it.isNotBlank() }
         ?: fallbackProps.getProperty(name, "")
-    return "\"${value.trim()}\""
+    val escaped = value.trim()
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    return "\"$escaped\""
 }
 
 android {
@@ -123,7 +129,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    // Room (34 tables)
+    // Room (35 tables)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

@@ -91,7 +91,7 @@ fun StatsScreen() {
     val range = remember(period) { Dates.statsRangeFor(period) }
 
     val summary by remember(range) { db.scrobbleDao().summary(range.fromMs, range.toMs) }
-        .collectAsStateWithLifecycle(initialValue = PeriodSummary(0, 0, 0, 0, 0, 0))
+        .collectAsStateWithLifecycle(initialValue = PeriodSummary(0L, 0L, 0, 0, 0, 0))
 
     val tracks by remember(period) {
         if (period == Period.GLOBAL) db.trackDao().topAllTime(TOP_LIMIT) else db.trackDao().topForPeriod(range.fromIso, range.toIso, TOP_LIMIT)

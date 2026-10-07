@@ -76,8 +76,13 @@ data class RewindData(
     val topTrack: RankedTrack? get() = topTracks.firstOrNull()
     val topArtist: RankedArtist? get() = topArtists.firstOrNull()
     val topAlbum: RankedAlbum? get() = topAlbums.firstOrNull()
-    val topArtistShare: Int get() = topArtist?.let { if (totals.plays == 0) 0 else (it.periodPlays * 100 / totals.plays).coerceIn(0, 100) } ?: 0
-    val playsDeltaPct: Int? get() = previous?.takeIf { it.plays > 0 }?.let { ((totals.plays - it.plays) * 100 / it.plays) }
+    val topArtistShare: Int get() = topArtist?.let {
+        if (totals.plays == 0) 0 else (it.periodPlays.toLong() * 100L / totals.plays.toLong()).coerceIn(0L, 100L).toInt()
+    } ?: 0
+    val playsDeltaPct: Int? get() = previous?.takeIf { it.plays > 0 }?.let {
+        (((totals.plays.toLong() - it.plays.toLong()) * 100L / it.plays.toLong())
+            .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())).toInt()
+    }
 }
 
 /**
