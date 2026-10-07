@@ -386,7 +386,7 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
             // Le palier le plus haut atteint, avec son multiplicateur réel (un Diamant 3× n'est pas au seuil du Diamant 1×).
             val reached = det.history
                 .mapNotNull { h -> CertLevel.entries.firstOrNull { it.dbName == h.level }?.let { h to it } }
-                .maxByOrNull { (_, lvl) -> lvl.ordinal * 100 + it.first.multiplier }
+                .maxByOrNull { (h, lvl) -> lvl.ordinal * 100 + h.multiplier }
             listOfNotNull(reached?.let { (h, lvl) -> thresholds.required(Certification(lvl, h.multiplier)).toFloat() to certColor(lvl) }) +
                 (need.toFloat() to certColor(next.level))
         }
