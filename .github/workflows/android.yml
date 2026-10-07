@@ -31,7 +31,10 @@ jobs:
       # (« Migration didn't properly handle: … ») et la compilation ne le voit pas : Room ne
       # valide à la compilation que le SQL des @Query et le schéma cible. C'est ce qu'a produit
       # la 0.22.16. Vérification en quelques secondes, avant même d'installer le JDK.
+      # working-directory : le défaut du job est NovaStats/ (pour Gradle) ; le script, lui,
+      # est appelé depuis la racine du dépôt.
       - name: Cohérence migrations / entités (index)
+        working-directory: ${{ github.workspace }}
         run: python3 NovaStats/tools/check_schema.py
 
       - name: JDK 17
