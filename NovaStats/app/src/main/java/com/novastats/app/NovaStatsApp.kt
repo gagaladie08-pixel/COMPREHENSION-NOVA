@@ -52,6 +52,8 @@ class NovaStatsApp : Application() {
         super.onCreate()
         instance = this
         com.novastats.app.util.CrashJournal.install(this)
+        // 🔎 Diagnostic « l'app se vide » : comptage des écoutes au lancement, puis autour de chaque recalcul.
+        com.novastats.app.util.RebuildAudit.install(this)
         createNotificationChannels()
         com.novastats.app.data.api.EnrichmentState.attach(this)
         EnrichmentWorker.schedulePeriodic(this)

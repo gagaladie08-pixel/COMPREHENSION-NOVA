@@ -11,6 +11,7 @@ import com.novastats.app.data.db.entity.PantheonStatusEntity
 import com.novastats.app.data.db.entity.SessionEntity
 import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.util.runCatchingCancellable
+import com.novastats.app.util.RebuildAudit
 import com.novastats.app.domain.ArtistCertSummary
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
@@ -74,11 +75,36 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
      * @return les nouvelles certifications / statuts Panthéon / entrées Hall of Fame apparus pendant ce recalcul
      *         (vide après un import complet, pour ne pas inonder de notifications).
      */
-    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> = rebuildMutex.withLock {
+    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> {
+        val context = RebuildAudit.context ?: return rebuildAllAudited(fullBillboard, onProgress)
+        RebuildAudit.log(context, db, "🧮 Recalcul lancé (complet=$fullBillboard)")
+        return try {
+            rebuildAllAudited(fullBillboard, onProgress).also {
+                RebuildAudit.log(context, db, "✅ Recalcul terminé (complet=$fullBillboard)")
+            }
+        } catch (t: Throwable) {
+            // L'exception remonte inchangée : seule une ligne de diagnostic est ajoutée.
+            val state = runCatching { RebuildAudit.format(RebuildAudit.snapshot(db)) }
+                .getOrDefault("comptage indisponible")
+            RebuildAudit.write(context, "❌ Recalcul interrompu (${t.javaClass.simpleName}: ${t.message}) — $state")
+            throw t
+        }
+    }
+
+    /** Corps du recalcul. Le verrou est pris par [rebuildAll] — ne pas ré-entrer. */
+    private suspend fun rebuildAllAudited(fullBillboard: Boolean, onProgress: (String) -> Unit): List<Achievement> = rebuildMutex.withLock {
         val certsBefore: Map<Pair<String, Long>, Int> = if (fullBillboard) emptyMap() else db.certificationDao().allCurrent().associate { (it.entityType to it.entityId) to it.toDomain().rank }
         val pantheonBefore: Map<Long, String> = if (fullBillboard) emptyMap() else db.pantheonDao().allCurrent().associate { it.artistId to it.currentStatus }
         val hofBefore: Set<List<String>> = if (fullBillboard) emptySet() else db.hallOfFameDao().all().map { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }.toSet()
 
+        // Chaque étape est journalisée AVANT d'être exécutée : si le process meurt en route,
+        // la dernière ligne du journal nomme l'étape en cours et le comptage qui la précédait.
+        val auditContext = RebuildAudit.context
+        suspend fun audit(step: String) {
+            if (auditContext != null) RebuildAudit.step(auditContext, db, "🧮 $step")
+        }
+
+        audit("1/8 Versions + agrégats + écoutes quotidiennes")
         onProgress("Versions, agrégats titres et écoutes quotidiennes…")
         // Le repli d'une version déplace les scrobbles du root et supprime parfois le dernier titre visible.
         // Publier les compteurs + daily_plays dans la même transaction évite que les listes paraissent vides.
@@ -97,25 +123,32 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             }
         }
 
+        audit("2/8 Streaks")
         onProgress("Streaks…")
         rebuildStreaks()
 
+        audit("3/8 Sessions")
         onProgress("Sessions…")
         rebuildSessions()
 
+        audit("4/8 Certifications (vide certifications puis recalcule)")
         onProgress("Certifications…")
         rebuildCertifications()
 
+        audit("5/8 Panthéon (vide pantheon_status puis recalcule)")
         onProgress("Panthéon…")
         rebuildPantheon()
 
+        audit("6/8 Billboard")
         onProgress("Billboard…")
         val billboard = BillboardEngine(db)
         if (fullBillboard) billboard.rebuildAll(onProgress) else billboard.refreshCurrent()
 
+        audit("7/8 Records (vide records_cache puis recalcule)")
         onProgress("Records…")
         RecordsEngine(db).rebuildAll(onProgress)
 
+        audit("8/8 Nova Awards")
         onProgress("Nova Awards…")
         if (fullBillboard) AwardsEngine(db).rebuildAll() else AwardsEngine(db).refreshAll()
 
@@ -167,6 +200,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
     /** Caller owns the Room transaction so moving scrobbles and deleting their version rows stays atomic. */
     private suspend fun collapseEmptyRootsInTransaction() {
         val roots = db.trackDao().emptyRootsWithVersions()
+        if (roots.isEmpty()) return
+        // 🔎 Diagnostic : c'est le seul endroit du recalcul qui SUPPRIME des écoutes
+        // (dropDuplicatesAgainst) et des titres (delete). On encadre chaque version.
+        val auditContext = RebuildAudit.context
+        var before: RebuildAudit.Counts? = if (auditContext != null) RebuildAudit.snapshot(db) else null
         for (root in roots) {
             val versions = db.trackDao().versionsOf(root.trackId)
             var rootAlbumId = root.albumId
@@ -182,6 +220,14 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
                 rootAlbumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = root.trackId, albumId = it)) }
                 db.trackDao().fillCover(root.trackId, v.coverUrl, v.coverSource)
                 db.trackDao().delete(v.trackId) // track_artists / track_albums en cascade
+                val previous = before
+                if (auditContext != null && previous != null) {
+                    val after = RebuildAudit.snapshot(db)
+                    RebuildAudit.diff(previous, after)?.let { delta ->
+                        RebuildAudit.write(auditContext, "🧬 Repli « ${v.title} » → racine #${root.trackId} : $delta")
+                    }
+                    before = after
+                }
             }
         }
     }

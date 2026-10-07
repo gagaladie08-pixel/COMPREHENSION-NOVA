@@ -352,6 +352,9 @@ class LibraryRepository(private val db: NovaDatabase) {
     suspend fun relinkAll(onProgress: (String) -> Unit = {}): RelinkResult {
         clearCaches()
         loadArtistExceptions(seedDefaults = true)
+        // 🔎 Diagnostic : la reliason supprime les écoutes en doublon (UNIQUE track_id+started_at).
+        val auditContext = com.novastats.app.util.RebuildAudit.context
+        val auditBefore = if (auditContext != null) com.novastats.app.util.RebuildAudit.snapshot(db) else null
         val rows = db.scrobbleDao().allForRelink()
         var moved = 0
         var duplicates = 0
@@ -378,6 +381,20 @@ class LibraryRepository(private val db: NovaDatabase) {
             }
         }
         db.trackDao().flattenRoots()
+        val previousAudit = auditBefore
+        if (auditContext != null && previousAudit != null) {
+            runCatchingCancellable {
+                val delta = com.novastats.app.util.RebuildAudit.diff(
+                    previousAudit,
+                    com.novastats.app.util.RebuildAudit.snapshot(db)
+                )
+                com.novastats.app.util.RebuildAudit.write(
+                    auditContext,
+                    "🔗 Reliason terminée : $moved déplacée(s), $duplicates doublon(s) supprimé(s)" +
+                        (delta?.let { " · $it" } ?: " · aucune perte de ligne")
+                )
+            }
+        }
         return RelinkResult(moved, duplicates)
     }
 
