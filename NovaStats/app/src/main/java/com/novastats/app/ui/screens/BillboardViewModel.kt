@@ -39,6 +39,8 @@ data class ChartItem(
     val coverUrl: String?,
     val circle: Boolean,
     val plays: Int,
+    /** Durée totale écoutée sur la période (⏱ tri par durées). */
+    val durationMs: Long = 0,
     val variationPlays: Int,
     val movement: Movement,
     val periodsInChart: Int,
@@ -82,6 +84,8 @@ data class BillboardUiState(
     val anchor: LocalDate = BillboardDates.latest(Period.WEEKLY, Dates.today()),
     val query: String = "",
     val movementFilter: MovementFilter? = null,
+    /** ⏱ true = classement réordonné par durées écoutées (positions recalculées 1..n). */
+    val sortDuration: Boolean = false,
     val isCurrent: Boolean = true,
     val hasAnyData: Boolean = false,
     val items: List<ChartItem> = emptyList(),
@@ -89,9 +93,13 @@ data class BillboardUiState(
 ) {
     val limit: Int get() = chart.limit(period)
     val filtered: List<ChartItem>
-        get() = items.filter { item ->
-            (query.isBlank() || item.name.contains(query, ignoreCase = true) || (item.secondary?.contains(query, ignoreCase = true) == true)) &&
-                (movementFilter == null || movementFilter.matches(item.movement))
+        get() {
+            val base = items.filter { item ->
+                (query.isBlank() || item.name.contains(query, ignoreCase = true) || (item.secondary?.contains(query, ignoreCase = true) == true)) &&
+                    (movementFilter == null || movementFilter.matches(item.movement))
+            }
+            // En mode durées : ordre par minutes écoutées, positions réaffichées 1..n (le snapshot reste intact).
+            return if (sortDuration) base.sortedByDescending { it.durationMs }.mapIndexed { i, it2 -> it2.copy(position = i + 1) } else base
         }
 
     /** Compteur par type de mouvement (sur la liste complète, hors recherche). */
@@ -120,7 +128,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val anchor = MutableStateFlow(BillboardDates.latest(Period.WEEKLY, Dates.today()))
     private val query = MutableStateFlow("")
     private val movementFilter = MutableStateFlow<MovementFilter?>(null)
-    private val textAndFilter = combine(query, movementFilter) { q, f -> q to f }
+    private val sortDuration = MutableStateFlow(false)
+    private val textAndFilter = combine(query, movementFilter, sortDuration) { q, f, d -> Triple(q, f, d) }
 
     private val hasAnyData: Flow<Boolean> = db.scrobbleDao().countConfirmedFlow().map { it > 0 }
 
@@ -158,9 +167,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    val state: StateFlow<BillboardUiState> = combine(selection, textAndFilter, hasAnyData, items, summary) { s, (q, f), any, list, sum ->
+    val state: StateFlow<BillboardUiState> = combine(selection, textAndFilter, hasAnyData, items, summary) { s, (q, f, d), any, list, sum ->
         BillboardUiState(
-            chart = s.chart, period = s.period, anchor = s.anchor, query = q, movementFilter = f,
+            chart = s.chart, period = s.period, anchor = s.anchor, query = q, movementFilter = f, sortDuration = d,
             isCurrent = BillboardDates.isCurrent(s.period, s.anchor),
             hasAnyData = any, items = list, summary = sum
         )
@@ -201,6 +210,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun search(q: String) { query.value = q }
 
+    /** ▶ écoutes / ⏱ durées : bascule l'ordre du classement. */
+    fun toggleSort() { sortDuration.value = !sortDuration.value }
+
     /** Appui sur une case : active le filtre, ré-appui : le retire. */
     fun toggleMovementFilter(f: MovementFilter) { movementFilter.value = if (movementFilter.value == f) null else f }
 
@@ -226,7 +238,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                     rows.map { r ->
                         ChartItem(
                             r.row.trackId, r.row.position, r.title, r.artistName, r.coverUrl, false,
-                            r.row.playCount, r.row.variationPlays,
+                            r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
                             r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
                         )
@@ -237,7 +249,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                         val status = r.pantheonStatus?.let { com.novastats.app.domain.PantheonStatus.fromDb(it) }?.let { "${it.emoji} ${it.label}" }
                         ChartItem(
                             r.row.artistId, r.row.position, r.name, status, r.photoUrl, true,
-                            r.row.playCount, r.row.variationPlays,
+                            r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
                             r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
                         )
@@ -247,7 +259,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                     rows.map { r ->
                         ChartItem(
                             r.row.albumId, r.row.position, r.title, r.artistName, r.coverUrl, false,
-                            r.row.playCount, r.row.variationPlays,
+                            r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
                             r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
                         )

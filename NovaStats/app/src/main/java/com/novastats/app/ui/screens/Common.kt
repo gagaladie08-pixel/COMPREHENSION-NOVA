@@ -407,3 +407,28 @@ fun periodCaption(period: Period, range: com.novastats.app.domain.DateRange): St
         Period.GLOBAL -> "Depuis le début"
     }
 }
+
+/** ▶ écoutes / ⏱ durée — deux pilules pour choisir l'ordre du classement (Stats + Billboard). */
+@Composable
+fun SortToggle(byDuration: Boolean, onChange: (Boolean) -> Unit) {
+    val theme = Nova.theme
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        listOf(false to "▶ par écoutes", true to "⏱ par durées").forEach { (dur, label) ->
+            val on = byDuration == dur
+            Text(
+                label,
+                color = if (on) theme.background else theme.textSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (on) theme.primary else theme.primary.copy(alpha = 0.10f))
+                    .clickable { onChange(dur) }
+                    .padding(horizontal = 14.dp, vertical = 5.dp)
+            )
+        }
+    }
+}

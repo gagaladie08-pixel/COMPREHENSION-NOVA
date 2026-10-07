@@ -118,9 +118,11 @@ fun StatsScreen() {
         return
     }
 
-    val filteredTracks = remember(tracks, q) { tracks.mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
-    val filteredArtists = remember(artists, q) { artists.mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
-    val filteredAlbums = remember(albums, q) { albums.mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
+    // ▶ écoutes / ⏱ durées : même classement, autre ordre — le tri par minutes révèle d'autres gagnants.
+    var byDuration by remember { mutableStateOf(false) }
+    val filteredTracks = remember(tracks, q, byDuration) { (if (byDuration) tracks.sortedByDescending { it.periodDurationMs } else tracks).mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
+    val filteredArtists = remember(artists, q, byDuration) { (if (byDuration) artists.sortedByDescending { it.periodDurationMs } else artists).mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
+    val filteredAlbums = remember(albums, q, byDuration) { (if (byDuration) albums.sortedByDescending { it.periodDurationMs } else albums).mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
 
     val total = when (tab) { 0 -> filteredTracks.size; 1 -> filteredArtists.size; else -> filteredAlbums.size }
     // Le podium met en avant le top 3 : la liste démarre alors à la 4ᵉ place (pas de doublon).
@@ -158,7 +160,7 @@ fun StatsScreen() {
                     )
                 )
                 Text(
-                    periodCaption(period, range) + if (period == Period.GLOBAL) " · Top $TOP_LIMIT" else "",
+                    periodCaption(period, range) + if (period == Period.GLOBAL) " · Top $TOP_LIMIT ${if (byDuration) "par durées" else "par écoutes"}" else "",
                     color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
                 )
@@ -230,6 +232,8 @@ fun StatsScreen() {
                         )
                     )
                 }
+                SortToggle(byDuration) { byDuration = it }
+                Spacer(Modifier.height(2.dp))
             }
         }
 

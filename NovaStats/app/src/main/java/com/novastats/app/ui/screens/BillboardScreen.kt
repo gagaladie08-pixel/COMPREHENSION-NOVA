@@ -107,7 +107,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     // Lignes à afficher : uniquement le classement réel (plus de places vides « — »)
     val totalRows = rows.size
     // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de chart / période / date / recherche
-    var visible by remember(state.chart, state.period, state.anchor, state.query) { mutableIntStateOf(TOP_INITIAL) }
+    var visible by remember(state.chart, state.period, state.anchor, state.query, state.sortDuration) { mutableIntStateOf(TOP_INITIAL) }
     val shown = minOf(visible, totalRows)
     val listState = rememberLazyListState()
     LaunchedEffect(state.period, state.anchor) { listState.scrollToItem(0) }
@@ -196,6 +196,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                         shape = RoundedCornerShape(12.dp)
                     )
                 }
+                SortToggle(state.sortDuration) { vm.toggleSort() }
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -229,7 +230,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 
             val realShown = minOf(shown, rows.size)
             items(rows.take(realShown), key = { it.entityId }) { item ->
-                ChartRow(item, state.period, onLongPress = { vm.openHistory(item) })
+                ChartRow(item, state.period, showDuration = state.sortDuration, onLongPress = { vm.openHistory(item) })
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }
 
@@ -433,7 +434,7 @@ fun movementColor(m: Movement): Color = when (m) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
+private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = false, onLongPress: () -> Unit) {
     val theme = Nova.theme
     val isOne = item.position == 1
     val bg = when (item.position) {
@@ -492,7 +493,7 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
             val positionPeak = m !is Movement.New && item.position == item.peakPosition && item.timesAtPeak <= 1
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (positionPeak) { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
-                Text("${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
+                Text(if (showDuration) formatDuration(item.durationMs) else "${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
             }
             if (item.isPlaysPeak) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             if (m !is Movement.New && m !is Movement.Reentry) {
