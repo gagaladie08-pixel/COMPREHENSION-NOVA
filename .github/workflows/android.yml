@@ -39,9 +39,15 @@ jobs:
           gradle-version: "8.9"
 
       - name: Tests unitaires (JVM)
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+        id: tests
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest --no-daemon --stacktrace 2>&1 | tee "$GITHUB_WORKSPACE/unit-test.log"
 
+      # Exécuter le build même si un test échoue, afin de distinguer une régression de test d'une erreur de compilation.
       - name: Compiler l'APK debug
+        id: build-apk
+        if: always()
         run: gradle :app:assembleDebug --no-daemon --stacktrace
         env:
           # Facultatif : si ces secrets existent, ils remplacent api_keys.properties
@@ -58,6 +64,7 @@ jobs:
 
       - name: Renommer l'APK
         id: apk
+        if: always() && steps.build-apk.outcome == 'success'
         run: |
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           NAME="NovaStats-debug-${GITHUB_RUN_NUMBER}-${SHORT_SHA}.apk"
@@ -66,6 +73,7 @@ jobs:
           echo "tag=build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Artefact (téléchargeable depuis l'onglet Actions)
+        if: always() && steps.apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: NovaStats-debug-apk
@@ -73,15 +81,18 @@ jobs:
           retention-days: 30
 
       - name: Rapport de tests (en cas d'échec)
-        if: failure()
+        if: always() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: test-reports
-          path: NovaStats/app/build/reports/
+          path: |
+            unit-test.log
+            NovaStats/app/build/reports/
           retention-days: 7
 
       # Publication dans "Releases" : lien direct téléchargeable depuis un téléphone, sans connexion GitHub.
       - name: Publier dans GitHub Releases
+        if: always() && steps.apk.outcome == 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
