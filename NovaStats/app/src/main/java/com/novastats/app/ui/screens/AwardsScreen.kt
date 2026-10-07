@@ -117,17 +117,18 @@ fun AwardsScreen() {
         Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        YearBigCard("🏆", "Nova Awards", "La cérémonie de tes 9 récompenses annuelles — année en cours LIVE, années passées FINAL.", Nova.theme.primary) { inCeremony = true }
-        YearBigCard("🎬", "Nova Rewind", "Tes périodes en images : écoutes, artistes, records — et une carte à partager.", Nova.theme.secondary) { rewindOpen = true }
-        YearBigCard("📊", "Year-End Charts", "Le bilan complet de chaque année civile : classements titres, artistes et albums.", Nova.theme.accent) { yearEndOpen = true }
+        // weight() n'existe que dans ColumnScope : il est posé ici, pas dans YearBigCard.
+        YearBigCard("🏆", "Nova Awards", "La cérémonie de tes 9 récompenses annuelles — année en cours LIVE, années passées FINAL.", Nova.theme.primary, Modifier.weight(1f)) { inCeremony = true }
+        YearBigCard("🎬", "Nova Rewind", "Tes périodes en images : écoutes, artistes, records — et une carte à partager.", Nova.theme.secondary, Modifier.weight(1f)) { rewindOpen = true }
+        YearBigCard("📊", "Year-End Charts", "Le bilan complet de chaque année civile : classements titres, artistes et albums.", Nova.theme.accent, Modifier.weight(1f)) { yearEndOpen = true }
     }
 }
 
-/** Grande carte d'entrée d'une expérience annuelle : poids égal, l'écran est rempli. */
+/** Grande carte d'entrée d'une expérience annuelle : l'appelant pose `Modifier.weight(1f)`. */
 @Composable
-private fun YearBigCard(emoji: String, title: String, subtitle: String, tint: Color, onClick: () -> Unit) {
+private fun YearBigCard(emoji: String, title: String, subtitle: String, tint: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val theme = Nova.theme
-    NovaCard(Modifier.fillMaxWidth().weight(1f)) {
+    NovaCard(Modifier.fillMaxWidth().then(modifier)) {
         Box(
             Modifier.fillMaxSize().clickable { onClick() }
                 .background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.30f), tint.copy(alpha = 0.10f), Color.Transparent)))
