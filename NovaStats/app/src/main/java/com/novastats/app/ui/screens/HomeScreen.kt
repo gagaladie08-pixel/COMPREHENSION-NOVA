@@ -58,6 +58,7 @@ import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.ui.navigation.NovaTab
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
+import com.novastats.app.ui.theme.NovaTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -524,7 +525,7 @@ private fun hofEntryLabel(type: String) = when (type) {
 
 /** 📊 Sept barres, une par jour (les journées sans écoute n'existent pas en base : on les complète à 0). */
 @Composable
-private fun WeekSparkline(stats: List<DailyStatsEntity>, todayIso: String, theme: NovaColors) {
+private fun WeekSparkline(stats: List<DailyStatsEntity>, todayIso: String, theme: NovaTheme) {
     val byDate = stats.associateBy { it.date }
     val dayFmt = java.time.format.DateTimeFormatter.ofPattern("EEE", Locale.FRANCE)
     val days = (0L..6L).map { off ->
