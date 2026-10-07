@@ -77,7 +77,9 @@ enum class NovaTab(val route: String, val label: String, val emoji: String, val 
     CERTIFICATIONS("certifications", "Certifs", "💎", Icons.Filled.Diamond),
     HALL_OF_FAME("hall_of_fame", "Hall of Fame", "🏛️", Icons.Filled.AccountBalance),
     PANTHEON("pantheon", "Panthéon", "👑", Icons.Filled.Star),
-    AWARDS("awards", "Awards", "🏆", Icons.Filled.WorkspacePremium),
+    // L'onglet garde sa route « awards » (les notifications déjà émises y pointent) mais accueille
+    // désormais toute l'année musicale : Awards + Rewind + Year-End Charts.
+    AWARDS("awards", "Ton année", "🎉", Icons.Filled.WorkspacePremium),
     SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings);
 }
 

@@ -1,6 +1,7 @@
 package com.novastats.app.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,10 +14,12 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -78,8 +81,94 @@ private data class Winner(val name: String, val subtitle: String?, val imageUrl:
  * 🏆 Nova Awards — 9 récompenses annuelles. Déblocage après 2 mois d'utilisation. Année en cours LIVE (recalculée à
  * chaque ouverture), années passées FINAL (archivées). Révélation une par une au premier accès, cérémonie le 31 décembre.
  */
+/**
+ * 🎉 Ton année — la cérémonie des Nova Awards, le Rewind et les Year-End Charts réunis.
+ *
+ * Ces trois expériences racontaient « ton année musicale » à trois endroits différents :
+ * l'onglet Awards, une carte de l'Accueil, une sous-section du Billboard. Elles vivent
+ * désormais côte à côte, en trois segments. Les autres onglets ne bougent pas ; le Rewind
+ * reste aussi accessible depuis l'Accueil, qui sert de vitrine.
+ */
 @Composable
 fun AwardsScreen() {
+    var segment by rememberSaveable { mutableIntStateOf(0) }
+    var rewindKey by remember { mutableStateOf<String?>(null) }
+    var yearEndOpen by remember { mutableStateOf(false) }
+
+    // Pleins écrans prioritaires, comme sur l'Accueil : ils recouvrent tout, retour = l'onglet.
+    if (rewindKey != null) { RewindScreen(rewindKey) { rewindKey = null }; return }
+    if (yearEndOpen) { BackHandler { yearEndOpen = false }; YearEndScreen { yearEndOpen = false }; return }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("🏆 Awards", "🎬 Rewind", "📊 Year-End").forEachIndexed { i, label ->
+                NovaFilterChip(
+                    flagKey = "tonannee$i", selected = segment == i, onClick = { segment = i },
+                    label = { Text(label, fontWeight = FontWeight.SemiBold) }
+                )
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            when (segment) {
+                0 -> AwardsCeremony()
+                1 -> RewindSegment { rewindKey = it }
+                else -> YearEndSegment { yearEndOpen = true }
+            }
+        }
+    }
+}
+
+/** Segment 🎬 : le Rewind — une période en images, et sa carte à partager. */
+@Composable
+private fun RewindSegment(onOpen: (String) -> Unit) {
+    val theme = Nova.theme
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+        item {
+            Text("🎬 Nova Rewind", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)
+            Text("Une période en images : écoutes, artistes, records, récompenses — et une carte à partager.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(12.dp))
+            RewindEntryCard(onOpen)
+            Spacer(Modifier.height(10.dp))
+            Text("Un Rewind apparaît dès qu'une période a assez d'écoutes pour raconter quelque chose.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** Segment 📊 : le bilan complet de chaque année civile (venu du Billboard). */
+@Composable
+private fun YearEndSegment(onOpen: () -> Unit) {
+    val theme = Nova.theme
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+        item {
+            Text("📊 Year-End Charts", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Bold)
+            Text("Le bilan complet de chaque année civile : classements titres, artistes et albums.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(12.dp))
+            NovaCard {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen() }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🏆", fontSize = 20.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Ouvrir les Year-End Charts", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Choisis une année, retrouve ses n°1", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("›", color = theme.primary, fontSize = 22.sp)
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** 🏆 Cérémonie des Nova Awards — segment « Awards » de l'onglet Ton année. */
+@Composable
+private fun AwardsCeremony() {
     val theme = Nova.theme
     val ctx = LocalContext.current
     val app = ctx.applicationContext as NovaStatsApp
