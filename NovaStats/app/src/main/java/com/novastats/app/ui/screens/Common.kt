@@ -401,7 +401,7 @@ fun periodCaption(period: Period, range: com.novastats.app.domain.DateRange): St
     val f = java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
     return when (period) {
         Period.DAILY -> "Aujourd'hui · ${range.to.format(f)}"
-        Period.WEEKLY -> "7 derniers jours · ${range.from.format(f)} → ${range.to.format(f)}"
+        Period.WEEKLY -> "${range.from.format(f)} → ${range.to.format(f)} (en cours)"
         Period.MONTHLY -> "Mois en cours · ${range.from.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE))}"
         Period.YEARLY -> "Année ${range.to.year}"
         Period.GLOBAL -> "Depuis le début"

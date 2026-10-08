@@ -50,7 +50,9 @@ object Dates {
      * Monthly = mois calendaire, Yearly = année calendaire, Global = tout.
      */
     fun statsRangeFor(period: Period, anchor: LocalDate = today()): DateRange = when (period) {
-        Period.WEEKLY -> DateRange(anchor.minusDays(6), anchor)
+        // Choix utilisateur (option C) : la « semaine » Stats est la semaine calendaire en cours
+        // (lundi → aujourd'hui), comme le Billboard — plus une fenêtre glissante de 7 jours.
+        Period.WEEKLY -> DateRange(weekOf(anchor).from, anchor)
         else -> rangeFor(period, anchor)
     }
 
