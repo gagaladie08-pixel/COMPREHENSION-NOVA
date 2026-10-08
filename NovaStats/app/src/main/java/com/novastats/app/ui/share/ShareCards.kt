@@ -185,7 +185,7 @@ object ShareCards {
     }
 
     /** 📤 Carte du parcours d'une entité dans son chart (+ face-à-face éventuel), 1080×1920, aux couleurs du thème. */
-    suspend fun renderChartStory(ctx: Context, h: EntityHistory, compare: EntityHistory? = null, theme: NovaTheme = Nova.theme): File = withContext(Dispatchers.Default) {
+    suspend fun renderChartStory(ctx: Context, h: EntityHistory, compare: EntityHistory? = null, theme: NovaTheme): File = withContext(Dispatchers.Default) {
         val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF

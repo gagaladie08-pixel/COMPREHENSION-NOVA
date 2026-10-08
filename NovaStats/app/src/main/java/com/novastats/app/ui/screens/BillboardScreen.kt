@@ -285,7 +285,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         ChartHistoryDialog(
             it, onDismiss = { vm.clearCompare(); vm.closeHistory() },
             compare = compare, candidates = state.items,
-            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = vm::shareHistory
+            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = { vm.shareHistory(theme) }
         )
     }
 }

@@ -276,12 +276,12 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun clearCompare() { _compare.value = null }
 
     /** 📤 Rend la carte du parcours (+ face-à-face) et ouvre la feuille de partage. */
-    fun shareHistory() {
+    fun shareHistory(theme: com.novastats.app.ui.theme.NovaTheme) {
         val h = _history.value ?: return
         val cmp = _compare.value
         viewModelScope.launch {
             runCatching {
-                val f = withContext(Dispatchers.IO) { com.novastats.app.ui.share.ShareCards.renderChartStory(app, h, cmp) }
+                val f = withContext(Dispatchers.IO) { com.novastats.app.ui.share.ShareCards.renderChartStory(app, h, cmp, theme) }
                 com.novastats.app.ui.share.ShareCards.share(app, f)
             }
         }
