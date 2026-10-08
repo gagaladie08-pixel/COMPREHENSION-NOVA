@@ -152,6 +152,11 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 if (state.hasAnyData) SummaryBanner(state)
                 // 4. Carte « #1 de la période » : la pochette du #1 en fond, titre, artiste, écoutes, règne
                 state.summary.numberOne?.let { one -> if (state.items.isNotEmpty()) NumberOneCard(one, state) { vm.openHistory(one) } }
+                // 5. Carrousel « histoires » (hebdo + mensuel) : nouvelle entrée, dominance, longévité, progression
+                if (state.period == Period.WEEKLY || state.period == Period.MONTHLY) {
+                    val stories = remember(state.items, state.summary, state.chart, state.period) { buildStories(state) }
+                    if (stories.isNotEmpty()) StoriesCarousel(stories, state.period)
+                }
             }
         }
 
@@ -509,3 +514,83 @@ private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = fa
     }
 }
 
+
+/** Carte du carrousel « histoires » — un fait, une pochette. */
+private data class Story(val coverUrl: String?, val circle: Boolean, val text: String)
+
+/** Quatre faits calculés sur le snapshot affiché : meilleure entrée, dominance, longévité, plus forte progression. */
+private fun buildStories(s: BillboardUiState): List<Story> {
+    val items = s.items
+    if (items.isEmpty()) return emptyList()
+    val chartName = s.chart.label.removePrefix("Nova ")
+    val out = mutableListOf<Story>()
+    // 1. Meilleure nouvelle entrée (celle entrée le plus haut)
+    items.filter { it.movement is Movement.New }.minByOrNull { it.position }?.let { n ->
+        out += Story(n.coverUrl, n.circle, "« ${n.name} »" + (n.secondary?.let { " de $it" } ?: "") + " est la meilleure nouvelle entrée du classement $chartName, directement à la ${n.position}ᵉ place.")
+    }
+    // 2. Dominance : l'artiste qui occupe le plus de places
+    if (s.chart != Chart.ARTIST_50) {
+        items.groupBy { it.secondary.orEmpty() }.filter { it.key.isNotBlank() && it.value.size >= 2 }
+            .maxByOrNull { it.value.size }?.let { (artist, rows) ->
+                val one = items.first()
+                out += if (one.secondary == artist)
+                    Story(one.coverUrl, one.circle, "$artist occupe le plus grand nombre de places dans le classement $chartName (${rows.size}). Son titre « ${one.name} » est numéro 1.")
+                else {
+                    val best = rows.minByOrNull { it.position }!!
+                    Story(best.coverUrl, best.circle, "$artist occupe le plus grand nombre de places dans le classement $chartName (${rows.size}), avec « ${best.name} » en meilleure position (#${best.position}).")
+                }
+            }
+    }
+    // 3. Longévité : le plus grand nombre de périodes consécutives dans le chart
+    items.maxByOrNull { it.periodsInChart }?.takeIf { it.periodsInChart > 1 }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + (r.secondary?.let { " de $it" } ?: "") + " détient le record de longévité du classement $chartName, avec ${r.periodsInChart} ${BillboardDates.unitLabel(s.period, r.periodsInChart)} d'affilée.")
+    }
+    // 4. Plus forte progression de la période
+    s.summary.biggestClimber?.let { c ->
+        val up = c.movement as? Movement.Up ?: return@let
+        out += Story(c.coverUrl, c.circle, "« ${c.name} »" + (c.secondary?.let { " de $it" } ?: "") + " signe la plus forte progression du classement $chartName, gagnant ${up.places} place${if (up.places > 1) "s" else ""} pour atteindre la ${c.position}ᵉ position.")
+    }
+    return out
+}
+
+/** Carrousel façon Spotify Charts : grande pochette, une phrase-fait, pastilles + flèches. */
+@Composable
+private fun StoriesCarousel(stories: List<Story>, period: Period) {
+    val theme = Nova.theme
+    var index by remember { mutableIntStateOf(0) }
+    val i = index.coerceIn(0, stories.lastIndex)
+    val story = stories[i]
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(20.dp)).background(theme.primary.copy(alpha = 0.16f))
+            .padding(16.dp)
+    ) {
+        Text(
+            if (period == Period.MONTHLY) "Voici un aperçu de ce qui anime tes écoutes ce mois-ci."
+            else "Voici un aperçu de ce qui anime tes écoutes cette semaine.",
+            color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(Modifier.height(12.dp))
+        CoverArt(story.coverUrl, story.text, circle = story.circle, size = 180)
+        Spacer(Modifier.height(12.dp))
+        Text(story.text, color = theme.text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            stories.forEachIndexed { k, st ->
+                Box(
+                    Modifier.size(10.dp).clip(RoundedCornerShape(50))
+                        .background(if (k == i) theme.text else theme.textSecondary.copy(alpha = 0.45f))
+                        .clickable { index = k }
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { index = i - 1 }, enabled = i > 0) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Histoire précédente", tint = if (i > 0) theme.text else theme.textSecondary.copy(alpha = 0.3f))
+            }
+            IconButton(onClick = { index = i + 1 }, enabled = i < stories.lastIndex) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Histoire suivante", tint = if (i < stories.lastIndex) theme.text else theme.textSecondary.copy(alpha = 0.3f))
+            }
+        }
+    }
+}
