@@ -70,6 +70,12 @@ object RecordCatalog {
     )
     fun inGroup(g: RecordGroup): List<RecordDef> = groupOf.filterValues { it == g }.keys.mapNotNull { id -> ALL.firstOrNull { it.id == id } }
 
+    /** Records dont la casse mérite une cérémonie : les plus durs à obtenir et à battre (choix utilisateur). */
+    val MAJOR: Set<String> = setOf(
+        "MOST_TIME_AT_1", "MOST_CUMULATIVE", "LONGEST_LIFESPAN", "PODIUM_SWEEP",
+        "LONGEST_LISTENING_STREAK", "BIGGEST_PERIOD", "BIGGEST_JUMP", "FASTEST_CERT"
+    )
+
     /** Index de période (jours epoch / semaines ISO / mois / années) — partagé moteur + explications. */
     fun periodIndex(date: java.time.LocalDate, p: Period): Int = when (p) {
         Period.DAILY -> date.toEpochDay().toInt()

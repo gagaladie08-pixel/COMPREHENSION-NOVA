@@ -260,6 +260,14 @@ interface RecordDao {
     )
     suspend fun tiedAt(type: String, period: String?, category: String, sub: String?, value: Double): Int
 
+    /** 🕰️ Records établis triés par date d'établissement (fil chronologique + éphéméride + cérémonie). */
+    @Query("SELECT * FROM records_cache WHERE value_date IS NOT NULL ORDER BY value_date DESC LIMIT :limit")
+    suspend fun recentByValueDate(limit: Int): List<RecordCacheEntity>
+
+    /** 🎯 Détenteur actuel d'un record typé (bloc « en direct »). */
+    @Query("SELECT * FROM records_cache WHERE record_type = :type AND period_type = :period AND category = :category ORDER BY value DESC LIMIT 1")
+    suspend fun holder(type: String, period: String, category: String): RecordCacheEntity?
+
     /** Toutes les lignes de cache d'une entité (tous records / périodes / sous-sections) — contexte de la fiche. */
     @Query("SELECT * FROM records_cache WHERE category = :category AND entity_id = :entityId ORDER BY record_type, period_type, subcategory")
     suspend fun rowsForEntity(category: String, entityId: Long): List<RecordCacheEntity>

@@ -52,6 +52,7 @@ import com.novastats.app.data.db.dao.RecordRow
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.repository.RecordExplainer
 import com.novastats.app.domain.Period
+import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
 import com.novastats.app.domain.RecordDef
@@ -162,6 +163,7 @@ fun RecordsScreen() {
                     }
                     Spacer(Modifier.height(6.dp))
                 }
+                item(key = "live") { RecordsLive(db) }
                 val groups = if (group == null) RecordGroup.entries.toList() else listOf(group!!)
                 groups.forEach { g ->
                     item(key = "h_${g.name}") {
@@ -663,6 +665,106 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
             "MOST_SUCCESSIVE_1" -> "$n #1 successifs"
             "MOST_SIMULTANEOUS" -> "$n simultané${if (n > 1) "s" else ""}"
             else -> "$n"
+        }
+    }
+}
+
+/** Ligne du bloc « en direct » : leader de la période en cours face au record établi. */
+private data class LiveRow(val periodLabel: String, val leaderName: String, val leaderPlays: Int, val holderName: String?, val recordValue: Double, val sameHolder: Boolean)
+
+/**
+ * 🎯⚠️🕰️📅🎉 Section vivante de l'onglet Records :
+ * records en approche / menaces (BIGGEST_PERIOD jour·semaine·mois), fil des records récemment tombés,
+ * éphéméride « en ce jour », et cérémonie réservée aux records MAJEURS cassés dans les 7 derniers jours.
+ */
+@Composable
+private fun RecordsLive(db: NovaDatabase) {
+    val theme = Nova.theme
+    var live by remember { mutableStateOf<List<LiveRow>?>(null) }
+    var feed by remember { mutableStateOf<List<Triple<String, String, String>>>(emptyList()) }
+    var ephemeride by remember { mutableStateOf<List<String>>(emptyList()) }
+    var ceremony by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        runCatching {
+            val today = Dates.today()
+            val mmdd = java.time.format.DateTimeFormatter.ofPattern("MM-dd")
+            fun nameOf(cat: String, id: Long) = when (cat) {
+                "TRACK" -> db.trackDao().getById(id)?.title
+                "ALBUM" -> db.albumDao().getById(id)?.title
+                else -> db.artistDao().byIds(listOf(id)).firstOrNull()?.name
+            } ?: "Inconnu"
+            fun defOf(t: String) = RecordCatalog.ALL.firstOrNull { it.id == t }
+            // 🎯 En direct : le leader de la période en cours face au record établi
+            val rows = mutableListOf<LiveRow>()
+            listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY).forEach { p ->
+                val rec = db.recordDao().holder("BIGGEST_PERIOD", p.dbName, "TRACK") ?: return@forEach
+                val r = Dates.statsRangeFor(p)
+                val leader = db.scrobbleDao().topForPeriod(r.fromIso, r.toIso, 1).first().firstOrNull() ?: return@forEach
+                if (leader.periodPlays > 0) {
+                    rows += LiveRow(p.frLabel, leader.track.title, leader.periodPlays, db.trackDao().getById(rec.entityId)?.title, rec.value, leader.track.trackId == rec.entityId)
+                }
+            }
+            live = rows
+            // 🕰️ Fil chronologique + 🎉 cérémonie (records majeurs, 7 derniers jours)
+            val recent = db.recordDao().recentByValueDate(80)
+            feed = recent.take(6).mapNotNull { e ->
+                val def = defOf(e.recordType) ?: return@mapNotNull null
+                val p = Period.entries.firstOrNull { it.dbName == e.periodType }
+                Triple(e.valueDate ?: return@mapNotNull null, "« ${nameOf(e.category, e.entityId)} » · ${def.title}", formatRecordValue(def, p, e.value))
+            }
+            ceremony = recent.filter { it.recordType in RecordCatalog.MAJOR && (it.valueDate ?: "") >= today.minusDays(6).toString() }
+                .take(3).map { e -> "${defOf(e.recordType)?.title ?: e.recordType} — « ${nameOf(e.category, e.entityId)} » (${e.valueDate})" }
+            // 📅 Éphéméride : certifications, HoF et records établis un « 8 octobre » des années passées
+            val ev = mutableListOf<String>()
+            db.certificationDao().allHistory().forEach { h ->
+                val d = java.time.Instant.ofEpochMilli(h.certifiedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                if (d != today && d.format(mmdd) == today.format(mmdd)) {
+                    val lvl = CertLevel.entries.firstOrNull { it.dbName == h.level }
+                    ev += "${d.year} · ${lvl?.emoji ?: "🏅"} ${lvl?.label ?: h.level} obtenue — « ${nameOf(h.entityType, h.entityId)} »"
+                }
+            }
+            db.hallOfFameDao().all().forEach { h ->
+                val d = runCatching { java.time.LocalDate.parse(h.entryDate) }.getOrNull() ?: return@forEach
+                if (d != today && d.format(mmdd) == today.format(mmdd)) ev += "${d.year} · 🏛️ Hall of Fame (${h.entryType.replace('_', ' ').lowercase()})"
+            }
+            recent.forEach { e ->
+                val d = runCatching { java.time.LocalDate.parse(e.valueDate ?: return@forEach) }.getOrNull() ?: return@forEach
+                if (d != today && d.format(mmdd) == today.format(mmdd)) ev += "${d.year} · 🏆 ${defOf(e.recordType)?.title ?: e.recordType} établi"
+            }
+            ephemeride = ev.take(5)
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+        if (ceremony.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(NovaColors.Gold.copy(alpha = 0.14f)).padding(12.dp)) {
+                Text("🎉 Record majeur tombé ces 7 derniers jours", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                ceremony.forEach { Text(it, color = theme.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp)) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        live?.let { rows -> if (rows.isNotEmpty()) {
+            Text("🎯 En direct — records en approche", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            rows.forEach { r ->
+                val gap = r.recordValue - r.leaderPlays
+                Text(
+                    when {
+                        gap <= 0 -> "🔥 « ${r.leaderName} » a déjà dépassé le record ${r.periodLabel.lowercase()} (${r.recordValue.toInt()} ▶) !"
+                        r.sameHolder -> "« ${r.leaderName} » est à ${gap.toInt()} écoutes de battre son propre record ${r.periodLabel.lowercase()} (${r.recordValue.toInt()} ▶)."
+                        else -> "⚠️ « ${r.leaderName} » (${r.leaderPlays} ▶) talonne le record ${r.periodLabel.lowercase()} de « ${r.holderName} » (${r.recordValue.toInt()} ▶)."
+                    },
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        } }
+        if (feed.isNotEmpty()) {
+            Text("🕰️ Derniers records tombés", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            feed.forEach { (d, label, v) -> Text("$d · $label — $v", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (ephemeride.isNotEmpty()) {
+            Text("📅 En ce jour", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            ephemeride.forEach { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
         }
     }
 }
