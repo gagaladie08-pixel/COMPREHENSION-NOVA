@@ -106,6 +106,13 @@ data class BillboardUiState(
     fun count(filter: MovementFilter): Int = items.count { filter.matches(it.movement) }
 }
 
+/** 🏅 L'autre moitié de la carte : certifications / Panthéon / Hall of Fame (fiche historique). */
+data class EntityExtras(
+    val certLines: List<String> = emptyList(),
+    val pantheonLabel: String? = null,
+    val hofLines: List<String> = emptyList()
+)
+
 /** Fiche historique (appui long). */
 data class EntityHistory(
     val item: ChartItem,
@@ -113,7 +120,8 @@ data class EntityHistory(
     val period: Period,
     val appearances: List<ChartAppearance>,
     val anchors: List<LocalDate>,
-    val stats: ChartHistoryStats
+    val stats: ChartHistoryStats,
+    val extras: EntityExtras = EntityExtras()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -219,11 +227,63 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun openHistory(item: ChartItem) {
         val c = chart.value; val p = period.value
         viewModelScope.launch {
+            val (rows, extras) = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) to loadExtras(c, item.entityId) }
+            val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
+            val first = appearances.minOfOrNull { it.date } ?: anchor.value
+            val anchors = BillboardDates.allAnchors(p, first, Dates.today())
+            _history.value = EntityHistory(item, c, p, appearances, anchors, ChartHistory.stats(appearances, anchors), extras)
+        }
+    }
+
+    /** 🏅 Certifications, statut Panthéon, intronisations Hall of Fame de l'entité. */
+    private suspend fun loadExtras(c: Chart, id: Long): EntityExtras {
+        val type = c.entityType
+        val certFmt = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.FRANCE)
+        val certLines = if (type != "ARTIST") db.certificationDao().history(id, type).map { hst ->
+            val lvl = com.novastats.app.domain.CertLevel.entries.firstOrNull { it.dbName == hst.level }
+            "${lvl?.emoji ?: "🏅"} ${lvl?.label ?: hst.level}${if (hst.multiplier > 1) " ×${hst.multiplier}" else ""} — ${certFmt.format(java.util.Date(hst.certifiedAt))}"
+        } else emptyList()
+        val pantheonLabel = if (type == "ARTIST")
+            db.artistDao().byIds(listOf(id)).firstOrNull()?.pantheonStatus
+                ?.let { com.novastats.app.domain.PantheonStatus.fromDb(it) }?.let { "${it.emoji} ${it.label}" }
+        else null
+        val hofLines = db.hallOfFameDao().ofEntity(id, type).map { e ->
+            when (e.entryType) {
+                "DIRECT_DEBUT" -> "⚡ Entrée directe"
+                "LONG_RUN" -> "👑 Long règne (${e.weeksAt1} ${BillboardDates.unitLabel(Period.WEEKLY, e.weeksAt1)})"
+                "TRIPLE_DEBUT" -> "🚀 Triple début"
+                else -> "🌟 Règne légendaire"
+            } + " — ${e.periodType}"
+        }
+        return EntityExtras(certLines, pantheonLabel, hofLines)
+    }
+
+    private val _compare = MutableStateFlow<EntityHistory?>(null)
+    val compare: StateFlow<EntityHistory?> = _compare
+
+    /** ⚔️ Seconde courbe : charge l'historique de l'entité choisie. */
+    fun compareWith(item: ChartItem) {
+        val c = chart.value; val p = period.value
+        viewModelScope.launch {
             val rows = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) }
             val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
             val first = appearances.minOfOrNull { it.date } ?: anchor.value
             val anchors = BillboardDates.allAnchors(p, first, Dates.today())
-            _history.value = EntityHistory(item, c, p, appearances, anchors, ChartHistory.stats(appearances, anchors))
+            _compare.value = EntityHistory(item, c, p, appearances, anchors, ChartHistory.stats(appearances, anchors))
+        }
+    }
+
+    fun clearCompare() { _compare.value = null }
+
+    /** 📤 Rend la carte du parcours (+ face-à-face) et ouvre la feuille de partage. */
+    fun shareHistory() {
+        val h = _history.value ?: return
+        val cmp = _compare.value
+        viewModelScope.launch {
+            runCatching {
+                val f = withContext(Dispatchers.IO) { com.novastats.app.ui.share.ShareCards.renderChartStory(app, h, cmp) }
+                com.novastats.app.ui.share.ShareCards.share(app, f)
+            }
         }
     }
 

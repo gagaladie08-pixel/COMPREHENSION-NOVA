@@ -26,6 +26,9 @@ import com.novastats.app.data.repository.RewindData
 import com.novastats.app.data.repository.RewindSpec
 import com.novastats.app.ui.screens.formatCount
 import com.novastats.app.ui.screens.formatDuration
+import com.novastats.app.ui.screens.EntityHistory
+import com.novastats.app.ui.screens.storySentence
+import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.ui.theme.NovaColors
 import com.novastats.app.ui.theme.NovaTheme
 import kotlinx.coroutines.Dispatchers
@@ -178,6 +181,77 @@ object ShareCards {
         }
 
         writePng(ctx, bmp, "nova_rewind_${data.spec.key}.png")
+    }
+
+    /** 📤 Carte du parcours d'une entité dans son chart (+ face-à-face éventuel), 1080×1920, aux couleurs du thème. */
+    suspend fun renderChartStory(ctx: Context, h: EntityHistory, compare: EntityHistory? = null, theme: NovaTheme = Nova.theme): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val gold = NovaColors.Gold.toArgb()
+        val silver = NovaColors.Silver.toArgb()
+
+        /* Fond dégradé + halo or */
+        val bg = Paint().apply { shader = LinearGradient(0f, 0f, 0f, H.toFloat(), intArrayOf(theme.background.toArgb(), blend(theme.background.toArgb(), gold, 0.18f), AColor.BLACK), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP) }
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bg)
+        halo(c, 200f, 300f, 520f, gold, 0.35f)
+
+        /* En-tête */
+        c.drawText("NOVA BILLBOARD · ${h.chart.label.uppercase()}", 72f, 140f, textPaint(bold, 30f, withAlpha(theme.accent.toArgb(), 0.95f)).apply { letterSpacing = 0.2f })
+        var y = drawWrapped(c, h.item.name, 72f, 250f, W - 144f, textPaint(bold, 84f, theme.text.toArgb()), 2, 96f)
+        h.item.secondary?.let { y = drawWrapped(c, it, 72f, y + 10f, W - 144f, textPaint(inter, 40f, theme.textSecondary.toArgb()), 1, 52f) }
+
+        /* Pochette + peak en grand */
+        val coverBmp = h.item.coverUrl?.let { loadBitmap(ctx, it, 700) }
+        val coverRect = RectF(72f, y + 40f, 72f + 420f, y + 460f)
+        if (coverBmp != null) drawCover(c, coverBmp, coverRect, 40f)
+        h.stats.peak?.let { pk ->
+            c.drawText("PEAK", 560f, y + 140f, textPaint(bold, 34f, withAlpha(gold, 0.8f)).apply { letterSpacing = 0.2f })
+            c.drawText("#${pk.position}", 560f, y + 260f, textPaint(bold, 110f, gold))
+            if (h.stats.timesAtPeak > 1) c.drawText("×${h.stats.timesAtPeak}", 560f, y + 330f, textPaint(bold, 44f, withAlpha(gold, 0.9f)))
+        }
+
+        /* La phrase-histoire */
+        val sy = drawWrapped(c, storySentence(h), 72f, coverRect.bottom + 90f, W - 144f, textPaint(inter, 40f, theme.text.toArgb()), 4, 56f)
+
+        /* Courbe des positions (#1 en haut) + face-à-face argent */
+        val plot = RectF(72f, sy + 60f, W - 72f, sy + 620f)
+        val sorted = h.appearances.sortedBy { it.date }
+        val maxPos = (sorted.maxOfOrNull { it.position } ?: 5).coerceAtLeast(5).toFloat()
+        fun px(i: Int) = plot.left + if (sorted.size < 2) plot.width() / 2 else plot.width() * i / (sorted.size - 1)
+        fun py(v: Float) = plot.top + plot.height() * ((v - 1f) / (maxPos - 1f)).coerceIn(0f, 1f)
+        listOf(1f, maxPos).forEach { g ->
+            c.drawLine(plot.left, py(g), plot.right, py(g), Paint().apply { color = withAlpha(theme.textSecondary.toArgb(), 0.25f); strokeWidth = 2f })
+            c.drawText("#${g.toInt()}", plot.left, py(g) - 8f, textPaint(inter, 26f, theme.textSecondary.toArgb()))
+        }
+        fun drawSeries(ap: List<ChartAppearance>, color: Int, width: Float) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; strokeWidth = width; style = Paint.Style.STROKE }
+            var prev: android.graphics.PointF? = null
+            ap.forEachIndexed { i, a ->
+                val cur = android.graphics.PointF(px(i), py(a.position.toFloat()))
+                prev?.let { c.drawLine(it.x, it.y, cur.x, cur.y, p) }
+                prev = cur
+            }
+            ap.forEachIndexed { i, a -> c.drawCircle(px(i), py(a.position.toFloat()), 7f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }) }
+        }
+        val dFmt = java.time.format.DateTimeFormatter.ofPattern("d MMM yy")
+        if (sorted.size >= 2) {
+            compare?.let { cmp -> drawSeries(cmp.appearances.sortedBy { it.date }, silver, 6f) }
+            drawSeries(sorted, gold, 9f)
+            h.stats.peak?.let { pk ->
+                val i = sorted.indexOfFirst { it.date == pk.date }
+                if (i >= 0) c.drawText("⭐", px(i), py(pk.position.toFloat()) - 24f, textPaint(inter, 44f, gold).apply { textAlign = Paint.Align.CENTER })
+            }
+            sorted.first().let { c.drawText(it.date.format(dFmt), plot.left, plot.bottom + 48f, textPaint(inter, 26f, theme.textSecondary.toArgb())) }
+            sorted.last().let { c.drawText(it.date.format(dFmt), plot.right, plot.bottom + 48f, textPaint(inter, 26f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.RIGHT }) }
+        }
+
+        /* Pied */
+        compare?.let { c.drawText("⚔ vs ${it.item.name}", 72f, H - 60f, textPaint(bold, 34f, silver)) }
+        c.drawText("NovaStats", W - 72f, H - 60f, textPaint(bold, 30f, withAlpha(theme.textSecondary.toArgb(), 0.8f)).apply { textAlign = Paint.Align.RIGHT })
+
+        writePng(ctx, bmp, "nova_chart_${h.item.entityId}.png")
     }
 
     /* ----------------------------- helpers ----------------------------- */

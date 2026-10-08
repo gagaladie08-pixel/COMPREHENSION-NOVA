@@ -39,6 +39,11 @@ fun NovaCurveChart(
     gridValues: List<Float> = emptyList(),
     thresholds: List<Pair<Float, Color>> = emptyList(),
     peakIndex: Int? = null,
+    /** Jalons 🚀  ↩ 🔥 : index de la valeur → emoji dessiné au-dessus du point. */
+    markers: Map<Int, String> = emptyMap(),
+    /** ⚔️ Seconde série (face-à-face), alignée sur le même axe X ; null = pas de comparaison. */
+    overlay: List<Float?>? = null,
+    overlayColor: Color? = null,
     showPoints: Boolean = false,
     endDot: Boolean = !invertY,
     /** Libellés de l'axe X alignés sur [values] (dates des périodes). null = pas de libellé. */
@@ -122,6 +127,30 @@ fun NovaCurveChart(
             drawCircle(NovaColors.Gold, radius = 7.dp.toPx(), center = c)
             val p = android.graphics.Paint().apply { textSize = 14.sp.toPx(); textAlign = android.graphics.Paint.Align.CENTER; isAntiAlias = true }
             drawContext.canvas.nativeCanvas.drawText("⭐", c.x, c.y - 9.dp.toPx(), p)
+        }
+
+        // ⚔️ Courbe de comparaison (argent), mêmes échelles
+        overlay?.let { ov ->
+            val oc = overlayColor ?: NovaColors.Silver
+            val osegs = mutableListOf<List<Offset>>()
+            var oseg = mutableListOf<Offset>()
+            ov.forEachIndexed { i, v ->
+                if (v != null) oseg += Offset(x(i), y(v))
+                else if (oseg.isNotEmpty()) { osegs += oseg; oseg = mutableListOf() }
+            }
+            if (oseg.isNotEmpty()) osegs += oseg
+            osegs.forEach { pts ->
+                if (pts.size >= 2) drawNovaCurve(theme, pts, baselineY = baseline, anim = anim, strokeOverride = oc, showPoints = false)
+                else drawCircle(oc, radius = 3.dp.toPx(), center = pts.first())
+            }
+        }
+
+        // 🚀  ↩  jalons au-dessus des points
+        markers.forEach { (i, emoji) ->
+            val v = values.getOrNull(i) ?: return@forEach
+            val c = Offset(x(i), y(v))
+            val mp = android.graphics.Paint().apply { textSize = 12.sp.toPx(); textAlign = android.graphics.Paint.Align.CENTER; isAntiAlias = true }
+            drawContext.canvas.nativeCanvas.drawText(emoji, c.x, c.y - 8.dp.toPx(), mp)
         }
 
         /* ---- Axe X : première période, milieu, dernière ---- */

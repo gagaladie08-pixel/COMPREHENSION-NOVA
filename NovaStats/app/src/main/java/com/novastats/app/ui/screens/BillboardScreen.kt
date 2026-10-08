@@ -102,6 +102,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val theme = Nova.theme
     val state by vm.state.collectAsStateWithLifecycle()
     val history by vm.history.collectAsStateWithLifecycle()
+    val compare by vm.compare.collectAsStateWithLifecycle()
     var showPicker by remember { mutableStateOf(false) }
 
     var searching by remember { mutableStateOf(false) }
@@ -280,7 +281,13 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         ) { DatePicker(state = pickerState, showModeToggle = false) }
     }
 
-    history?.let { ChartHistoryDialog(it, onDismiss = vm::closeHistory) }
+    history?.let {
+        ChartHistoryDialog(
+            it, onDismiss = { vm.clearCompare(); vm.closeHistory() },
+            compare = compare, candidates = state.items,
+            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = vm::shareHistory
+        )
+    }
 }
 
 /* ------------------------------------------------------------------------- */
