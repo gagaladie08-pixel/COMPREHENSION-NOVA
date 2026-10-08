@@ -770,8 +770,8 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
             // Contexte par combinaison : top 3 actuel + chronologie des chutes
             val famRows = db.recordDao().rowsForTypes(FAMILY_RECORDS.toList())
             val groups = famRows.groupBy { listOf(it.r.recordType, it.r.periodType ?: "-", it.r.category, it.r.subcategory ?: "-") }
-            val chrono = mutableMapOf<String, List<Pair<RecordRow, RecordRow?>>>()
-            val top3map = mutableMapOf<String, List<String>>()
+            val chrono = mutableMapOf<List<String>, List<Pair<RecordRow, RecordRow?>>>()
+            val top3map = mutableMapOf<List<String>, List<String>>()
             for ((key, rs) in groups) {
                 val def = RecordCatalog.ALL.firstOrNull { d -> d.id == rs.first().r.recordType } ?: continue
                 chrono[key] = fallenChronology(rs, def.ascending)
