@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -725,6 +726,19 @@ private fun fallenEvent(all: List<RecordRow>, row: RecordRow): String {
     }
 }
 
+/** Les 12 records de la famille demandés par l'utilisateur (puce Approche étendue aux autres vues). */
+private val FAMILY_RECORDS = setOf(
+    "MOST_RECORDS", "MOST_CUMULATIVE", "MOST_TIME_AT_1", "MOST_CERTIFICATIONS",
+    "MOST_BLOCKED_TOP5", "MOST_CONSISTENT", "MOST_DEBUT_1", "MOST_DEBUT_TOP10",
+    "MOST_SONGS_IN_CHART", "MOST_SONGS_AT_1", "MOST_SONGS_TOP10", "MOST_SUCCESSIVE_1"
+)
+
+/** Enveloppe de la famille : majeurs historiques + les 12 records choisis. */
+private val FAMILY_ALL: Set<String> get() = RecordCatalog.MAJOR + FAMILY_RECORDS
+
+/** Types gérés par un compteur vivant (période en cours / cumul all time / streak) — exclus du calcul statique n°1/n°2. */
+private val LIVE_HANDLED = setOf("BIGGEST_PERIOD", "LONGEST_LISTENING_STREAK")
+
 /** Ligne de la famille des records : affichée sous les puces, cliquable vers son pop-up propre. */
 private data class RecItem(
     val emoji: String,
@@ -738,7 +752,7 @@ private data class RecItem(
 /**
  * 🏆 Écran « famille des records » : les 4 vues en petites puces côte à côte (style Certifications),
  * la puce active est surlignée et ses données s'écrivent directement en dessous.
- * Chaque ligne cliquable ouvre SON pop-up à elle — le récit de l'événement, pas la fiche du record.
+ * Chaque ligne cliquable ouvre SON pop-up à elle — grand, premium, avec l'explication du record et le récit.
  */
 @Composable
 private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
@@ -751,9 +765,9 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
     var popup by remember { mutableStateOf<RecItem?>(null) }
     LaunchedEffect(Unit) {
         runCatching {
-            // 🎯 Approche + ⚠️ Menaces : leaders de la période en cours face aux records BIGGEST_PERIOD
             val ap = mutableListOf<RecItem>()
             val me = mutableListOf<RecItem>()
+            // 🎯⚠️ BIGGEST_PERIOD vivant : leader de la période en cours face au record
             val bpRows = db.recordDao().rowsForTypes(listOf("BIGGEST_PERIOD"))
             for (p in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY)) {
                 val r = Dates.statsRangeFor(p)
@@ -781,33 +795,39 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
                     }
                 }
             }
-            // ⚠️ Menaces : cumuls all time talonnés par le #2
+            // 🎯⚠️ Cumuls all time vivants : le n°2 face au n°1
             val mcRows = db.recordDao().rowsForTypes(listOf("MOST_CUMULATIVE"))
             val t2 = db.trackDao().topAllTime(2).first()
             if (t2.size >= 2) {
                 val gap = t2[0].periodPlays - t2[1].periodPlays
                 val row = mcRows.filter { it.r.category == "TRACK" }.maxByOrNull { it.r.value }
-                if (row != null) me += RecItem("🏆", "Most Cumulative · Titre", "Détenteur : « ${row.name ?: "Inconnu"} » — ${valueOf(row)}",
-                    if (gap <= 0) "🔥 Égalité en tête du cumul : « ${t2[1].track.title} » a rejoint « ${t2[0].track.title} » — le record all time peut basculer à chaque écoute."
-                    else "⚠️ « ${t2[1].track.title} » n'est qu'à $gap écoutes du cumul de « ${t2[0].track.title} » (${t2[0].periodPlays} ▶) — le record all time est menacé.", row)
+                if (row != null) {
+                    val detail = "Détenteur : « ${row.name ?: "Inconnu"} » — ${valueOf(row)}"
+                    if (gap <= 0) me += RecItem("🏆", "Most Cumulative · Titre", detail, "🔥 Égalité en tête du cumul : « ${t2[1].track.title} » a rejoint « ${t2[0].track.title} » — le record all time peut basculer à chaque écoute.", row)
+                    else ap += RecItem("🏆", "Most Cumulative · Titre", detail, "⚠️ « ${t2[1].track.title} » n'est qu'à $gap écoutes du cumul de « ${t2[0].track.title} » (${t2[0].periodPlays} ▶) — le record all time est en approche.", row)
+                }
             }
             val a2 = db.artistDao().topAllTime(2).first()
             if (a2.size >= 2) {
                 val gap = a2[0].periodPlays - a2[1].periodPlays
                 val row = mcRows.filter { it.r.category == "ARTIST" }.maxByOrNull { it.r.value }
-                if (row != null) me += RecItem("🏆", "Most Cumulative · Artiste", "Détenteur : « ${row.name ?: "Inconnu"} » — ${valueOf(row)}",
-                    if (gap <= 0) "🔥 Égalité en tête du cumul : « ${a2[1].artist.name} » a rejoint « ${a2[0].artist.name} » — le record all time peut basculer à chaque écoute."
-                    else "⚠️ « ${a2[1].artist.name} » n'est qu'à $gap écoutes du cumul de « ${a2[0].artist.name} » (${a2[0].periodPlays} ▶) — le record all time est menacé.", row)
+                if (row != null) {
+                    val detail = "Détenteur : « ${row.name ?: "Inconnu"} » — ${valueOf(row)}"
+                    if (gap <= 0) me += RecItem("🏆", "Most Cumulative · Artiste", detail, "🔥 Égalité en tête du cumul : « ${a2[1].artist.name} » a rejoint « ${a2[0].artist.name} » — le record all time peut basculer à chaque écoute.", row)
+                    else ap += RecItem("🏆", "Most Cumulative · Artiste", detail, "⚠️ « ${a2[1].artist.name} » n'est qu'à $gap écoutes du cumul de « ${a2[0].artist.name} » (${a2[0].periodPlays} ▶) — le record all time est en approche.", row)
+                }
             }
             val al2 = db.albumDao().topAllTime(2).first()
             if (al2.size >= 2) {
                 val gap = al2[0].periodPlays - al2[1].periodPlays
                 val row = mcRows.filter { it.r.category == "ALBUM" }.maxByOrNull { it.r.value }
-                if (row != null) me += RecItem("🏆", "Most Cumulative · Album", "Détenteur : « ${row.name ?: "Inconnu"} » — ${valueOf(row)}",
-                    if (gap <= 0) "🔥 Égalité en tête du cumul : « ${al2[1].album.title} » a rejoint « ${al2[0].album.title} » — le record all time peut basculer à chaque écoute."
-                    else "⚠️ « ${al2[1].album.title} » n'est qu'à $gap écoutes du cumul de « ${al2[0].album.title} » (${al2[0].periodPlays} ▶) — le record all time est menacé.", row)
+                if (row != null) {
+                    val detail = "Détenteur : « ${row.name ?: "Inconnu"} » — ${valueOf(row)}"
+                    if (gap <= 0) me += RecItem("🏆", "Most Cumulative · Album", detail, "🔥 Égalité en tête du cumul : « ${al2[1].album.title} » a rejoint « ${al2[0].album.title} » — le record all time peut basculer à chaque écoute.", row)
+                    else ap += RecItem("🏆", "Most Cumulative · Album", detail, "⚠️ « ${al2[1].album.title} » n'est qu'à $gap écoutes du cumul de « ${al2[0].album.title} » (${al2[0].periodPlays} ▶) — le record all time est en approche.", row)
+                }
             }
-            // ⚠️ Menaces : streak d'écoute en cours face au record
+            // 🎯⚠️ Streak d'écoute en cours face au record
             val lsRow = db.recordDao().rowsForTypes(listOf("LONGEST_LISTENING_STREAK")).maxByOrNull { it.r.value }
             if (lsRow != null) {
                 val today = Dates.today()
@@ -816,14 +836,42 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
                 if (!set.contains(cursor)) cursor = cursor.minusDays(1)
                 while (set.contains(cursor)) { streak++; cursor = cursor.minusDays(1) }
                 val rec = lsRow.r.value.toInt()
-                me += RecItem("🔥", "Longest Listening Streak", "Détenteur : « ${lsRow.name ?: "Inconnu"} » — $rec jour(s)", when {
-                    streak <= 0 -> "Pas de streak en cours — le record de $rec jour(s) de « ${lsRow.name ?: "Inconnu"} » tient bon."
-                    streak > rec -> "🔥 Streak en cours : $streak jours — le record de $rec jour(s) est déjà dépassé !"
-                    else -> "🎯 Streak en cours : $streak jour(s) sur les $rec du record de « ${lsRow.name ?: "Inconnu"} » — encore ${rec - streak} pour l'égaler."
-                }, lsRow)
+                val detail = "Détenteur : « ${lsRow.name ?: "Inconnu"} » — $rec jour(s)"
+                when {
+                    streak > rec -> me += RecItem("🔥", "Longest Listening Streak", detail, "🔥 Streak en cours : $streak jours — le record de $rec jour(s) est déjà dépassé !", lsRow)
+                    streak > 0 -> ap += RecItem("🎧", "Longest Listening Streak", detail, "🎯 Streak en cours : $streak jour(s) sur les $rec du record de « ${lsRow.name ?: "Inconnu"} » — encore ${rec - streak} pour l'égaler.", lsRow)
+                }
             }
-            me.sortBy { RecordCatalog.groupOf[it.row?.r?.recordType ?: ""]?.ordinal ?: 99 }
+            // 🎯⚠️ Statique : le n°2 du Top 10 de chaque record de la famille face au détenteur
+            val statAp = mutableListOf<Pair<Double, RecItem>>()
+            val famRows = db.recordDao().rowsForTypes(FAMILY_ALL.toList()).filter {
+                it.r.recordType !in LIVE_HANDLED && !(it.r.recordType == "MOST_CUMULATIVE" && it.r.periodType == null)
+            }
+            val groups = famRows.groupBy { listOf(it.r.recordType, it.r.periodType ?: "-", it.r.category, it.r.subcategory ?: "-") }
+            for ((_, rs) in groups) {
+                val first0 = rs.first()
+                val def = RecordCatalog.ALL.firstOrNull { d -> d.id == first0.r.recordType } ?: continue
+                val sorted = rs.sortedBy { if (def.ascending) -it.r.value else it.r.value }
+                if (sorted.size < 2) continue
+                val one = sorted[0]; val two = sorted[1]
+                val gapv = if (def.ascending) two.r.value - one.r.value else one.r.value - two.r.value
+                if (gapv < 0) continue
+                val cat = RecordCategory.valueOf(first0.r.category)
+                val period = Period.entries.firstOrNull { it.dbName == first0.r.periodType }
+                val subLabel = def.subs[cat]?.firstOrNull { it.dbName == first0.r.subcategory }?.label
+                val title = listOfNotNull(def.title, period?.label, sectionLabel(cat), subLabel).joinToString(" · ")
+                val detail = "Détenteur : « ${one.name ?: "Inconnu"} » — ${valueOf(one)}"
+                if (gapv == 0.0) {
+                    me += RecItem(def.emoji, title, detail, "🔥 Égalité en tête : « ${two.name ?: "Inconnu"} » (${valueOf(two)}) a rejoint « ${one.name ?: "Inconnu"} » — le record peut basculer à chaque instant.", one)
+                } else {
+                    statAp += gapv to RecItem(def.emoji, title, detail,
+                        "« ${two.name ?: "Inconnu"} » (${valueOf(two)}) n'est qu'à ${formatRecordValue(def, period, gapv)} du record de « ${one.name ?: "Inconnu"} » (${valueOf(one)}).", one)
+                }
+            }
+            statAp.sortBy { it.first }
+            ap += statAp.map { it.second }
             approche = ap
+            me.sortBy { RecordCatalog.groupOf[it.row?.r?.recordType ?: ""]?.ordinal ?: 99 }
             menaces = me
             // 📅 Éphéméride : un jour comme aujourd'hui, les années passées
             val today = Dates.today()
@@ -842,7 +890,7 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
                     ep += RecItem("🏛️", "${d.year} · Hall of Fame", h.entryType.replace('_', ' ').lowercase(), null, null)
                 }
             }
-            for (row in db.recordDao().recentRows(300).filter { it.r.recordType in RecordCatalog.MAJOR }) {
+            for (row in db.recordDao().recentRows(300).filter { it.r.recordType in FAMILY_ALL }) {
                 val vd = row.r.valueDate ?: continue
                 val d = runCatching { java.time.LocalDate.parse(vd) }.getOrNull() ?: continue
                 if (d != today && d.format(mmdd) == today.format(mmdd)) {
@@ -856,8 +904,8 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
             }
             ep.sortBy { it.title }
             ephemeride = ep
-            // 🎉 Records battus : top 20 chrono des majeurs
-            val all = db.recordDao().rowsForTypes(RecordCatalog.MAJOR.toList())
+            // 🎉 Records battus : top 20 chrono de la famille
+            val all = db.recordDao().rowsForTypes(FAMILY_ALL.toList())
             val fallen = all.filter { it.r.valueDate != null }.sortedByDescending { it.r.valueDate }.take(20)
             battus = fallen.mapIndexed { idx, f ->
                 val def = RecordCatalog.ALL.firstOrNull { it.id == f.r.recordType }
@@ -866,7 +914,7 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
         }
     }
     Column(Modifier.fillMaxSize()) {
-        PageHeader("Records", "🏆 La famille des records majeurs", NovaColors.Gold, onBack, subtitle = "Uniquement les majeurs · touche une ligne pour son pop-up")
+        PageHeader("Records", "🏆 La famille des records", NovaColors.Gold, onBack, subtitle = "Les 12 records choisis + les majeurs · touche une ligne pour son pop-up")
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -904,37 +952,58 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
     popup?.let { rc -> RecordEventPopup(rc) { popup = null } }
 }
 
-/** Pop-up propre à la ligne cliquée : les réalités de l'événement, pas la fiche générique du record. */
+/** Pop-up propre à la ligne cliquée : grand et premium — explication du record + réalités de l'événement. */
 @Composable
 private fun RecordEventPopup(rc: RecItem, onDismiss: () -> Unit) {
     val theme = Nova.theme
+    val def = rc.row?.let { row -> RecordCatalog.ALL.firstOrNull { it.id == row.r.recordType } }
     NovaPopupCard(
-        borderColor = NovaColors.Gold.copy(alpha = 0.7f), onDismiss = onDismiss, backdropUrl = rc.row?.imageUrl,
+        borderColor = NovaColors.Gold, onDismiss = onDismiss, glowDp = 26,
+        widthFraction = 0.97f, heightFraction = 0.93f, backdropUrl = rc.row?.imageUrl,
         banner = {
-            Box(Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
                 BlurredBackdrop(rc.row?.imageUrl, NovaColors.Gold, Modifier.fillMaxSize())
                 if (rc.row != null) {
-                    Box(Modifier.size(110.dp).clip(RoundedCornerShape(12.dp))) {
-                        CoverArt(rc.row.imageUrl, rc.row.name ?: "?", size = 110, circle = rc.row.r.category == "ARTIST", zoomable = true)
+                    Box(
+                        Modifier.size(140.dp).shadow(22.dp, RoundedCornerShape(14.dp), ambientColor = NovaColors.Gold, spotColor = NovaColors.Gold)
+                            .border(3.dp, NovaColors.Gold, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp))
+                    ) {
+                        CoverArt(rc.row.imageUrl, rc.row.name ?: "?", size = 140, circle = rc.row.r.category == "ARTIST", zoomable = true)
                     }
                 } else {
-                    Text(rc.emoji, fontSize = 56.sp)
+                    Text(rc.emoji, fontSize = 64.sp)
                 }
             }
         }
     ) {
-        Text("${rc.emoji} ${rc.title}", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-        rc.row?.let { row ->
-            Text(row.name ?: "Inconnu", color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            row.subtitle?.let { Text(it, color = theme.primary, fontWeight = FontWeight.SemiBold) }
+        Text("${rc.emoji} ${def?.title ?: rc.title}", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+        // L'explication du record lui-même
+        def?.description?.let {
             Spacer(Modifier.height(6.dp))
-            Text(valueOf(row), color = NovaColors.Gold, fontWeight = FontWeight.Black, fontSize = 24.sp)
-            row.r.valueDate?.let { Text("Établi le $it", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(NovaColors.Gold.copy(alpha = 0.10f)).padding(12.dp)) {
+                Text("📖 Le record", color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = theme.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+            }
         }
-        Spacer(Modifier.height(12.dp))
+        rc.row?.let { row ->
+            Spacer(Modifier.height(14.dp))
+            Text(row.name ?: "Inconnu", color = theme.text, fontWeight = FontWeight.Black, fontSize = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            row.subtitle?.let { Text(it, color = theme.primary, fontWeight = FontWeight.SemiBold) }
+            Spacer(Modifier.height(8.dp))
+            Text(valueOf(row), color = NovaColors.Gold, fontWeight = FontWeight.Black, fontSize = 32.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            val period = Period.entries.firstOrNull { it.dbName == row.r.periodType }
+            val subLabel = def?.subs?.get(RecordCategory.valueOf(row.r.category))?.firstOrNull { it.dbName == row.r.subcategory }?.label
+            val ctx = listOfNotNull(period?.label, sectionLabel(RecordCategory.valueOf(row.r.category)), subLabel, row.r.valueDate?.let { "établi le $it" }).joinToString(" · ")
+            Text(ctx, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
+        Spacer(Modifier.height(14.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(NovaColors.Gold.copy(alpha = 0.25f)))
+        Spacer(Modifier.height(10.dp))
         SectionTitle("📌 Ce qui s'est passé", NovaColors.Gold)
-        Text(rc.story ?: "", color = theme.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
-        Spacer(Modifier.height(8.dp))
+        Text(rc.story ?: "", color = theme.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 22.sp)
+        Spacer(Modifier.height(10.dp))
         Text(rc.detail, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.height(6.dp))
     }
 }
