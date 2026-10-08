@@ -307,8 +307,18 @@ private fun SummaryBanner(state: BillboardUiState) {
         {
             // ⏱️ Temps d'écoute et ▶ écoutes de la période, variation vs période précédente (maquette utilisateur)
             if (s.totalPlays > 0 || s.prevPlays > 0) {
-                TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
-                TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
+                if (state.period == Period.GLOBAL) {
+                    // Le % comparerait deux cumuls énormes (« +0,4 % ») : on affiche plutôt ce qui est entré cette semaine.
+                    val dDur = s.totalDurationMs - s.prevDurationMs
+                    val dPlays = s.totalPlays - s.prevPlays
+                    TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs),
+                        deltaText = "${if (dDur >= 0) "+" else "-"}${formatDuration(kotlin.math.abs(dDur))} cette semaine", prevPrefix = "cumul à la semaine précédente")
+                    TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes",
+                        deltaText = "${if (dPlays >= 0) "+" else "-"}${formatCount(kotlin.math.abs(dPlays))} écoutes cette semaine", prevPrefix = "cumul à la semaine précédente")
+                } else {
+                    TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
+                    TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
+                }
                 Spacer(Modifier.height(4.dp))
             }
             s.numberOne?.let { one ->
@@ -379,20 +389,27 @@ private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -
 
 /** « ⏱️ 17h 38min ↑ +13 % » + « vs période précédente : 15h 29min ». */
 @Composable
-private fun TrendLine(emoji: String, value: String, cur: Double, prev: Double, prevLabel: String) {
+private fun TrendLine(
+    emoji: String, value: String, cur: Double, prev: Double, prevLabel: String,
+    /** Global : au lieu du % (croissance du cumul), on affiche le delta absolu de la semaine (« +87 écoutes cette semaine »). */
+    deltaText: String? = null, prevPrefix: String = "vs période précédente"
+) {
     val theme = Nova.theme
     val pct = if (prev <= 0.0) null else ((cur - prev) / prev * 100).toInt()
-    val up = pct == null || pct >= 0
+    val up = cur >= prev
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("$emoji ", style = MaterialTheme.typography.titleMedium)
         Text(value, color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.width(8.dp))
         Text(
-            when { pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %" },
+            when {
+                deltaText != null -> deltaText
+                pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %"
+            },
             color = if (up) NovaColors.Up else NovaColors.Down, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium
         )
     }
-    Text("vs période précédente : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+    Text("$prevPrefix : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
