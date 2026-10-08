@@ -29,6 +29,7 @@ import com.novastats.app.ui.screens.formatDuration
 import com.novastats.app.ui.screens.EntityHistory
 import com.novastats.app.ui.screens.storySentence
 import com.novastats.app.domain.ChartAppearance
+import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import com.novastats.app.ui.theme.NovaTheme
 import kotlinx.coroutines.Dispatchers
