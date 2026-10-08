@@ -268,6 +268,45 @@ interface RecordDao {
     @Query("SELECT * FROM records_cache WHERE record_type = :type AND period_type = :period AND category = :category ORDER BY value DESC LIMIT 1")
     suspend fun holder(type: String, period: String, category: String): RecordCacheEntity?
 
+    /** 🕰️ Records établis AVEC noms, triés par date d'établissement (fil cliquable + page « tombés »). */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.value_date IS NOT NULL
+        ORDER BY r.value_date DESC LIMIT :limit
+        """
+    )
+    suspend fun recentRows(limit: Int): List<RecordRow>
+
+    /** 🎯 Toutes les lignes cachées des records demandés (page « en direct » des majeurs). */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.record_type IN (:types)
+        """
+    )
+    suspend fun rowsForTypes(types: List<String>): List<RecordRow>
+
     /** Toutes les lignes de cache d'une entité (tous records / périodes / sous-sections) — contexte de la fiche. */
     @Query("SELECT * FROM records_cache WHERE category = :category AND entity_id = :entityId ORDER BY record_type, period_type, subcategory")
     suspend fun rowsForEntity(category: String, entityId: Long): List<RecordCacheEntity>

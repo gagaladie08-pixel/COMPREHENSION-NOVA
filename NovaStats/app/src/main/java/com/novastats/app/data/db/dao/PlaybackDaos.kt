@@ -335,6 +335,10 @@ interface DailyPlayDao {
     suspend fun firstDate(): String?
     /** Toutes les lignes (titre, artiste principal, album, jour) avec au moins une écoute — base des séries d'écoute (record 28). */
     @Query("SELECT root_id AS track_id, artist_id, album_id, date FROM daily_plays WHERE play_count > 0 ORDER BY date") suspend fun allEntityDays(): List<DailyEntityRow>
+    /** 🎯 Jours actifs (au moins une écoute) depuis [from] — pour la streak d'écoute en cours. */
+    @Query("SELECT date FROM daily_plays WHERE date >= :from GROUP BY date HAVING SUM(play_count) > 0 ORDER BY date")
+    suspend fun activeDaysSince(from: String): List<String>
+
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE root_id = :id GROUP BY date ORDER BY date") suspend fun seriesForTrack(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE album_id = :id GROUP BY date ORDER BY date") suspend fun seriesForAlbum(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE artist_id = :id GROUP BY date ORDER BY date") suspend fun seriesForArtist(id: Long): List<DayCount>
