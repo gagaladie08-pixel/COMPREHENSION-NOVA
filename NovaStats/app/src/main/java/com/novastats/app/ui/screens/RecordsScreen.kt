@@ -690,7 +690,7 @@ private fun RecordsLive(db: NovaDatabase) {
         runCatching {
             val today = Dates.today()
             val mmdd = java.time.format.DateTimeFormatter.ofPattern("MM-dd")
-            fun nameOf(cat: String, id: Long) = when (cat) {
+            suspend fun nameOf(cat: String, id: Long) = when (cat) {
                 "TRACK" -> db.trackDao().getById(id)?.title
                 "ALBUM" -> db.albumDao().getById(id)?.title
                 else -> db.artistDao().byIds(listOf(id)).firstOrNull()?.name
@@ -698,10 +698,10 @@ private fun RecordsLive(db: NovaDatabase) {
             fun defOf(t: String) = RecordCatalog.ALL.firstOrNull { it.id == t }
             // 🎯 En direct : le leader de la période en cours face au record établi
             val rows = mutableListOf<LiveRow>()
-            listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY).forEach { p ->
-                val rec = db.recordDao().holder("BIGGEST_PERIOD", p.dbName, "TRACK") ?: return@forEach
+            for (p in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY)) {
+                val rec = db.recordDao().holder("BIGGEST_PERIOD", p.dbName, "TRACK") ?: continue
                 val r = Dates.statsRangeFor(p)
-                val leader = db.scrobbleDao().topForPeriod(r.fromIso, r.toIso, 1).first().firstOrNull() ?: return@forEach
+                val leader = db.trackDao().topForPeriod(r.fromIso, r.toIso, 1).first().firstOrNull() ?: continue
                 if (leader.periodPlays > 0) {
                     rows += LiveRow(p.frLabel, leader.track.title, leader.periodPlays, db.trackDao().getById(rec.entityId)?.title, rec.value, leader.track.trackId == rec.entityId)
                 }
@@ -709,28 +709,38 @@ private fun RecordsLive(db: NovaDatabase) {
             live = rows
             // 🕰️ Fil chronologique + 🎉 cérémonie (records majeurs, 7 derniers jours)
             val recent = db.recordDao().recentByValueDate(80)
-            feed = recent.take(6).mapNotNull { e ->
-                val def = defOf(e.recordType) ?: return@mapNotNull null
-                val p = Period.entries.firstOrNull { it.dbName == e.periodType }
-                Triple(e.valueDate ?: return@mapNotNull null, "« ${nameOf(e.category, e.entityId)} » · ${def.title}", formatRecordValue(def, p, e.value))
+            val feedList = mutableListOf<Triple<String, String, String>>()
+            for (e in recent.take(6)) {
+                val def = defOf(e.recordType) ?: continue
+                val vd = e.valueDate ?: continue
+                val per = Period.entries.firstOrNull { it.dbName == e.periodType }
+                feedList += Triple(vd, "« ${nameOf(e.category, e.entityId)} » · ${def.title}", formatRecordValue(def, per, e.value))
             }
-            ceremony = recent.filter { it.recordType in RecordCatalog.MAJOR && (it.valueDate ?: "") >= today.minusDays(6).toString() }
-                .take(3).map { e -> "${defOf(e.recordType)?.title ?: e.recordType} — « ${nameOf(e.category, e.entityId)} » (${e.valueDate})" }
-            // 📅 Éphéméride : certifications, HoF et records établis un « 8 octobre » des années passées
+            feed = feedList
+            val cereList = mutableListOf<String>()
+            for (e in recent) {
+                if (e.recordType in RecordCatalog.MAJOR && (e.valueDate ?: "") >= today.minusDays(6).toString()) {
+                    cereList += "${defOf(e.recordType)?.title ?: e.recordType} — « ${nameOf(e.category, e.entityId)} » (${e.valueDate})"
+                    if (cereList.size >= 3) break
+                }
+            }
+            ceremony = cereList
+            // 📅 Éphéméride : certifications, HoF et records établis un même jour-mois des années passées
             val ev = mutableListOf<String>()
-            db.certificationDao().allHistory().forEach { h ->
+            for (h in db.certificationDao().allHistory()) {
                 val d = java.time.Instant.ofEpochMilli(h.certifiedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
                 if (d != today && d.format(mmdd) == today.format(mmdd)) {
                     val lvl = CertLevel.entries.firstOrNull { it.dbName == h.level }
                     ev += "${d.year} · ${lvl?.emoji ?: "🏅"} ${lvl?.label ?: h.level} obtenue — « ${nameOf(h.entityType, h.entityId)} »"
                 }
             }
-            db.hallOfFameDao().all().forEach { h ->
-                val d = runCatching { java.time.LocalDate.parse(h.entryDate) }.getOrNull() ?: return@forEach
+            for (h in db.hallOfFameDao().all()) {
+                val d = runCatching { java.time.LocalDate.parse(h.entryDate) }.getOrNull() ?: continue
                 if (d != today && d.format(mmdd) == today.format(mmdd)) ev += "${d.year} · 🏛️ Hall of Fame (${h.entryType.replace('_', ' ').lowercase()})"
             }
-            recent.forEach { e ->
-                val d = runCatching { java.time.LocalDate.parse(e.valueDate ?: return@forEach) }.getOrNull() ?: return@forEach
+            for (e in recent) {
+                val vd = e.valueDate ?: continue
+                val d = runCatching { java.time.LocalDate.parse(vd) }.getOrNull() ?: continue
                 if (d != today && d.format(mmdd) == today.format(mmdd)) ev += "${d.year} · 🏆 ${defOf(e.recordType)?.title ?: e.recordType} établi"
             }
             ephemeride = ev.take(5)
