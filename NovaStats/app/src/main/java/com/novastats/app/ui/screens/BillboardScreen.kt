@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.novastats.app.ui.navigation.BillboardFocus
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.Chart
 import com.novastats.app.domain.Dates
@@ -103,6 +104,9 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val history by vm.history.collectAsStateWithLifecycle()
     val compare by vm.compare.collectAsStateWithLifecycle()
+    val focus by BillboardFocus.state.collectAsStateWithLifecycle()
+    var pendingFocus by remember { mutableStateOf<BillboardFocus.Focus?>(null) }
+    var highlightId by remember { mutableStateOf<Long?>(null) }
     var showPicker by remember { mutableStateOf(false) }
 
     var searching by remember { mutableStateOf(false) }
@@ -117,6 +121,30 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val shown = minOf(visible, totalRows)
     val listState = rememberLazyListState()
     LaunchedEffect(state.period, state.anchor) { listState.scrollToItem(0) }
+    // 🚪 Téléporteur Stats → Billboard : applique chart/période, attend les lignes, surligne la cible
+    LaunchedEffect(focus) {
+        val f = focus ?: return@LaunchedEffect
+        vm.search("")
+        state.movementFilter?.let { vm.toggleMovementFilter(it) }
+        vm.selectChart(f.chart)
+        vm.selectPeriod(f.period)
+        pendingFocus = f
+        BillboardFocus.consume()
+    }
+    LaunchedEffect(pendingFocus, state.items) {
+        val f = pendingFocus ?: return@LaunchedEffect
+        if (state.items.isEmpty()) return@LaunchedEffect
+        val idx = state.items.indexOfFirst { it.entityId == f.entityId }
+        if (idx < 0) { pendingFocus = null; return@LaunchedEffect }
+        if (visible < idx + 1) visible = idx + 1
+        highlightId = f.entityId
+        kotlinx.coroutines.delay(80)
+        listState.scrollToItem(2 + idx)
+        pendingFocus = null
+    }
+    LaunchedEffect(highlightId) {
+        if (highlightId != null) { kotlinx.coroutines.delay(2600); highlightId = null }
+    }
 
     // 🎨 Pochette du n°1 du chart affiché, en fond d'écran
     val artUrl = state.items.firstOrNull()?.coverUrl
@@ -241,7 +269,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 
             val realShown = minOf(shown, rows.size)
             items(rows.take(realShown), key = { it.entityId }) { item ->
-                ChartRow(item, state.period, showDuration = state.sortDuration, onLongPress = { vm.openHistory(item) })
+                ChartRow(item, state.period, showDuration = state.sortDuration, highlighted = item.entityId == highlightId, onLongPress = { vm.openHistory(item) })
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }
 
@@ -468,7 +496,7 @@ fun movementColor(m: Movement): Color = when (m) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = false, onLongPress: () -> Unit) {
+private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = false, highlighted: Boolean = false, onLongPress: () -> Unit) {
     val theme = Nova.theme
     val isOne = item.position == 1
     val bg = when (item.position) {
@@ -494,6 +522,7 @@ private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = fa
                 }
             )
             .then(if (pride) Modifier.prideWash(flag, alpha = if (item.position <= 3) 0.14f else 0.07f).prideStripe(flag) else Modifier.background(bg))
+            .then(if (highlighted) Modifier.border(2.dp, NovaColors.Gold, RoundedCornerShape(14.dp)) else Modifier)
             .combinedClickable(onClick = {}, onLongClick = onLongPress)
             .padding(horizontal = 12.dp, vertical = if (isOne) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically

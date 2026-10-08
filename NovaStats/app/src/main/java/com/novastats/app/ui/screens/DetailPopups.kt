@@ -63,10 +63,14 @@ import com.novastats.app.data.db.entity.HallOfFameEntity
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.domain.TitleNormalizer
+import com.novastats.app.ui.navigation.BillboardFocus
+import com.novastats.app.ui.navigation.NovaTab
+import com.novastats.app.ui.navigation.PendingNav
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
+import com.novastats.app.domain.Chart
 import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.domain.ChartHistory
 import com.novastats.app.domain.ChartHistoryStats
@@ -258,7 +262,10 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
             }
         }
         PopupSection("📊 Positions par période")
-        PositionsTable(ranks)
+        PositionsTable(ranks) { per ->
+            BillboardFocus.request(BillboardFocus.Focus(Chart.HOT_100, per, trackId))
+            PendingNav.target.value = PendingNav.Target(PendingNav.TARGET_TAB, tabRoute = NovaTab.BILLBOARD.route)
+        }
         ChartRunSection(EntityType.TRACK, trackId, theme.primary)
         val nextCert = CertificationRules.TRACK.next(t.playCount)
         ForecastSection(t.playCount, CertificationRules.TRACK.required(nextCert), nextCert.label(), series, theme.primary, "🏅")
@@ -381,7 +388,10 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
             hof.forEach { e -> PopupInfoRow(hofBadgeLabel(e.entryType) + " · " + e.periodType.lowercase().replaceFirstChar { it.uppercase() }, formatIso(e.entryDate)) }
         }
         PopupSection("📊 Positions par période", theme.glowSecondary)
-        PositionsTable(ranks)
+PositionsTable(ranks) { per ->
+            BillboardFocus.request(BillboardFocus.Focus(Chart.ARTIST_50, per, artistId))
+            PendingNav.target.value = PendingNav.Target(PendingNav.TARGET_TAB, tabRoute = NovaTab.BILLBOARD.route)
+        }
         ChartRunSection(EntityType.ARTIST, artistId, theme.glowSecondary)
         PantheonRules.next(status)?.let { next ->
             ForecastSection(a.playCount, next.playsThreshold, "${next.emoji} ${next.label}", series, statusColor, "👑")
@@ -658,7 +668,10 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
             }
         }
         PopupSection("📊 Positions par période", theme.secondary)
-        PositionsTable(ranks)
+PositionsTable(ranks) { per ->
+            BillboardFocus.request(BillboardFocus.Focus(Chart.ALBUMS_75, per, albumId))
+            PendingNav.target.value = PendingNav.Target(PendingNav.TARGET_TAB, tabRoute = NovaTab.BILLBOARD.route)
+        }
         ChartRunSection(EntityType.ALBUM, albumId, theme.secondary)
         val nextCert = CertificationRules.ALBUM.next(al.playCount)
         ForecastSection(al.playCount, CertificationRules.ALBUM.required(nextCert), nextCert.label(), series, theme.secondary, "🏅")
