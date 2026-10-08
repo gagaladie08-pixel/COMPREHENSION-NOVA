@@ -81,6 +81,11 @@ import com.novastats.app.ui.theme.prideWash
 import com.novastats.app.ui.theme.NovaColors
 import java.time.Instant
 import androidx.compose.runtime.produceState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import java.time.ZoneOffset
 
@@ -518,18 +523,22 @@ private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = fa
 /** Carte du carrousel « histoires » — un fait, une pochette. */
 private data class Story(val coverUrl: String?, val circle: Boolean, val text: String)
 
-/** Quatre faits calculés sur le snapshot affiché : meilleure entrée, dominance, longévité, plus forte progression. */
-private fun buildStories(s: BillboardUiState): List<Story> {
-    val items = s.items
+/** Dix faits possibles calculés sur le snapshot affiché ; chaque carte absente = fait manquant. */
+private fun buildStories(st: BillboardUiState): List<Story> {
+    val items = st.items
     if (items.isEmpty()) return emptyList()
-    val chartName = s.chart.label.removePrefix("Nova ")
+    val chartName = st.chart.label.removePrefix("Nova ")
+    val de: (ChartItem) -> String = { it.secondary?.let { a -> " de $a" } ?: "" }
     val out = mutableListOf<Story>()
-    // 1. Meilleure nouvelle entrée (celle entrée le plus haut)
-    items.filter { it.movement is Movement.New }.minByOrNull { it.position }?.let { n ->
-        out += Story(n.coverUrl, n.circle, "« ${n.name} »" + (n.secondary?.let { " de $it" } ?: "") + " est la meilleure nouvelle entrée du classement $chartName, directement à la ${n.position}ᵉ place.")
+    // 1. Entrée directe (New n°1) sinon meilleure nouvelle entrée
+    val newBest = items.filter { it.movement is Movement.New }.minByOrNull { it.position }
+    if (newBest != null && newBest.position == 1) {
+        out += Story(newBest.coverUrl, newBest.circle, "« ${newBest.name} »" + de(newBest) + " est entré directement n°1 du classement $chartName. Une entrée directe.")
+    } else if (newBest != null) {
+        out += Story(newBest.coverUrl, newBest.circle, "« ${newBest.name} »" + de(newBest) + " est la meilleure nouvelle entrée du classement $chartName, directement à la ${newBest.position}ᵉ place.")
     }
     // 2. Dominance : l'artiste qui occupe le plus de places
-    if (s.chart != Chart.ARTIST_50) {
+    if (st.chart != Chart.ARTIST_50) {
         items.groupBy { it.secondary.orEmpty() }.filter { it.key.isNotBlank() && it.value.size >= 2 }
             .maxByOrNull { it.value.size }?.let { (artist, rows) ->
                 val one = items.first()
@@ -541,55 +550,91 @@ private fun buildStories(s: BillboardUiState): List<Story> {
                 }
             }
     }
-    // 3. Longévité : le plus grand nombre de périodes consécutives dans le chart
-    items.maxByOrNull { it.periodsInChart }?.takeIf { it.periodsInChart > 1 }?.let { r ->
-        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + (r.secondary?.let { " de $it" } ?: "") + " détient le record de longévité du classement $chartName, avec ${r.periodsInChart} ${BillboardDates.unitLabel(s.period, r.periodsInChart)} d'affilée.")
+    // 3. Duel au sommet : l'écart #1 / #2
+    val one = items.first()
+    val two = items.getOrNull(1)
+    if (two != null) {
+        val gap = one.plays - two.plays
+        out += if (gap <= 10)
+            Story(one.coverUrl, one.circle, "« ${one.name} » et « ${two.name} » ne sont séparés que de $gap écoute${if (gap > 1) "s" else ""} en tête du classement $chartName.")
+        else Story(one.coverUrl, one.circle, "« ${one.name} » mène le classement $chartName avec $gap écoutes d'avance sur « ${two.name} ».")
     }
-    // 4. Plus forte progression de la période
-    s.summary.biggestClimber?.let { c ->
+    // 4. Longévité : le plus grand nombre de périodes consécutives dans le chart
+    items.maxByOrNull { it.periodsInChart }?.takeIf { it.periodsInChart > 1 }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " détient le record de longévité du classement $chartName, avec ${r.periodsInChart} ${BillboardDates.unitLabel(st.period, r.periodsInChart)} d'affilée.")
+    }
+    // 5. Plus forte progression de la période
+    st.summary.biggestClimber?.let { c ->
         val up = c.movement as? Movement.Up ?: return@let
-        out += Story(c.coverUrl, c.circle, "« ${c.name} »" + (c.secondary?.let { " de $it" } ?: "") + " signe la plus forte progression du classement $chartName, gagnant ${up.places} place${if (up.places > 1) "s" else ""} pour atteindre la ${c.position}ᵉ position.")
+        out += Story(c.coverUrl, c.circle, "« ${c.name} »" + de(c) + " signe la plus forte progression du classement $chartName, gagnant ${up.places} place${if (up.places > 1) "s" else ""} pour atteindre la ${c.position}ᵉ position.")
+    }
+    // 6. Plus forte chute de la période
+    st.summary.biggestFaller?.let { f ->
+        val down = f.movement as? Movement.Down ?: return@let
+        out += Story(f.coverUrl, f.circle, "« ${f.name} »" + de(f) + " signe la plus forte chute de la période, perdant ${down.places} place${if (down.places > 1) "s" else ""} — maintenant #${f.position}.")
+    }
+    // 7. Le retour : meilleure réentrée
+    items.filter { it.movement is Movement.Reentry }.minByOrNull { it.position }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " fait son retour dans le classement $chartName, directement à la ${r.position}ᵉ place.")
+    }
+    // 8. Dynastie : le n°1 actuel déjà couronné plusieurs fois
+    st.summary.numberOne?.takeIf { it.timesAtPeak > 1 }?.let { n ->
+        out += Story(n.coverUrl, n.circle, "« ${n.name} »" + de(n) + " a maintenant été n°1 à ${n.timesAtPeak} reprises dans ce classement.")
+    }
+    // 9. Record personnel : meilleure période historique d'une ligne du chart
+    items.filter { it.isPlaysPeak }.minByOrNull { it.position }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " vient de vivre sa meilleure période historique : ${r.plays} écoutes, un record personnel.")
     }
     return out
 }
 
-/** Carrousel façon Spotify Charts : grande pochette, une phrase-fait, pastilles + flèches. */
+/** Carrousel façon Spotify Charts : swipe horizontal, auto-défilement après 45 s, pastilles + flèches. */
 @Composable
 private fun StoriesCarousel(stories: List<Story>, period: Period) {
     val theme = Nova.theme
-    var index by remember { mutableIntStateOf(0) }
-    val i = index.coerceIn(0, stories.lastIndex)
-    val story = stories[i]
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(20.dp)).background(theme.primary.copy(alpha = 0.16f))
-            .padding(16.dp)
-    ) {
+    val pagerState = rememberPagerState(pageCount = { stories.size })
+    val scope = rememberCoroutineScope()
+    // Défilement auto : 45 s par carte ; le minuteur repart à chaque changement de page (swipe inclus)
+    LaunchedEffect(pagerState.currentPage, stories.size) {
+        if (stories.size > 1) {
+            delay(45_000)
+            pagerState.animateScrollToPage((pagerState.currentPage + 1) % stories.size)
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Text(
             if (period == Period.MONTHLY) "Voici un aperçu de ce qui anime tes écoutes ce mois-ci."
             else "Voici un aperçu de ce qui anime tes écoutes cette semaine.",
-            color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
+            color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
         )
-        Spacer(Modifier.height(12.dp))
-        CoverArt(story.coverUrl, story.text, circle = story.circle, size = 180)
-        Spacer(Modifier.height(12.dp))
-        Text(story.text, color = theme.text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            stories.forEachIndexed { k, st ->
+        HorizontalPager(state = pagerState) { page ->
+            val story = stories[page]
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                    .background(theme.primary.copy(alpha = 0.16f)).padding(16.dp)
+            ) {
+                CoverArt(story.coverUrl, story.text, circle = story.circle, size = 180)
+                Spacer(Modifier.height(12.dp))
+                Text(story.text, color = theme.text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val cur = pagerState.currentPage
+            stories.forEachIndexed { k, _ ->
                 Box(
                     Modifier.size(10.dp).clip(RoundedCornerShape(50))
-                        .background(if (k == i) theme.text else theme.textSecondary.copy(alpha = 0.45f))
-                        .clickable { index = k }
+                        .background(if (k == cur) theme.text else theme.textSecondary.copy(alpha = 0.45f))
+                        .clickable { scope.launch { pagerState.animateScrollToPage(k) } }
                 )
                 Spacer(Modifier.width(6.dp))
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { index = i - 1 }, enabled = i > 0) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Histoire précédente", tint = if (i > 0) theme.text else theme.textSecondary.copy(alpha = 0.3f))
+            IconButton(onClick = { scope.launch { pagerState.animateScrollToPage((cur - 1 + stories.size) % stories.size) } }, enabled = stories.size > 1) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Histoire précédente", tint = theme.text)
             }
-            IconButton(onClick = { index = i + 1 }, enabled = i < stories.lastIndex) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Histoire suivante", tint = if (i < stories.lastIndex) theme.text else theme.textSecondary.copy(alpha = 0.3f))
+            IconButton(onClick = { scope.launch { pagerState.animateScrollToPage((cur + 1) % stories.size) } }, enabled = stories.size > 1) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Histoire suivante", tint = theme.text)
             }
         }
     }
