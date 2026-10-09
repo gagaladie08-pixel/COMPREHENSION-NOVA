@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.dao.ArtistCertRow
+import kotlinx.coroutines.flow.first
 import com.novastats.app.data.db.dao.PeriodEntityStats
 import com.novastats.app.data.db.dao.RankedTrack
 import com.novastats.app.data.db.dao.RankedTrackPos
@@ -322,6 +323,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     var periodTotal by remember { mutableStateOf(0) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
     var history by remember { mutableStateOf<List<PantheonHistoryEntity>>(emptyList()) }
+    var certRowsArtist by remember { mutableStateOf<List<ArtistCertRow>>(emptyList()) }
     var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
     /** Série quotidienne (prévision du prochain statut Panthéon). */
     var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
@@ -350,6 +352,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         safe("part") { periodPlays = db.artistDao().playsForPeriod(artistId, share.fromIso, share.toIso); periodTotal = db.dailyPlayDao().playsBetween(share.fromIso, share.toIso) }
         safe("positions") { ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) } }
         safe("série") { series = db.dailyPlayDao().seriesForArtist(artistId) }
+        safe("certifications") { certRowsArtist = db.certificationDao().artistCertRows().first().filter { it.artistId == artistId } }
     }
     val a = artist
     val status = PantheonStatus.fromDb(a?.pantheonStatus)
@@ -379,9 +382,49 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         ImagePickerBar(EntityType.ARTIST, a.artistId, a.name, null, a.photoUrl, a.photoSource, theme.glowSecondary, circle = true) { artist = db.artistDao().getById(artistId) }
         PopupSection("👑 Statut Panthéon", theme.glowSecondary)
         PopupInfoRow("Statut actuel", status?.let { "${it.emoji} ${it.label}" } ?: "Aucun (Star à 425 écoutes)", valueColor = statusColor)
-        history.forEach { h ->
-            val st = PantheonStatus.fromDb(h.status)
-            PopupInfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶", valueColor = st?.let { pantheonColor(it) } ?: theme.text)
+        if (history.isEmpty()) Text("Aucun statut atteint pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        else Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.clip(RoundedCornerShape(10.dp)).background(theme.surface).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🎧", fontSize = 18.sp)
+                Text("débuts", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            history.forEachIndexed { i, h ->
+                val st = PantheonStatus.fromDb(h.status)
+                val c = st?.let { pantheonColor(it) } ?: theme.text
+                val stepMs = if (i == 0) h.timeToReachMs else h.dateReached - history[i - 1].dateReached
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 2.dp)) {
+                    Text("→", color = theme.textSecondary)
+                    Text(stepLabel(stepMs), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                Column(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.15f)).border(1.dp, c.copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(st?.emoji ?: "👑", fontSize = 18.sp)
+                    Text(st?.label ?: h.status, color = c, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    Text(formatDate(h.dateReached), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text("${formatCount(h.playCountAtStatus)} ▶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        if (certRowsArtist.isNotEmpty()) {
+            val sum = summaryOf(certRowsArtist)
+            PopupSection("🏅 Certifications de l'artiste", theme.glowSecondary)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CertLevel.entries.forEach { l ->
+                    val nt = sum.tracksAtLeast(l); val na = sum.albumsAtLeast(l)
+                    if (nt + na > 0) Text("${l.emoji} $nt 🎵 · $na 💿", color = certColor(l), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            certRowsArtist.filter { it.entityType == "TRACK" }
+                .sortedByDescending { (CertLevel.entries.firstOrNull { x -> x.dbName == it.level }?.ordinal ?: 0) * 1000 + it.multiplier }
+                .take(3).forEach { r ->
+                    val l = CertLevel.entries.firstOrNull { it.dbName == r.level }
+                    PopupInfoRow("« ${r.name ?: "?"} »", (l?.let { "${it.emoji} ${it.label}" } ?: r.level) + (if (l == CertLevel.DIAMOND && r.multiplier > 1) " ×${r.multiplier}" else ""), valueColor = certColor(l))
+                }
         }
         if (hof.isNotEmpty()) {
             PopupSection("🏛️ Hall of Fame", theme.glowSecondary)
@@ -1041,5 +1084,16 @@ private fun ForecastSection(
     } else {
         Text("Rythme récent trop faible pour une estimation.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
+    }
+}
+
+/** Durée courte entre deux statuts (« 34 j », « 5 mois »). */
+private fun stepLabel(ms: Long?): String {
+    ms ?: return "—"
+    val d = ms / 86_400_000L
+    return when {
+        d < 1 -> "< 1 j"
+        d < 90 -> "$d j"
+        else -> "${d / 30} mois"
     }
 }
