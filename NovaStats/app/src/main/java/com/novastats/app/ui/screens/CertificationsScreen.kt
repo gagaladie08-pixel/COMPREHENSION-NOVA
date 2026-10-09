@@ -416,7 +416,7 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
                 val stepMs = if (i == 0) h.timeToCertifyMs else h.certifiedAt - det.history[i - 1].certifiedAt
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 2.dp)) {
                     Text("→", color = theme.textSecondary)
-                    Text(formatElapsed(stepMs, h.certifiedAt), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text(formatElapsed(stepMs, h.certifiedAt) ?: "—", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                 }
                 Column(
                     Modifier.clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.15f)).border(1.dp, c.copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(8.dp),
