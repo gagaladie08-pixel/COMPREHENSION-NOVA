@@ -307,6 +307,36 @@ private fun DetectionPage(onOpenReview: () -> Unit = {}) {
                         Switch(checked = pkg in whitelist, onCheckedChange = { on -> scope.launch { settings.setWhitelist(if (on) whitelist + pkg else whitelist - pkg) } })
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+                var query by remember { mutableStateOf("") }
+                var allApps by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+                LaunchedEffect(Unit) {
+                    val pm = context.packageManager
+                    allApps = withContext(Dispatchers.Default) {
+                        runCatching { pm.getInstalledApplications(0).map { it.packageName to pm.getApplicationLabel(it).toString() }.sortedBy { it.second.lowercase() } }.getOrDefault(emptyList())
+                    }
+                }
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Ajouter n'importe quelle app de ton téléphone…") },
+                    label = { Text("🔍 Rechercher une app") }
+                )
+                if (query.trim().length >= 2) {
+                    val q = query.trim().lowercase()
+                    allApps.filter { (pkg, label) -> pkg !in whitelist && (label.lowercase().contains(q) || pkg.contains(q)) }.take(15).forEach { (pkg, label) ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { scope.launch { settings.setWhitelist(whitelist + pkg) } }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(label, color = theme.text, style = MaterialTheme.typography.bodyMedium)
+                                Text(pkg, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                            }
+                            Text("+ Ajouter", color = theme.primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
 

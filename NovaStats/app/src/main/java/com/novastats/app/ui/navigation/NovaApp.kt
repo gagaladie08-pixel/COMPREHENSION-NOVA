@@ -77,9 +77,7 @@ enum class NovaTab(val route: String, val label: String, val emoji: String, val 
     CERTIFICATIONS("certifications", "Certifs", "💎", Icons.Filled.Diamond),
     HALL_OF_FAME("hall_of_fame", "Hall of Fame", "🏛️", Icons.Filled.AccountBalance),
     PANTHEON("pantheon", "Panthéon", "👑", Icons.Filled.Star),
-    // L'onglet garde sa route « awards » (les notifications déjà émises y pointent) mais accueille
-    // désormais toute l'année musicale : Awards + Rewind + Year-End Charts.
-    AWARDS("awards", "Ton année", "🎉", Icons.Filled.WorkspacePremium),
+    AWARDS("awards", "Awards", "🏆", Icons.Filled.WorkspacePremium),
     SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings);
 }
 
@@ -198,6 +196,16 @@ fun NovaApp() {
                 color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f)
             )
         }
+        // 🚨 Relances répétées sans reconnexion : le système ne rebranche plus le listener → consigne manuelle
+        if (listenerOk && !detection.listenerConnected && health.restarts >= 3) Row(
+            Modifier.fillMaxWidth().background(Color(0xFFC0392B)).clickable { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "🚨 Reconnexion bloquée côté système (${health.restarts} relances sans succès). Dans l'écran qui s'ouvre : désactive puis réactive l'accès de NovaStats, puis redémarre le téléphone si besoin.",
+                color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f)
+            )
+        }
         // 🔋 Optimisation batterie active → l'OS peut geler la détection hors de l'app
         if (listenerOk && !batteryExempt && !batteryDismissed) Row(
             Modifier.fillMaxWidth().background(Color(0xFFB7950B)).padding(horizontal = 14.dp, vertical = 8.dp),
@@ -212,6 +220,22 @@ fun NovaApp() {
                 }
             )
             Text("  ✕", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { batteryDismissed = true })
+        }
+        val wl by (ctx.applicationContext as com.novastats.app.NovaStatsApp).settings.whitelist.collectAsStateWithLifecycle(initialValue = emptySet())
+        if (wl.isNotEmpty()) Row(
+            Modifier.fillMaxWidth().background(Color(0xFF8E44AD)).clickable {
+                navController.navigate(NovaTab.SETTINGS.route) {
+                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "🔕 Whitelist active : ${wl.size} app(s) écoutée(s), toutes les autres ignorées. Touche pour gérer.",
+                color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f)
+            )
         }
         ThemeFxHost(Modifier.weight(1f)) {
         NavHost(
