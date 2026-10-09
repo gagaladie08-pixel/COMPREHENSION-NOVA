@@ -129,18 +129,27 @@ fun CertificationsScreen() {
     var levelFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var detail by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    var sortTracks by rememberSaveable { mutableStateOf("niveau") }
+    var sortAlbums by rememberSaveable { mutableStateOf("niveau") }
+    val sortMode = if (tab == 0) sortTracks else sortAlbums
 
     val type = if (tab == 0) EntityType.TRACK else EntityType.ALBUM
     val thresholds = if (tab == 0) CertificationRules.TRACK else CertificationRules.ALBUM
-    val candidates by remember(tab) { if (tab == 0) app.database.certificationDao().trackCandidates() else app.database.certificationDao().albumCandidates() }
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val trackCands by app.database.certificationDao().trackCandidates().collectAsStateWithLifecycle(initialValue = emptyList())
+    val albumCands by app.database.certificationDao().albumCandidates().collectAsStateWithLifecycle(initialValue = emptyList())
+    val candidates = if (tab == 0) trackCands else albumCands
 
     val certified = remember(candidates) { candidates.filter { it.level != null } }
     val counts = remember(certified) { certified.groupingBy { it.level!! }.eachCount() }
     val q = query.trim().lowercase()
-    val list = remember(certified, levelFilter, q) {
-        certified.filter { (levelFilter == null || it.level == levelFilter) && (q.isEmpty() || it.name.lowercase().contains(q) || (it.subtitle ?: "").lowercase().contains(q)) }
-            .sortedWith(compareByDescending<CertCandidate> { it.cert()?.rank ?: 0 }.thenByDescending { it.playCount })
+    val list = remember(certified, levelFilter, q, sortMode) {
+        val base = certified.filter { (levelFilter == null || it.level == levelFilter) && (q.isEmpty() || it.name.lowercase().contains(q) || (it.subtitle ?: "").lowercase().contains(q)) }
+        when (sortMode) {
+            "recent" -> base.sortedByDescending { it.certifiedAt ?: 0L }
+            "plays" -> base.sortedByDescending { it.playCount }
+            "radar" -> base.sortedBy { thresholds.required(thresholds.next(it.playCount)) - it.playCount }
+            else -> base.sortedWith(compareByDescending<CertCandidate> { it.cert()?.rank ?: 0 }.thenByDescending { it.playCount })
+        }
     }
     // Radar : les 5 plus proches du prochain palier (sans limite de distance)
     val radar = remember(candidates, q) {
@@ -149,6 +158,15 @@ fun CertificationsScreen() {
             .sortedWith(compareBy({ it.third }, { -it.first.playCount })).take(5)
     }
     val allMax = candidates.isNotEmpty() && candidates.all { it.level == CertLevel.DIAMOND.dbName }
+
+    // 📡 Rythme de la semaine en cours (écoutes par entité) pour les dates estimées du radar
+    val weekPlays by produceState<Map<Long, Int>>(initialValue = emptyMap(), key1 = tab) {
+        val r = Dates.statsRangeFor(Period.WEEKLY)
+        value = runCatching {
+            if (tab == 0) db.trackDao().topForPeriod(r.fromIso, r.toIso, 500).first().associate { it.track.trackId to it.periodPlays }
+            else db.albumDao().topForPeriod(r.fromIso, r.toIso, 500).first().associate { it.album.albumId to it.periodPlays }
+        }.getOrDefault(emptyMap())
+    }
 
     // 🎨 Art du titre le plus écouté (all time) en fond d'écran
     val artUrl by produceState<String?>(initialValue = null) {
@@ -165,6 +183,8 @@ fun CertificationsScreen() {
                     color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
                 )
             }
+            MedalShowcase(trackCands, albumCands)
+            Spacer(Modifier.height(10.dp))
             TabRow(
                 selectedTabIndex = tab, containerColor = theme.background, contentColor = theme.primary,
                 indicator = { pos -> if (Nova.isPride) Box(Modifier.tabIndicatorOffset(pos[tab]).height(5.dp).background(Brush.horizontalGradient(prideFlagFor(tab + 1)))) else TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(pos[tab]), color = theme.primary) }
@@ -193,6 +213,18 @@ fun CertificationsScreen() {
                     )
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            CoverageCard(candidates, counts)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("niveau" to "🏅 Niveau", "recent" to "🕰️ Récentes", "plays" to "▶ Écoutes", "radar" to "📡 Proches du palier").forEach { (id, label) ->
+                    NovaFilterChip(
+                        selected = sortMode == id, onClick = { if (tab == 0) sortTracks = id else sortAlbums = id },
+                        label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = theme.primary.copy(alpha = 0.25f), selectedLabelColor = theme.text)
+                    )
+                }
+            }
             Spacer(Modifier.height(6.dp))
         }
         if (list.isEmpty()) item {
@@ -202,7 +234,7 @@ fun CertificationsScreen() {
         // Radar en bas de la liste (demande utilisateur)
         item(key = "radar") {
             Spacer(Modifier.height(12.dp))
-            RadarCard(radar, allMax, tab == 0) { detail = type to it }
+            RadarCard(radar, allMax, tab == 0, weekPlays) { detail = type to it }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -212,7 +244,7 @@ fun CertificationsScreen() {
 }
 
 @Composable
-private fun RadarCard(radar: List<Triple<CertCandidate, Certification, Int>>, allMax: Boolean, tracks: Boolean, onOpen: (Long) -> Unit) {
+private fun RadarCard(radar: List<Triple<CertCandidate, Certification, Int>>, allMax: Boolean, tracks: Boolean, weekPlays: Map<Long, Int>, onOpen: (Long) -> Unit) {
     val theme = Nova.theme
     NovaCard(Modifier.padding(horizontal = 16.dp)) {
         Column(Modifier.padding(14.dp)) {
@@ -234,6 +266,14 @@ private fun RadarCard(radar: List<Triple<CertCandidate, Certification, Int>>, al
                     Column(horizontalAlignment = Alignment.End) {
                         Text(next.label(), color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                         Text("−$remaining", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        val playsWeek = weekPlays[c.entityId] ?: 0
+                        val daysInWeek = (java.time.temporal.ChronoUnit.DAYS.between(Dates.parse(Dates.statsRangeFor(Period.WEEKLY).fromIso), Dates.today()) + 1).coerceAtLeast(1)
+                        val pace = playsWeek.toFloat() / daysInWeek
+                        val eta = if (pace > 0f) kotlin.math.ceil(remaining / pace).toInt() else null
+                        Text(
+                            if (eta != null) "≈ $eta j · vers le ${Dates.today().plusDays(eta.toLong()).format(axisFmt)}" else "rythme 0 cette semaine",
+                            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
             }
@@ -360,20 +400,32 @@ private fun CertificationPopup(entityType: String, id: Long, onDismiss: () -> Un
         LinearProgressIndicator(progress = { ((det.playCount - base).toFloat() / (need - base).coerceAtLeast(1)).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), color = certColor(next.level), trackColor = theme.background)
         Text("${need - det.playCount} écoute${if (need - det.playCount > 1) "s" else ""} avant ${next.label()} ($need)", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
 
-        SectionLabel("📜 Historique des paliers")
+        SectionLabel("📜 Frise des paliers")
         if (det.history.isEmpty()) Text("Aucun palier atteint pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-        det.history.forEach { h ->
-            val lvl = CertLevel.entries.firstOrNull { it.dbName == h.level }
-            val label = lvl?.let { Certification(it, h.multiplier).label() } ?: h.level
-            // Temps mis pour atteindre ce palier depuis la première écoute de l'élément.
-            val took = formatElapsed(h.timeToCertifyMs, h.certifiedAt)
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(label, color = certColor(lvl), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    listOfNotNull("le ${Dates.toLocalDate(h.certifiedAt).format(longFmt)}", took, sinceLabel(h.certifiedAt))
-                        .joinToString(" · "),
-                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
-                )
+        else Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.clip(RoundedCornerShape(10.dp)).background(theme.surface).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🎧", fontSize = 18.sp)
+                Text("1ʳ écoute", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            det.history.forEachIndexed { i, h ->
+                val lvl = CertLevel.entries.firstOrNull { it.dbName == h.level }
+                val c = certColor(lvl)
+                val stepMs = if (i == 0) h.timeToCertifyMs else h.certifiedAt - det.history[i - 1].certifiedAt
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 2.dp)) {
+                    Text("→", color = theme.textSecondary)
+                    Text(formatElapsed(stepMs, h.certifiedAt), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                Column(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.15f)).border(1.dp, c.copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(lvl?.emoji ?: "🏅", fontSize = 18.sp)
+                    Text(lvl?.let { Certification(it, h.multiplier).label() } ?: h.level, color = c, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    Text(Dates.toLocalDate(h.certifiedAt).format(axisFmt), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
 
@@ -422,3 +474,75 @@ private fun RanksRow(ranks: Map<Period, Int?>) {
     }
 }
 
+/** 🏅 Vitrine globale (chansons + albums) : compteurs par niveau + prochaine certification. */
+@Composable
+private fun MedalShowcase(tracks: List<CertCandidate>, albums: List<CertCandidate>) {
+    val theme = Nova.theme
+    val all = tracks + albums
+    val counts = CertLevel.entries.associateWith { l -> all.count { it.level == l.dbName } }
+    val total = all.count { it.level != null }
+    var nextLine: String? = null
+    var best = Long.MAX_VALUE
+    for ((cands, rules) in listOf(tracks to CertificationRules.TRACK, albums to CertificationRules.ALBUM)) {
+        for (e in cands) {
+            val rem = rules.required(rules.next(e.playCount)) - e.playCount
+            if (rem < best) { best = rem.toLong(); nextLine = "Prochaine médaille : « ${e.name} », à $rem écoute${if (rem > 1) "s" else ""} de ${rules.next(e.playCount).label()}." }
+        }
+    }
+    NovaCard(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("🏅 Ma vitrine — chansons + albums", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CertLevel.entries.forEach { l ->
+                    val c = certColor(l)
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(c.copy(alpha = 0.14f))
+                            .border(1.dp, c.copy(alpha = 0.45f), RoundedCornerShape(12.dp)).padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(l.emoji, fontSize = 22.sp)
+                        Text("${counts[l] ?: 0}", color = c, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        Text(l.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (total == 0) "Aucune certification pour l'instant — première médaille 🥉 à 25 ▶ (chanson) ou 50 ▶ (album)."
+                else nextLine ?: "🏆 Toute ta bibliothèque est au sommet !",
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+/** 📚 Couverture de la bibliothèque de l'onglet : % certifié + jauges par niveau + palier symbolique. */
+@Composable
+private fun CoverageCard(candidates: List<CertCandidate>, counts: Map<String, Int>) {
+    val theme = Nova.theme
+    if (candidates.isEmpty()) return
+    val total = candidates.size
+    val certified = candidates.count { it.level != null }
+    val pct = (certified * 100) / total
+    val target = CertLevel.entries.firstOrNull { l -> (counts[l.dbName] ?: 0) < 10 }
+    NovaCard(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("📚 Couverture de ta bibliothèque", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            Text("$pct % de tes éléments sont certifiés ($certified / $total)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp))
+            CertLevel.entries.forEach { l ->
+                val n = counts[l.dbName] ?: 0
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(l.emoji, fontSize = 14.sp)
+                    Text("${l.label} · $n", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    Text("${(n * 100) / total} %", color = certColor(l), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                }
+                LinearProgressIndicator(progress = { (n.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)), color = certColor(l), trackColor = theme.background)
+            }
+            target?.let { l ->
+                Spacer(Modifier.height(8.dp))
+                Text("🎯 Encore ${10 - (counts[l.dbName] ?: 0)} certification${if (10 - (counts[l.dbName] ?: 0) > 1) "s" else ""} pour atteindre 10 ${l.label} ${l.emoji}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
