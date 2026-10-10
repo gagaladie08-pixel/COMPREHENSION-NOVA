@@ -19,7 +19,10 @@ import kotlinx.coroutines.withContext
  *  3. crédits de featuring pris comme titre (« Cardi B, Bad Bunny J Balvin » alors que le vrai titre existe
  *     sur le même album) → fusion avec le vrai titre ;
  *  4. crédit fantôme vérifié contre les crédits officiels : Lil Nas X n'est sur aucune chanson de
- *     KPop Demon Hunters (tracklist Republic Records) → retiré des 3 fiches qui le portaient.
+ *     KPop Demon Hunters (tracklist Republic Records) → retiré des 3 fiches qui le portaient ;
+ *  5. anti-récidive : les détections abandonnées (annulées depuis 24 h, ou en attente depuis 14 j)
+ *     sont effacées, puis les fiches artistes/albums qui ne référencent plus rien sont purgées.
+ *     Les vraies voix des Saja Boys sont préservées (liste blanche).
  *
  * Aucune écoute n'est supprimée : on renomme, fusionne et déplace uniquement, via [DataEditorManager]
  * (chaque geste est tracé dans l'historique d'édition). Idempotent : un second passage ne trouve plus rien.
@@ -125,6 +128,13 @@ object LibraryCleanup {
             if (hits.isNotEmpty()) runCatching {
                 editor.removeArtistCredits(hits.map { it.trackId to lnx.artistId }, "Lil Nas X")
             }
+        }
+
+        // ---- 5. Anti-récidive : détections abandonnées + fiches artistes/albums vides ----
+        runCatching {
+            editor.purgeEmptyShells(
+                keepArtists = listOf(quarantine, "Danny Chung", "Kevin Woo", "Neckwav", "samUIL Lee")
+            )
         }
     }
 }

@@ -35,7 +35,7 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         const val RENAME = "RENAME"; const val MERGE = "MERGE"; const val COVER_CHANGE = "COVER_CHANGE"
         const val ALBUM_CHANGE = "ALBUM_CHANGE"; const val ARTIST_CHANGE = "ARTIST_CHANGE"; const val DELETE_PLAY = "DELETE_PLAY"; const val REVIEWED = "REVIEWED"
         const val REVIEW_FIX = "REVIEW_FIX"; const val REVIEW_IGNORE = "REVIEW_IGNORE"; const val ALBUM_SHARED = "ALBUM_SHARED"
-        const val LINK_VERSION = "LINK_VERSION"
+        const val LINK_VERSION = "LINK_VERSION"; const val GHOST_PURGE = "GHOST_PURGE"
     }
 
     private suspend fun log(type: String, entityType: String, entityId: Long, before: String?, after: String?, extra: String? = null) {
@@ -330,6 +330,31 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     }
 
     /* ---------------- Changer artiste / album d'un titre ---------------- */
+
+    /**
+     * 👻 Purge anti-récidive des fiches fantômes : détections abandonnées (CANCELLED > 24 h,
+     * PENDING > 14 j), puis albums et artistes qui ne référencent plus rien. Liste blanche
+     * d'artistes préservés passée par l'appelant. Un seul recalcul, une seule trace.
+     */
+    suspend fun purgeEmptyShells(keepArtists: List<String>): Triple<Int, Int, Int> = operationMutex.withLock {
+        _busy.value = true
+        try {
+            val now = System.currentTimeMillis()
+            val abandoned = db.scrobbleDao().deleteAbandoned(now - 24 * 3600_000L, now - 14 * 24 * 3600_000L)
+            val albums = db.albumDao().deleteAllUnused()
+            val artists = db.artistDao().deleteAllUnusedExcept(keepArtists)
+            if (abandoned + albums + artists > 0) {
+                log(Type.GHOST_PURGE, "SYSTEM", 0L, null,
+                    "$abandoned détection(s) abandonnée(s) · $albums album(s) vide(s) · $artists artiste(s) vide(s)",
+                    "purge coquilles")
+                library?.clearCaches()
+                _status.value = "👻 Coquilles purgées · recalcul…"
+                rebuilder.rebuildAll(fullBillboard = true)
+                _status.value = "✅ $abandoned détection(s), $albums album(s), $artists artiste(s) purgé(s)"
+            }
+            Triple(abandoned, albums, artists)
+        } finally { _busy.value = false }
+    }
 
     /** 🎭 Retire des crédits de featuring erronés (lot) — un seul recalcul, une entrée d'historique par titre. */
     suspend fun removeArtistCredits(entries: List<Pair<Long, Long>>, artistName: String) = perform("${entries.size} crédit(s) featuring retiré(s)", rebuild = true) {

@@ -312,6 +312,20 @@ interface DailyPlayDao {
     @Query("DELETE FROM daily_plays")
     suspend fun clear()
 
+    /**
+     * 👻 Détections abandonnées : CANCELLED depuis plus de 24 h (détection annulée, pas une écoute)
+     * ou PENDING vieilles de plus de 14 j (file d'attente expirée). Elles maintenaient en vie des
+     * fiches artistes/albums fantômes : les libérer permet à la purge des coquilles d'aboutir.
+     */
+    @Query(
+        """
+        DELETE FROM scrobbles
+        WHERE (status = 'CANCELLED' AND started_at < :cancelledBefore)
+           OR (status = 'PENDING' AND started_at < :pendingBefore)
+        """
+    )
+    suspend fun deleteAbandoned(cancelledBefore: Long, pendingBefore: Long): Int
+
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
         """
