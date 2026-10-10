@@ -105,7 +105,8 @@ object LibraryCleanup {
             val target = played.firstOrNull { o ->
                 o.trackId != t.trackId && o.albumId == t.albumId && o.albumId != null &&
                     !creditPattern.matches(o.title.trim()) &&
-                    db.trackDao().getById(o.trackId)?.artistId == t.artistId
+                    // Le vrai titre peut être crédité « Artiste, Invité… » : l'artiste de la fiche poubelle doit s'y retrouver
+                    (db.artistDao().getById(o.artistId)?.name?.lowercase()?.contains(ownArtist) == true)
             } ?: continue
             runCatching { editor.mergeTracks(t.trackId, target.trackId) }
         }
