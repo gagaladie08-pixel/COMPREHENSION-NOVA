@@ -30,7 +30,12 @@ object AgentSync {
 
     private const val THROTTLE_MS = 10 * 60_000L
     private val MEDIA = "application/json; charset=utf-8".toMediaType()
-    private val client = OkHttpClient.Builder().callTimeout(90, TimeUnit.SECONDS).build()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(150, TimeUnit.SECONDS)
+        .build()
 
     /** Poussée après un recalcul de stats : rien si la synchro est désactivée ou si la dernière pousse date de moins de 10 min. */
     suspend fun autoPush(app: NovaStatsApp): String? {
@@ -40,8 +45,18 @@ object AgentSync {
         return push(app, force = true)
     }
 
-    /** Pousse complète. Crée le Gist au premier envoi, puis met toujours à jour le même Gist. */
-    suspend fun push(app: NovaStatsApp, force: Boolean = false): String? = withContext(Dispatchers.IO) {
+    /**
+     * Pousse complète SÛRE : ne lève jamais. Une panne réseau (SocketTimeoutException, reset HTTP/2…)
+     * devient un message ⚠️ affichable au lieu de planter l'app — défaut d'origine : l'exception du bouton
+     * manuel remontait jusqu'au scope UI et tuait le process.
+     */
+    suspend fun push(app: NovaStatsApp, force: Boolean = false): String? =
+        runCatching { pushInternal(app, force) }.getOrElse {
+            "⚠️ Synchro échouée (${it.javaClass.simpleName}) — réessaie quand le réseau est stable"
+        }
+
+    /** Crée le Gist au premier envoi, puis met toujours à jour le même Gist. Une relance auto sur IOException. */
+    private suspend fun pushInternal(app: NovaStatsApp, force: Boolean): String? = withContext(Dispatchers.IO) {
         val s = app.settings
         if (!force && !s.agentSync.first()) return@withContext null
         val token = s.agentToken.first()?.trim().orEmpty()
@@ -84,7 +99,11 @@ object AgentSync {
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/vnd.github+json")
             .build()
-        val resp = client.newCall(request).execute()
+        val resp = try {
+            client.newCall(request).execute()
+        } catch (io: java.io.IOException) {
+            client.newCall(request).execute() // 2ᵉ tentative : réseau mobile instable
+        }
         val body = resp.body?.string().orEmpty()
         if (!resp.isSuccessful) {
             val hint = when (resp.code) {
