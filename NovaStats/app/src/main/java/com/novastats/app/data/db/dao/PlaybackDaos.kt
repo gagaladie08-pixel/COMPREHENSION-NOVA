@@ -299,19 +299,6 @@ interface ScrobbleDao {
     )
     suspend fun reattachOrphanAlbumPlays(): Int
 
-}
-
-@Dao
-interface DailyPlayDao {
-    @Upsert
-    suspend fun upsert(dailyPlay: DailyPlayEntity)
-
-    @Query("SELECT * FROM daily_plays WHERE track_id = :trackId AND date = :date")
-    suspend fun get(trackId: Long, date: String): DailyPlayEntity?
-
-    @Query("DELETE FROM daily_plays")
-    suspend fun clear()
-
     /**
      * 👻 Détections abandonnées : CANCELLED depuis plus de 24 h (détection annulée, pas une écoute)
      * ou PENDING vieilles de plus de 14 j (file d'attente expirée). Elles maintenaient en vie des
@@ -325,6 +312,19 @@ interface DailyPlayDao {
         """
     )
     suspend fun deleteAbandoned(cancelledBefore: Long, pendingBefore: Long): Int
+
+}
+
+@Dao
+interface DailyPlayDao {
+    @Upsert
+    suspend fun upsert(dailyPlay: DailyPlayEntity)
+
+    @Query("SELECT * FROM daily_plays WHERE track_id = :trackId AND date = :date")
+    suspend fun get(trackId: Long, date: String): DailyPlayEntity?
+
+    @Query("DELETE FROM daily_plays")
+    suspend fun clear()
 
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
