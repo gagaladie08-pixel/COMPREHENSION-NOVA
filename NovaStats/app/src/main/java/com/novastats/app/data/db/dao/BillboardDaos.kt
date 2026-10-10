@@ -20,6 +20,13 @@ data class RankedEntry(
     @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0
 )
 
+/** 🏛️ Premium : dauphin (#2) d'un snapshot, pour la marge de domination du Hall of Fame. */
+data class RunnerUpRow(
+    @ColumnInfo(name = "entity_id") val entityId: Long,
+    @ColumnInfo(name = "play_count") val playCount: Int,
+    @ColumnInfo(name = "name") val name: String
+)
+
 /** Apparition passée d'une entité dans un chart (pour peak, compteur, record d'écoutes, séries). */
 data class PriorRow(
     @ColumnInfo(name = "entity_id") val entityId: Long,
@@ -249,4 +256,19 @@ interface BillboardDao {
         """
     )
     suspend fun numberOneAlbum(type: String, date: String): Long?
+
+    /* ===== 🏛️ Premium : dauphin (#2) d'un snapshot + résolution de noms (Antichambre / domination) ===== */
+
+    @Query("SELECT st.track_id AS entity_id, st.play_count AS play_count, t.title AS name FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id JOIN tracks t ON t.track_id = st.track_id WHERE s.type = :type AND s.date = :date AND st.position = 2 LIMIT 1")
+    suspend fun runnerUpTrack(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.artist_id AS entity_id, sa.play_count AS play_count, a.name AS name FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN artists a ON a.artist_id = sa.artist_id WHERE s.type = :type AND s.date = :date AND sa.position = 2 LIMIT 1")
+    suspend fun runnerUpArtist(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.album_id AS entity_id, sa.play_count AS play_count, al.title AS name FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN albums al ON al.album_id = sa.album_id WHERE s.type = :type AND s.date = :date AND sa.position = 2 LIMIT 1")
+    suspend fun runnerUpAlbum(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT title FROM tracks WHERE track_id = :id") suspend fun nameOfTrack(id: Long): String?
+    @Query("SELECT name FROM artists WHERE artist_id = :id") suspend fun nameOfArtist(id: Long): String?
+    @Query("SELECT title FROM albums WHERE album_id = :id") suspend fun nameOfAlbum(id: Long): String?
 }
