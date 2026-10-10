@@ -518,11 +518,15 @@ interface ArtistDao {
 
     @Query("SELECT artist_id FROM artists") suspend fun allIds(): List<Long>
 
-    /** 👻 Purge en lot : artistes sans titre, sans crédit, sans album et sans écoute — sauf liste blanche. */
+    /**
+     * 👻 Purge en lot : artistes sans titre, sans crédit, sans album et sans écoute — sauf liste blanche.
+     * NB : NOT EXISTS sur une table de valeurs (et non « name NOT IN ») : en SQLite, NOT IN sur une
+     * sous-requête vide vaut NULL et ne supprimerait jamais rien.
+     */
     @Query(
         """
         DELETE FROM artists
-        WHERE name NOT IN (:keep)
+        WHERE NOT EXISTS (SELECT 1 FROM (SELECT :keep AS k) WHERE k = artists.name)
           AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = artists.artist_id)
           AND NOT EXISTS (SELECT 1 FROM track_artists ta WHERE ta.artist_id = artists.artist_id)
           AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.artist_id = artists.artist_id)
