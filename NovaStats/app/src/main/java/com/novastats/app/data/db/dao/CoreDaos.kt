@@ -913,6 +913,10 @@ interface TrackLinkDao {
     /** Liens album orphelins (album supprimé) : ménage après purge des coquilles. */
     @Query("DELETE FROM track_albums WHERE album_id NOT IN (SELECT album_id FROM albums)")
     suspend fun clearDanglingAlbumLinks(): Int
+
+    /** 🎭 Retire un crédit de featuring erroné d'un titre (l'artiste principal n'est jamais touché). */
+    @Query("DELETE FROM track_artists WHERE track_id = :trackId AND artist_id = :artistId")
+    suspend fun removeArtistCredit(trackId: Long, artistId: Long): Int
 }
 
 

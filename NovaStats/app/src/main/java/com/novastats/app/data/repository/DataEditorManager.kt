@@ -331,6 +331,18 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
 
     /* ---------------- Changer artiste / album d'un titre ---------------- */
 
+    /** 🎭 Retire des crédits de featuring erronés (lot) — un seul recalcul, une entrée d'historique par titre. */
+    suspend fun removeArtistCredits(entries: List<Pair<Long, Long>>, artistName: String) = perform("${entries.size} crédit(s) featuring retiré(s)", rebuild = true) {
+        var removed = 0
+        for ((trackId, artistId) in entries) {
+            val t = db.trackDao().getById(trackId) ?: continue
+            if (t.artistId == artistId) continue
+            removed += db.trackLinkDao().removeArtistCredit(trackId, artistId)
+            log(Type.ARTIST_CHANGE, "TRACK", trackId, artistName, null, "crédit featuring retiré de « ${t.title} »")
+        }
+        removed
+    }
+
     suspend fun setTrackArtist(trackId: Long, artistId: Long) = perform("Artiste du titre modifié", rebuild = true) {
         db.withTransaction { setTrackArtistInternal(trackId, artistId) }
     }

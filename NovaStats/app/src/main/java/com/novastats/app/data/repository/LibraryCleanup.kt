@@ -17,7 +17,9 @@ import kotlinx.coroutines.withContext
  *  2. titres portant l'empreinte d'un fichier/émission + artistes sans nom (« <unknown> », « Unknown », vide)
  *     → déplacés vers l'artiste de quarantaine « 🗂️ À trier », doublons fusionnés ;
  *  3. crédits de featuring pris comme titre (« Cardi B, Bad Bunny J Balvin » alors que le vrai titre existe
- *     sur le même album) → fusion avec le vrai titre.
+ *     sur le même album) → fusion avec le vrai titre ;
+ *  4. crédit fantôme vérifié contre les crédits officiels : Lil Nas X n'est sur aucune chanson de
+ *     KPop Demon Hunters (tracklist Republic Records) → retiré des 3 fiches qui le portaient.
  *
  * Aucune écoute n'est supprimée : on renomme, fusionne et déplace uniquement, via [DataEditorManager]
  * (chaque geste est tracé dans l'historique d'édition). Idempotent : un second passage ne trouve plus rien.
@@ -109,6 +111,20 @@ object LibraryCleanup {
                     (db.artistDao().getById(o.artistId)?.name?.lowercase()?.contains(ownArtist) == true)
             } ?: continue
             runCatching { editor.mergeTracks(t.trackId, target.trackId) }
+        }
+
+        // ---- 4. Crédit fantôme « Lil Nas X » sur KPop Demon Hunters (absent des crédits officiels) ----
+        val lnx = db.artistDao().findByNameNoCase("Lil Nas X")
+        if (lnx != null) {
+            val hits = db.trackDao().allPlayed().filter { t ->
+                if (t.artistId == lnx.artistId) return@filter false
+                val k = t.title.trim().lowercase()
+                val cible = k == "what it sounds like" || k == "dévoile" || k.startsWith("briller")
+                cible && db.trackLinkDao().artistIdsForTrack(t.trackId).contains(lnx.artistId)
+            }
+            if (hits.isNotEmpty()) runCatching {
+                editor.removeArtistCredits(hits.map { it.trackId to lnx.artistId }, "Lil Nas X")
+            }
         }
     }
 }
