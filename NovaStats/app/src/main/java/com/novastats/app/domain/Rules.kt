@@ -171,7 +171,7 @@ object TitleNormalizer {
     /** Retire un suffixe d'interface du nom d'artiste (« Burna Boy • Recommandé Pour Vous » → « Burna Boy »). */
     fun cleanArtistName(raw: String): String {
         val name = raw.trim()
-        val idx = name.indexOfLast('•')
+        val idx = name.lastIndexOf('•')
         if (idx <= 0) return name
         val suffix = name.substring(idx + 1).trim().lowercase()
         return if (UI_ARTIST_SUFFIXES.any { suffix == it || suffix.startsWith(it) }) name.substring(0, idx).trim().ifBlank { name } else name
