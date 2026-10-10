@@ -299,6 +299,19 @@ interface DailyPlayDao {
     @Query("DELETE FROM daily_plays")
     suspend fun clear()
 
+    /**
+     * 🧟 Albums fantômes : les écoutes pointant vers un album qui n'a PLUS aucun titre rattaché
+     * sont réattribuées à l'album ACTUEL de leur titre (jamais forcées si le titre n'a pas d'album).
+     */
+    @Query(
+        """
+        UPDATE scrobbles SET album_id = (SELECT t.album_id FROM tracks t WHERE t.track_id = scrobbles.track_id)
+        WHERE album_id IN (SELECT a.album_id FROM albums a WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.album_id))
+          AND (SELECT t2.album_id FROM tracks t2 WHERE t2.track_id = scrobbles.track_id) IS NOT NULL
+        """
+    )
+    suspend fun reattachOrphanAlbumPlays(): Int
+
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
         """
