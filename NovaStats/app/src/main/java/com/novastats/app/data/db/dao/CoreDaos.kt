@@ -804,6 +804,16 @@ interface AlbumDao {
 
     @Query("SELECT * FROM albums") suspend fun all(): List<AlbumEntity>
 
+    /** 🧟 Purge les coquilles : albums sans AUCUN titre rattaché et sans AUCUNE écoute (après réattribution fantôme). */
+    @Query(
+        """
+        DELETE FROM albums
+        WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = albums.album_id)
+          AND NOT EXISTS (SELECT 1 FROM scrobbles s WHERE s.album_id = albums.album_id)
+        """
+    )
+    suspend fun deleteEmptyShells(): Int
+
     /* ---- Éditeur de données ---- */
     @Query("SELECT al.*, IFNULL(a.name, 'Artistes variés') AS artist_name, al.play_count AS period_plays, al.total_duration_ms AS period_duration_ms FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id ORDER BY al.play_count DESC, al.title")
     fun allForEditor(): Flow<List<RankedAlbum>>
@@ -899,6 +909,10 @@ interface TrackLinkDao {
     @Query("DELETE FROM track_albums WHERE track_id = :trackId AND album_id = :albumId") suspend fun unlinkTrackAlbum(trackId: Long, albumId: Long)
     @Query("DELETE FROM track_albums WHERE track_id = :trackId") suspend fun clearTrackAlbums(trackId: Long)
     @Query("DELETE FROM track_albums WHERE album_id = :albumId") suspend fun clearAlbumLinks(albumId: Long)
+
+    /** Liens album orphelins (album supprimé) : ménage après purge des coquilles. */
+    @Query("DELETE FROM track_albums WHERE album_id NOT IN (SELECT album_id FROM albums)")
+    suspend fun clearDanglingAlbumLinks(): Int
 }
 
 

@@ -111,6 +111,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         val stepOneStartedAt = System.currentTimeMillis()
         db.withTransaction {
             collapseEmptyRootsInTransaction()
+            val reattached = db.scrobbleDao().reattachOrphanAlbumPlays()
+            db.trackLinkDao().clearDanglingAlbumLinks()
+            val purged = db.albumDao().deleteEmptyShells()
+            if (reattached + purged > 0 && auditContext != null)
+                RebuildAudit.write(auditContext, "🧟 Albums fantômes : $reattached écoute(s) réattribuée(s) à l'album actuel · $purged album(s) vide(s) purgé(s)")
             recomputeEntityAggregatesInTransaction()
             recomputeDailyAggregatesInTransaction()
         }
