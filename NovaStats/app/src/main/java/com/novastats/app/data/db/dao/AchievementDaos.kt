@@ -197,7 +197,7 @@ interface RecordDao {
                CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
-               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
                                WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
@@ -220,7 +220,7 @@ interface RecordDao {
                CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
-               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
                                WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
@@ -275,7 +275,7 @@ interface RecordDao {
                CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
-               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
                                WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
@@ -295,7 +295,7 @@ interface RecordDao {
                CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
-               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
                                WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
