@@ -9,6 +9,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -27,7 +28,6 @@ import java.util.concurrent.TimeUnit
  */
 object AgentSync {
 
-    private const val FILE_NAME = "nova_backup.json"
     private const val THROTTLE_MS = 10 * 60_000L
     private val MEDIA = "application/json; charset=utf-8".toMediaType()
     private val client = OkHttpClient.Builder().callTimeout(90, TimeUnit.SECONDS).build()
@@ -47,12 +47,27 @@ object AgentSync {
         val token = s.agentToken.first()?.trim().orEmpty()
         if (token.isEmpty()) return@withContext "⚠️ Aucun token GitHub enregistré (Réglages → Synchro agent)"
         val (text, sum) = BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
+        // L'API GitHub tronque tout fichier > 1 Mo : le miroir part compressé (gzip + base64, ~5x plus petit),
+        // lisible intégralement via api.github.com. nova_status.txt reste du texte clair pour un coup d'œil humain.
+        val gz = java.io.ByteArrayOutputStream().use { bos ->
+            java.util.zip.GZIPOutputStream(bos).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            bos.toByteArray()
+        }
+        val b64 = android.util.Base64.encodeToString(gz, android.util.Base64.NO_WRAP)
+        val statusTxt = "NovaStats ${BuildConfig.VERSION_NAME} · export ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date())} (heure appareil)\n" +
+            "${sum.plays} écoutes · ${sum.songs} titres · ${sum.artists} artistes · ${sum.albums} albums\n" +
+            "Miroir complet : nova_backup.b64 (gzip+base64, ${gz.size / 1024} Ko)\n" +
+            "Système temporaire — synchro agent."
+        val gistId = s.agentGistId.first().orEmpty()
         val payload = buildJsonObject {
             put("description", "NovaStats — miroir agent (temporaire)")
             put("public", false)
-            putJsonObject("files") { putJsonObject(FILE_NAME) { put("content", text) } }
+            putJsonObject("files") {
+                putJsonObject("nova_status.txt") { put("content", statusTxt) }
+                putJsonObject("nova_backup.b64") { put("content", b64) }
+                if (gistId.isNotEmpty()) put("nova_backup.json", JsonNull) // purge l'ancien fichier non compressé (> 1 Mo)
+            }
         }.toString()
-        val gistId = s.agentGistId.first().orEmpty()
         val request = (
             if (gistId.isEmpty()) Request.Builder().url("https://api.github.com/gists").post(payload.toRequestBody(MEDIA))
             else Request.Builder().url("https://api.github.com/gists/$gistId").patch(payload.toRequestBody(MEDIA))
