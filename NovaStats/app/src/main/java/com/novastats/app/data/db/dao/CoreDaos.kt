@@ -288,11 +288,17 @@ interface TrackDao {
     /** Titres d'un album écoutés sur une période, les plus écoutés d'abord — versions fondues dans leur original (cf. [ofAlbum]). */
     @Query(
         """
+        WITH RECURSIVE true_root AS (
+            SELECT track_id, track_id AS root_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT t.track_id, r.root_id FROM tracks t JOIN true_root r ON t.original_track_id = r.track_id
+        )
         SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id OR ta2.track_id IN (SELECT v.track_id FROM tracks v WHERE v.original_track_id = t.track_id AND v.album_id = t.album_id) GROUP BY a2.artist_id ORDER BY MAX(ta2.is_primary) DESC, MIN(ta2.id))) AS artist_name, al.title AS album_title,
                SUM(d.play_count) AS period_plays, SUM(d.total_duration_ms) AS period_duration_ms
         FROM daily_plays d
         JOIN tracks x ON x.track_id = d.track_id
-        LEFT JOIN tracks r ON r.track_id = x.original_track_id
+        LEFT JOIN true_root rr ON rr.track_id = x.track_id
+        LEFT JOIN tracks r ON r.track_id = rr.root_id AND rr.root_id != x.track_id
         JOIN tracks t ON t.track_id = CASE WHEN r.album_id = :albumId THEN r.track_id ELSE x.track_id END
         LEFT JOIN albums al ON al.album_id = t.album_id
         WHERE (x.album_id = :albumId OR r.album_id = :albumId) AND d.date BETWEEN :from AND :to
@@ -360,17 +366,18 @@ interface TrackDao {
      */
     @Query(
         """
-        WITH confirmed AS (
+        WITH RECURSIVE true_root AS (
+            SELECT track_id, track_id AS root_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT t.track_id, r.root_id FROM tracks t JOIN true_root r ON t.original_track_id = r.track_id
+        ), confirmed AS (
             SELECT s.track_id AS track_id, s.duration_listened_ms AS duration_listened_ms, s.started_at AS started_at
             FROM scrobbles s WHERE s.status = 'CONFIRMED'
-        ), root_of AS (
-            SELECT c.track_id AS track_id, IFNULL(v.original_track_id, c.track_id) AS root_id,
-                   c.duration_listened_ms AS duration_listened_ms, c.started_at AS started_at
-            FROM confirmed c LEFT JOIN tracks v ON v.track_id = c.track_id
         ), combined AS (
             SELECT track_id AS owner_id, duration_listened_ms, started_at FROM confirmed
             UNION ALL
-            SELECT root_id AS owner_id, duration_listened_ms, started_at FROM root_of WHERE root_id != track_id
+            SELECT r.root_id AS owner_id, c.duration_listened_ms, c.started_at
+            FROM confirmed c JOIN true_root r ON r.track_id = c.track_id WHERE r.root_id != c.track_id
         ), agg AS (
             SELECT owner_id, COUNT(*) AS play_count, SUM(duration_listened_ms) AS total_duration_ms,
                    MIN(started_at) AS first_played_at, MAX(started_at) AS last_played_at
@@ -388,13 +395,18 @@ interface TrackDao {
     /** Un seul parcours des écoutes confirmées, groupé par racine (évite une sous-requête par titre). */
     @Query(
         """
-        SELECT IFNULL(t.original_track_id, s.track_id) AS root_id,
+        WITH RECURSIVE true_root AS (
+            SELECT track_id, track_id AS root_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT t.track_id, r.root_id FROM tracks t JOIN true_root r ON t.original_track_id = r.track_id
+        )
+        SELECT IFNULL(r.root_id, s.track_id) AS root_id,
                COUNT(*) AS play_count,
                IFNULL(SUM(s.duration_listened_ms), 0) AS total_duration_ms
         FROM scrobbles s
-        LEFT JOIN tracks t ON t.track_id = s.track_id
+        LEFT JOIN true_root r ON r.track_id = s.track_id
         WHERE s.status = 'CONFIRMED'
-        GROUP BY IFNULL(t.original_track_id, s.track_id)
+        GROUP BY IFNULL(r.root_id, s.track_id)
         """
     )
     suspend fun rootAggregatesFromScrobbles(): List<RootScrobbleAggregate>
@@ -823,16 +835,20 @@ interface AlbumDao {
      */
     @Query(
         """
-        WITH confirmed AS (
+        WITH RECURSIVE true_root AS (
+            SELECT track_id, track_id AS root_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT t.track_id, r.root_id FROM tracks t JOIN true_root r ON t.original_track_id = r.track_id
+        ), confirmed AS (
             SELECT s.album_id AS album_id, s.track_id AS track_id,
                    s.duration_listened_ms AS duration_listened_ms, s.started_at AS started_at
             FROM scrobbles s WHERE s.status = 'CONFIRMED'
         ), album_agg AS (
             SELECT c.album_id AS album_id, COUNT(*) AS play_count,
                    SUM(c.duration_listened_ms) AS total_duration_ms,
-                   COUNT(DISTINCT IFNULL(v.original_track_id, c.track_id)) AS distinct_tracks_played,
+                   COUNT(DISTINCT IFNULL(r.root_id, c.track_id)) AS distinct_tracks_played,
                    MIN(c.started_at) AS first_played_at, MAX(c.started_at) AS last_played_at
-            FROM confirmed c LEFT JOIN tracks v ON v.track_id = c.track_id
+            FROM confirmed c LEFT JOIN true_root r ON r.track_id = c.track_id
             GROUP BY c.album_id
         )
         UPDATE albums SET

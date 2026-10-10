@@ -211,7 +211,16 @@ interface ScrobbleDao {
     fun summary(fromMs: Long, toMs: Long): Flow<PeriodSummary>
 
     /** Date (epoch ms) de la N-ième écoute confirmée d'un titre — dates rétroactives des certifications. */
-    @Query("SELECT started_at FROM scrobbles WHERE status = 'CONFIRMED' AND (track_id = :trackId OR track_id IN (SELECT track_id FROM tracks WHERE original_track_id = :trackId)) ORDER BY started_at LIMIT 1 OFFSET :n - 1")
+    @Query(
+        """
+        WITH RECURSIVE fam AS (
+            SELECT :trackId AS t
+            UNION ALL
+            SELECT v.track_id FROM tracks v JOIN fam f ON v.original_track_id = f.t
+        )
+        SELECT started_at FROM scrobbles WHERE status = 'CONFIRMED' AND track_id IN (SELECT t FROM fam) ORDER BY started_at LIMIT 1 OFFSET :n - 1
+        """
+    )
     suspend fun nthPlayOfTrack(trackId: Long, n: Int): Long?
 
     /** Écoutes dont le titre doit être re-résolu (liens artistes / versions) : valeurs brutes du lecteur si connues. */
@@ -223,8 +232,13 @@ interface ScrobbleDao {
     /** Écoute au même instant sur le titre cible OU une version de son groupe (original + versions liées) — le titre exact d'abord. */
     @Query(
         """
+        WITH RECURSIVE fam AS (
+            SELECT :rootId AS t
+            UNION ALL
+            SELECT v.track_id FROM tracks v JOIN fam f ON v.original_track_id = f.t
+        )
         SELECT * FROM scrobbles WHERE started_at = :startedAt
-          AND (track_id = :trackId OR track_id = :rootId OR track_id IN (SELECT track_id FROM tracks WHERE original_track_id = :rootId))
+          AND (track_id = :trackId OR track_id IN (SELECT t FROM fam))
         ORDER BY (track_id = :trackId) DESC LIMIT 1
         """
     )
@@ -288,11 +302,16 @@ interface DailyPlayDao {
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
         """
+        WITH RECURSIVE true_root AS (
+            SELECT track_id, track_id AS root_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT t.track_id, r.root_id FROM tracks t JOIN true_root r ON t.original_track_id = r.track_id
+        )
         INSERT INTO daily_plays (track_id, root_id, artist_id, album_id, date, play_count, total_duration_ms)
-        SELECT s.track_id, IFNULL(t.original_track_id, s.track_id), s.artist_id, s.album_id,
+        SELECT s.track_id, IFNULL(r.root_id, s.track_id), s.artist_id, s.album_id,
                date(s.started_at / 1000, 'unixepoch', 'localtime') AS d,
                COUNT(*), SUM(s.duration_listened_ms)
-        FROM scrobbles s LEFT JOIN tracks t ON t.track_id = s.track_id WHERE s.status = 'CONFIRMED'
+        FROM scrobbles s LEFT JOIN true_root r ON r.track_id = s.track_id WHERE s.status = 'CONFIRMED'
         GROUP BY s.track_id, d
         """
     )
