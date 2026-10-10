@@ -137,7 +137,7 @@ class NovaStatsApp : Application() {
         premiumChannel(CHANNEL_CERT_GOLD, "Certification · Or", "Carillon doré pour un nouveau palier Or", NotificationManager.IMPORTANCE_DEFAULT, "cert_gold", longArrayOf(0, 75))
         premiumChannel(CHANNEL_CERT_PLATINUM, "Certification · Platine", "Accord lumineux pour un nouveau palier Platine", NotificationManager.IMPORTANCE_DEFAULT, "cert_platinum", longArrayOf(0, 90, 55, 90))
         premiumChannel(CHANNEL_CERT_DIAMOND, "Certification · Diamant", "Fanfare cristalline et vibration pour Diamant", NotificationManager.IMPORTANCE_HIGH, "cert_diamond", longArrayOf(0, 130, 60, 130))
-        premiumChannel(CHANNEL_CERT_MULTIPLIERS, "Certification · Multiplicateurs", "Signature ascendante pour chaque nouveau multiplicateur Diamant", NotificationManager.IMPORTANCE_HIGH, "cert_multiplier", longArrayOf(0, 150, 70, 150, 70, 220))
+        premiumChannel(CHANNEL_CERT_MULTIPLIERS, "Certification · Multiplicateurs", "Signature ascendante pour chaque nouveau multiplicateur (Platine, Diamant)", NotificationManager.IMPORTANCE_HIGH, "cert_multiplier", longArrayOf(0, 150, 70, 150, 70, 220))
 
         premiumChannel(CHANNEL_PANTHEON_STAR, "Panthéon · Star", "Carillon léger — entrée au rang Star", NotificationManager.IMPORTANCE_DEFAULT, "pantheon_star", longArrayOf(0, 70))
         premiumChannel(CHANNEL_PANTHEON_SUPERSTAR, "Panthéon · Superstar", "Motif ascendant — entrée au rang Superstar", NotificationManager.IMPORTANCE_DEFAULT, "pantheon_superstar", longArrayOf(0, 90, 55, 90))

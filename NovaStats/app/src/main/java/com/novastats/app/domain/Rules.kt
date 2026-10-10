@@ -14,18 +14,18 @@ enum class CertLevel(val emoji: String, val label: String, val dbName: String) {
     DIAMOND("💎", "Diamant", "DIAMOND")
 }
 
-/** Une certification = niveau + multiplicateur (le multiplicateur ne concerne que Diamant). */
+/** Une certification = niveau + multiplicateur (Platine jusqu'à 3x, puis Diamant à l'infini). */
 data class Certification(val level: CertLevel, val multiplier: Int = 1) : Comparable<Certification> {
     val rank: Int get() = level.ordinal * 1000 + multiplier
     override fun compareTo(other: Certification) = rank.compareTo(other.rank)
-    fun label(): String = if (level == CertLevel.DIAMOND && multiplier > 1) "${multiplier}x ${level.emoji} ${level.label}" else "${level.emoji} ${level.label}"
+    fun label(): String = if (multiplier > 1) "${multiplier}x ${level.emoji} ${level.label}" else "${level.emoji} ${level.label}"
 }
 
 object CertificationRules {
-    /** Seuils Chansons : Argent 25 / Or 50 / Platine 100 / Diamant 350 (+350 par multiplicateur) */
+    /** Seuils Chansons : Argent 25 / Or 50 / Platine 100 (2x à 200, 3x à 300) / Diamant 350 (+350 par multiplicateur) */
     val TRACK = Thresholds(silver = 25, gold = 50, platinum = 100, diamond = 350)
 
-    /** Seuils Albums : Argent 50 / Or 100 / Platine 200 / Diamant 700 (+700 par multiplicateur) */
+    /** Seuils Albums : Argent 50 / Or 100 / Platine 200 (2x à 400, 3x à 600) / Diamant 700 (+700 par multiplicateur) */
     val ALBUM = Thresholds(silver = 50, gold = 100, platinum = 200, diamond = 700)
 
     data class Thresholds(val silver: Int, val gold: Int, val platinum: Int, val diamond: Int) {
@@ -34,14 +34,14 @@ object CertificationRules {
         fun required(cert: Certification): Int = when (cert.level) {
             CertLevel.SILVER -> silver
             CertLevel.GOLD -> gold
-            CertLevel.PLATINUM -> platinum
+            CertLevel.PLATINUM -> platinum * cert.multiplier
             CertLevel.DIAMOND -> diamond * cert.multiplier
         }
 
         /** Certification actuelle pour un nombre d'écoutes, ou null si en dessous d'Argent. */
         fun current(playCount: Int): Certification? = when {
             playCount >= diamond -> Certification(CertLevel.DIAMOND, playCount / diamond)
-            playCount >= platinum -> Certification(CertLevel.PLATINUM)
+            playCount >= platinum -> Certification(CertLevel.PLATINUM, minOf(playCount / platinum, 3))
             playCount >= gold -> Certification(CertLevel.GOLD)
             playCount >= silver -> Certification(CertLevel.SILVER)
             else -> null
@@ -53,7 +53,7 @@ object CertificationRules {
             else -> when (c.level) {
                 CertLevel.SILVER -> Certification(CertLevel.GOLD)
                 CertLevel.GOLD -> Certification(CertLevel.PLATINUM)
-                CertLevel.PLATINUM -> Certification(CertLevel.DIAMOND)
+                CertLevel.PLATINUM -> if (c.multiplier < 3) Certification(CertLevel.PLATINUM, c.multiplier + 1) else Certification(CertLevel.DIAMOND)
                 CertLevel.DIAMOND -> Certification(CertLevel.DIAMOND, c.multiplier + 1)
             }
         }
@@ -65,7 +65,8 @@ object CertificationRules {
             val out = mutableListOf<Certification>()
             if (playCount >= silver) out += Certification(CertLevel.SILVER)
             if (playCount >= gold) out += Certification(CertLevel.GOLD)
-            if (playCount >= platinum) out += Certification(CertLevel.PLATINUM)
+            var mp = 1
+            while (mp <= 3 && playCount >= platinum * mp) { out += Certification(CertLevel.PLATINUM, mp); mp++ }
             var m = 1
             while (playCount >= diamond * m) { out += Certification(CertLevel.DIAMOND, m); m++ }
             return out
