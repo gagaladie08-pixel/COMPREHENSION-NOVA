@@ -93,7 +93,7 @@ object BillboardDates {
         Period.WEEKLY -> "Semaine ${Dates.isoWeekNumber(anchor)} · ${anchor.format(shortFmt)} – ${anchor.plusDays(6).format(shortFmt)}"
         Period.MONTHLY -> anchor.format(monthFmt).replaceFirstChar { it.uppercase() }
         Period.YEARLY -> anchor.year.toString()
-        Period.GLOBAL -> "All-time · semaine ${Dates.isoWeekNumber(anchor)}"
+        Period.GLOBAL -> "All-time · à la semaine du ${anchor.format(shortFmt)}"
     }
 }
 

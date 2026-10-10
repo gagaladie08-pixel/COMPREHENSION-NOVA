@@ -47,8 +47,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.novastats.app.data.repository.HonorGuest
+import com.novastats.app.data.repository.HonorGuests
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.dao.ArtistCertRow
+import kotlinx.coroutines.flow.first
 import com.novastats.app.data.db.dao.PeriodEntityStats
 import com.novastats.app.data.db.dao.RankedTrack
 import com.novastats.app.data.db.dao.RankedTrackPos
@@ -63,10 +66,14 @@ import com.novastats.app.data.db.entity.HallOfFameEntity
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.domain.TitleNormalizer
+import com.novastats.app.ui.navigation.BillboardFocus
+import com.novastats.app.ui.navigation.NovaTab
+import com.novastats.app.ui.navigation.PendingNav
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
+import com.novastats.app.domain.Chart
 import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.domain.ChartHistory
 import com.novastats.app.domain.ChartHistoryStats
@@ -188,6 +195,14 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
     /** Série quotidienne (prévision du prochain palier). */
     var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
     val cert by remember { db.certificationDao().observe(trackId, EntityType.TRACK) }.collectAsStateWithLifecycle(initialValue = null)
+    // 🎤 Invités décisifs : sans les écoutes de leur version, cette certif n'existerait pas
+    var certGuests by remember { mutableStateOf<List<HonorGuest>>(emptyList()) }
+    LaunchedEffect(cert) {
+        val c = cert
+        certGuests = if (c != null && c.entityType == EntityType.TRACK)
+            runCatching { HonorGuests.decisiveForCert(db, trackId, c) }.getOrDefault(emptyList())
+        else emptyList()
+    }
 
     LaunchedEffect(trackId, period, track?.playCount, track?.originalTrackId) {
         val t = db.trackDao().getById(trackId) ?: return@LaunchedEffect
@@ -246,6 +261,9 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
             }
         }
         PopupSection(if (scoped) "🏅 Certification (cumul all time)" else "🏅 Certification")
+        certGuests.forEach { g ->
+            Text("🎤 avec ${g.artistName} (via « ${g.viaTitle} ») — cette certification n'existerait pas sans ses écoutes", color = theme.accent, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
         val lvl = cert?.let { c -> CertLevel.entries.firstOrNull { it.dbName == c.level } }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (lvl != null) MedalBadge(lvl, cert?.multiplier ?: 1, size = 58.dp)
@@ -258,7 +276,10 @@ private fun TrackPopup(trackId: Long, period: Period, onDismiss: () -> Unit) {
             }
         }
         PopupSection("📊 Positions par période")
-        PositionsTable(ranks)
+        PositionsTable(ranks) { per ->
+            BillboardFocus.request(BillboardFocus.Focus(Chart.HOT_100, per, trackId))
+            PendingNav.target.value = PendingNav.Target(PendingNav.TARGET_TAB, tabRoute = NovaTab.BILLBOARD.route)
+        }
         ChartRunSection(EntityType.TRACK, trackId, theme.primary)
         val nextCert = CertificationRules.TRACK.next(t.playCount)
         ForecastSection(t.playCount, CertificationRules.TRACK.required(nextCert), nextCert.label(), series, theme.primary, "🏅")
@@ -315,6 +336,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
     var periodTotal by remember { mutableStateOf(0) }
     var ranks by remember { mutableStateOf<Map<Period, Int?>>(emptyMap()) }
     var history by remember { mutableStateOf<List<PantheonHistoryEntity>>(emptyList()) }
+    var certRowsArtist by remember { mutableStateOf<List<ArtistCertRow>>(emptyList()) }
     var hof by remember { mutableStateOf<List<HallOfFameEntity>>(emptyList()) }
     /** Série quotidienne (prévision du prochain statut Panthéon). */
     var series by remember { mutableStateOf<List<DayCount>>(emptyList()) }
@@ -343,6 +365,7 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         safe("part") { periodPlays = db.artistDao().playsForPeriod(artistId, share.fromIso, share.toIso); periodTotal = db.dailyPlayDao().playsBetween(share.fromIso, share.toIso) }
         safe("positions") { ranks = Period.entries.associateWith { p -> val r = Dates.statsRangeFor(p); db.artistDao().rankForPeriod(artistId, r.fromIso, r.toIso) } }
         safe("série") { series = db.dailyPlayDao().seriesForArtist(artistId) }
+        safe("certifications") { certRowsArtist = db.certificationDao().artistCertRows().first().filter { it.artistId == artistId } }
     }
     val a = artist
     val status = PantheonStatus.fromDb(a?.pantheonStatus)
@@ -372,16 +395,59 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         ImagePickerBar(EntityType.ARTIST, a.artistId, a.name, null, a.photoUrl, a.photoSource, theme.glowSecondary, circle = true) { artist = db.artistDao().getById(artistId) }
         PopupSection("👑 Statut Panthéon", theme.glowSecondary)
         PopupInfoRow("Statut actuel", status?.let { "${it.emoji} ${it.label}" } ?: "Aucun (Star à 425 écoutes)", valueColor = statusColor)
-        history.forEach { h ->
-            val st = PantheonStatus.fromDb(h.status)
-            PopupInfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶", valueColor = st?.let { pantheonColor(it) } ?: theme.text)
+        if (history.isEmpty()) Text("Aucun statut atteint pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        else Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.clip(RoundedCornerShape(10.dp)).background(theme.surface).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("🎧", fontSize = 18.sp)
+                Text("débuts", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            history.forEachIndexed { i, h ->
+                val st = PantheonStatus.fromDb(h.status)
+                val c = st?.let { pantheonColor(it) } ?: theme.text
+                val stepMs = if (i == 0) h.timeToReachMs else h.dateReached - history[i - 1].dateReached
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 2.dp)) {
+                    Text("→", color = theme.textSecondary)
+                    Text(stepLabel(stepMs), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                Column(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.15f)).border(1.dp, c.copy(alpha = 0.5f), RoundedCornerShape(10.dp)).padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(st?.emoji ?: "👑", fontSize = 18.sp)
+                    Text(st?.label ?: h.status, color = c, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    Text(formatDate(h.dateReached), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text("${formatCount(h.playCountAtStatus)} ▶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        if (certRowsArtist.isNotEmpty()) {
+            val sum = summaryOf(certRowsArtist)
+            PopupSection("🏅 Certifications de l'artiste", theme.glowSecondary)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CertLevel.entries.forEach { l ->
+                    val nt = sum.tracksAtLeast(l); val na = sum.albumsAtLeast(l)
+                    if (nt + na > 0) Text("${l.emoji} $nt 🎵 · $na 💿", color = certColor(l), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            certRowsArtist.filter { it.entityType == "TRACK" }
+                .sortedByDescending { (CertLevel.entries.firstOrNull { x -> x.dbName == it.level }?.ordinal ?: 0) * 1000 + it.multiplier }
+                .take(3).forEach { r ->
+                    val l = CertLevel.entries.firstOrNull { it.dbName == r.level }
+                    PopupInfoRow("« ${r.name ?: "?"} »", (l?.let { "${it.emoji} ${it.label}" } ?: r.level) + (if (l == CertLevel.DIAMOND && r.multiplier > 1) " ×${r.multiplier}" else ""), valueColor = certColor(l))
+                }
         }
         if (hof.isNotEmpty()) {
             PopupSection("🏛️ Hall of Fame", theme.glowSecondary)
             hof.forEach { e -> PopupInfoRow(hofBadgeLabel(e.entryType) + " · " + e.periodType.lowercase().replaceFirstChar { it.uppercase() }, formatIso(e.entryDate)) }
         }
         PopupSection("📊 Positions par période", theme.glowSecondary)
-        PositionsTable(ranks)
+PositionsTable(ranks) { per ->
+            BillboardFocus.request(BillboardFocus.Focus(Chart.ARTIST_50, per, artistId))
+            PendingNav.target.value = PendingNav.Target(PendingNav.TARGET_TAB, tabRoute = NovaTab.BILLBOARD.route)
+        }
         ChartRunSection(EntityType.ARTIST, artistId, theme.glowSecondary)
         PantheonRules.next(status)?.let { next ->
             ForecastSection(a.playCount, next.playsThreshold, "${next.emoji} ${next.label}", series, statusColor, "👑")
@@ -658,7 +724,10 @@ private fun AlbumPopup(albumId: Long, period: Period, onDismiss: () -> Unit) {
             }
         }
         PopupSection("📊 Positions par période", theme.secondary)
-        PositionsTable(ranks)
+PositionsTable(ranks) { per ->
+            BillboardFocus.request(BillboardFocus.Focus(Chart.ALBUMS_75, per, albumId))
+            PendingNav.target.value = PendingNav.Target(PendingNav.TARGET_TAB, tabRoute = NovaTab.BILLBOARD.route)
+        }
         ChartRunSection(EntityType.ALBUM, albumId, theme.secondary)
         val nextCert = CertificationRules.ALBUM.next(al.playCount)
         ForecastSection(al.playCount, CertificationRules.ALBUM.required(nextCert), nextCert.label(), series, theme.secondary, "🏅")
@@ -734,7 +803,13 @@ private fun PantheonPopup(artistId: Long, onDismiss: () -> Unit) {
         if (det.history.isEmpty()) Text("Aucun statut atteint pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         det.history.forEach { h ->
             val st = PantheonStatus.fromDb(h.status)
-            PopupInfoRow("${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${formatDate(h.dateReached)} · ${formatCount(h.playCountAtStatus)} ▶", valueColor = st?.let { pantheonColor(it) } ?: theme.text)
+            // Temps mis pour atteindre ce statut depuis la première écoute de l'artiste.
+            val took = formatElapsed(h.timeToReachMs, h.dateReached)
+            PopupInfoRow(
+                "${st?.emoji ?: "•"} ${st?.label ?: h.status}",
+                listOfNotNull(formatDate(h.dateReached), took, "${formatCount(h.playCountAtStatus)} ▶").joinToString(" · "),
+                valueColor = st?.let { pantheonColor(it) } ?: theme.text
+            )
         }
 
         val certTracks = det.certs.filter { it.entityType == EntityType.TRACK }.sortedByDescending { certRank(it) }
@@ -748,10 +823,16 @@ private fun PantheonPopup(artistId: Long, onDismiss: () -> Unit) {
 
         PopupSection("📈 Courbe d'écoutes (cumul)", color)
         val cumul = remember(det.series) { var acc = 0; det.series.map { acc += it.playCount; acc.toFloat() } }
-        val thresholds = PantheonStatus.entries.filter { it.playsThreshold <= (a.playCount * 1.6f) || it == (status?.let { s -> PantheonStatus.entries.getOrNull(s.ordinal + 1) } ?: PantheonStatus.STAR) }
-            .map { it.playsThreshold.toFloat() to pantheonColor(it) }
+        /* Deux lignes seulement : le statut atteint et le suivant. Les cinq seuils (425 / 1 500 / 5 000 /
+         * 12 000…) s'empilaient en bas du graphique et leurs libellés se recouvraient. */
+        val nextStatus = status?.let { s -> PantheonStatus.entries.getOrNull(s.ordinal + 1) }
+        val thresholds = listOfNotNull(
+            status?.let { it.playsThreshold.toFloat() to pantheonColor(it) },
+            nextStatus?.let { it.playsThreshold.toFloat() to pantheonColor(it) }
+        )
+        val axisDates = remember(det.series) { det.series.map { axisDate(it.date) } }
         if (cumul.isEmpty()) Text("Pas encore de données.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(130.dp), color = if (mythic) HoloColors[3] else color, thresholds = thresholds)
+        else NovaCurveChart(cumul, Modifier.fillMaxWidth().height(140.dp), color = if (mythic) HoloColors[3] else color, thresholds = thresholds, xLabels = axisDates)
 
         PopupSection("📊 Positions Stats", color)
         PositionsTable(det.statsRanks)
@@ -767,8 +848,16 @@ private fun certRank(c: ArtistCertRow): Int = (CertLevel.entries.firstOrNull { i
 @Composable
 private fun CertLine(c: ArtistCertRow) {
     val lvl = CertLevel.entries.firstOrNull { it.dbName == c.level }
+    val theme = Nova.theme
+    // Temps mis par le titre / l'album pour atteindre ce palier (depuis sa première écoute).
+    val took = formatElapsed(c.timeToCertifyMs, c.certifiedAt.takeIf { it > 0 })
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(c.name ?: "—", color = Nova.theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(c.name ?: "—", color = theme.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            took?.let {
+                Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
         CertBadge(lvl, c.multiplier)
     }
 }
@@ -876,7 +965,8 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
             val maxPos = (det.positions.filterNotNull().maxOrNull() ?: 10).coerceAtLeast(5).toFloat()
             val peakIdx = s.peak?.let { pk -> det.anchors.indexOf(pk.date).takeIf { it >= 0 } }
             NovaCurveChart(det.positions.map { it?.toFloat() }, Modifier.fillMaxWidth().height(170.dp), color = color, invertY = true, minY = 1f, maxY = maxPos,
-                gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true)
+                gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true,
+                xLabels = det.anchors.map { axisDate(it.toString()) })
         }
 
         PopupSection("🎊 Historique complet de l'entrée", color)
@@ -1007,5 +1097,16 @@ private fun ForecastSection(
     } else {
         Text("Rythme récent trop faible pour une estimation.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
+    }
+}
+
+/** Durée courte entre deux statuts (« 34 j », « 5 mois »). */
+private fun stepLabel(ms: Long?): String {
+    ms ?: return "—"
+    val d = ms / 86_400_000L
+    return when {
+        d < 1 -> "< 1 j"
+        d < 90 -> "$d j"
+        else -> "${d / 30} mois"
     }
 }

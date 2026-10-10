@@ -45,6 +45,10 @@ class SettingsRepository(private val context: Context) {
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
         val AWARDS_UNLOCK_NOTIFIED = booleanPreferencesKey("awards_unlock_notified")
         val FIRST_SCROBBLE_NOTIFIED = booleanPreferencesKey("first_scrobble_notified")
+        val AGENT_SYNC = booleanPreferencesKey("agent_sync")
+        val AGENT_TOKEN = stringPreferencesKey("agent_token")
+        val AGENT_GIST_ID = stringPreferencesKey("agent_gist_id")
+        val AGENT_LAST_SYNC = longPreferencesKey("agent_last_sync")
     }
 
     /** Clés des notifications réelles de l'app (toutes actives par défaut, chacune désactivable séparément). */
@@ -171,6 +175,16 @@ class SettingsRepository(private val context: Context) {
     val fontScalePct: Flow<Int> = context.dataStore.data.map { it[Keys.FONT_SCALE] ?: 100 }
     suspend fun setFontScalePct(pct: Int) = context.dataStore.edit { it[Keys.FONT_SCALE] = pct.coerceIn(FONT_MIN, FONT_MAX) }
     suspend fun setAutoBackup(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_BACKUP] = v }
+
+    /* ---- 🤖 Synchro agent (temporaire — sera retirée) ---- */
+    val agentSync: Flow<Boolean> = context.dataStore.data.map { it[Keys.AGENT_SYNC] ?: false }
+    val agentToken: Flow<String?> = context.dataStore.data.map { it[Keys.AGENT_TOKEN] }
+    val agentGistId: Flow<String?> = context.dataStore.data.map { it[Keys.AGENT_GIST_ID] }
+    val agentLastSync: Flow<Long?> = context.dataStore.data.map { it[Keys.AGENT_LAST_SYNC] }
+    suspend fun setAgentSync(v: Boolean) = context.dataStore.edit { it[Keys.AGENT_SYNC] = v }
+    suspend fun setAgentToken(v: String) = context.dataStore.edit { it[Keys.AGENT_TOKEN] = v }
+    suspend fun setAgentGistId(v: String) = context.dataStore.edit { it[Keys.AGENT_GIST_ID] = v }
+    suspend fun setAgentLastSync(v: Long) = context.dataStore.edit { it[Keys.AGENT_LAST_SYNC] = v }
     suspend fun setLastBackupAt(v: Long) = context.dataStore.edit { it[Keys.LAST_BACKUP_AT] = v }
     suspend fun setHaptics(v: Boolean) = context.dataStore.edit { it[Keys.HAPTICS] = v }
     /** Icône du launcher qui suit le thème (bascule d'activity-alias, appliquée quand l'app passe en arrière-plan). */

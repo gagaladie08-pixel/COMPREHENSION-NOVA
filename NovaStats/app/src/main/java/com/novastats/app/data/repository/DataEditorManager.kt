@@ -35,7 +35,7 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
         const val RENAME = "RENAME"; const val MERGE = "MERGE"; const val COVER_CHANGE = "COVER_CHANGE"
         const val ALBUM_CHANGE = "ALBUM_CHANGE"; const val ARTIST_CHANGE = "ARTIST_CHANGE"; const val DELETE_PLAY = "DELETE_PLAY"; const val REVIEWED = "REVIEWED"
         const val REVIEW_FIX = "REVIEW_FIX"; const val REVIEW_IGNORE = "REVIEW_IGNORE"; const val ALBUM_SHARED = "ALBUM_SHARED"
-        const val LINK_VERSION = "LINK_VERSION"
+        const val LINK_VERSION = "LINK_VERSION"; const val GHOST_PURGE = "GHOST_PURGE"
     }
 
     private suspend fun log(type: String, entityType: String, entityId: Long, before: String?, after: String?, extra: String? = null) {
@@ -330,6 +330,57 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     }
 
     /* ---------------- Changer artiste / album d'un titre ---------------- */
+
+    /**
+     * 👻 Purge anti-récidive des fiches fantômes, en cascade :
+     *  1. détections abandonnées (CANCELLED > 24 h, PENDING > 14 j) ;
+     *  2. fiches titres sans aucune écoute ni version enfant ;
+     *  3. albums qui ne référencent plus rien ;
+     *  4. artistes qui ne référencent plus rien (liste blanche préservée).
+     * Chaque suppression passe par les deleteIfUnused éprouvés (contrôles FK complets).
+     * Une ligne d'audit est écrite MÊME quand rien n'est purgé, pour diagnostiquer à distance.
+     */
+    suspend fun purgeEmptyShells(keepArtists: List<String>): String = operationMutex.withLock {
+        _busy.value = true
+        try {
+            val now = System.currentTimeMillis()
+            val abandoned = db.scrobbleDao().deleteAbandoned(now - 24 * 3600_000L, now - 14 * 24 * 3600_000L)
+            var tracks = 0
+            for (t in db.trackDao().allList()) tracks += db.trackDao().deleteIfUnused(t.trackId)
+            var albums = 0
+            for (a in db.albumDao().all()) albums += db.albumDao().deleteIfUnused(a.albumId)
+            val keep = keepArtists.toSet()
+            var artists = 0
+            for (a in db.artistDao().byIds(db.artistDao().allIds())) {
+                if (a.name in keep) continue
+                artists += db.artistDao().deleteIfUnused(a.artistId)
+            }
+            val summary = "$abandoned détection(s) abandonnée(s) · $tracks titre(s) · $albums album(s) · $artists artiste(s) vide(s)"
+            com.novastats.app.util.RebuildAudit.context?.let {
+                com.novastats.app.util.RebuildAudit.write(it, "👻 Purge fantômes : $summary")
+            }
+            if (abandoned + tracks + albums + artists > 0) {
+                log(Type.GHOST_PURGE, "SYSTEM", 0L, null, summary, "purge coquilles")
+                library?.clearCaches()
+                _status.value = "👻 Coquilles purgées · recalcul…"
+                rebuilder.rebuildAll(fullBillboard = true)
+                _status.value = "✅ $summary purgé(s)"
+            }
+            summary
+        } finally { _busy.value = false }
+    }
+
+    /** 🎭 Retire des crédits de featuring erronés (lot) — un seul recalcul, une entrée d'historique par titre. */
+    suspend fun removeArtistCredits(entries: List<Pair<Long, Long>>, artistName: String) = perform("${entries.size} crédit(s) featuring retiré(s)", rebuild = true) {
+        var removed = 0
+        for ((trackId, artistId) in entries) {
+            val t = db.trackDao().getById(trackId) ?: continue
+            if (t.artistId == artistId) continue
+            removed += db.trackLinkDao().removeArtistCredit(trackId, artistId)
+            log(Type.ARTIST_CHANGE, "TRACK", trackId, artistName, null, "crédit featuring retiré de « ${t.title} »")
+        }
+        removed
+    }
 
     suspend fun setTrackArtist(trackId: Long, artistId: Long) = perform("Artiste du titre modifié", rebuild = true) {
         db.withTransaction { setTrackArtistInternal(trackId, artistId) }

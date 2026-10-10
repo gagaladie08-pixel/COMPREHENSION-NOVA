@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -180,12 +180,26 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v10 : index manquants sur les titres — `original_track_id` (repli des versions, liens de versions)
+         *  et `first_played_at` (rang de découverte). Les agrégats sont désormais calculés en GROUP BY,
+         *  mais ces deux colonnes restaient parcourues par des scans complets à chaque recalcul. */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tracks_original_track_id ON tracks(original_track_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tracks_first_played_at ON tracks(first_played_at)")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
-                .fallbackToDestructiveMigrationOnDowngrade()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                // Volontairement PAS de fallbackToDestructiveMigrationOnDowngrade() : il réinitialisait
+                // la base au moindre retour de version. Installer un build plus ancien que la base
+                // effaçait donc les écoutes en silence — plusieurs milliers, irrécupérables.
+                // Les 9 migrations couvrent v1 → v10 : la montée de version est toujours possible,
+                // et un downgrade échoue désormais à l'ouverture au lieu de tout détruire.
                 .build()
                 .also { instance = it }
         }
