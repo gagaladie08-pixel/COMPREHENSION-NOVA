@@ -59,13 +59,22 @@ object AgentSync {
             "Miroir complet : nova_backup.b64 (gzip+base64, ${gz.size / 1024} Ko)\n" +
             "Système temporaire — synchro agent."
         val gistId = s.agentGistId.first().orEmpty()
+        // Ne purger l'ancien fichier brut que s'il existe encore : demander la suppression d'un fichier
+        // absent fait rejeter tout le PATCH (HTTP 422).
+        val oldFileExists = if (gistId.isEmpty()) false else runCatching {
+            val g = client.newCall(
+                Request.Builder().url("https://api.github.com/gists/$gistId")
+                    .header("Authorization", "Bearer $token").header("Accept", "application/vnd.github+json").build()
+            ).execute()
+            g.isSuccessful && g.body?.string().orEmpty().contains("\"nova_backup.json\"")
+        }.getOrDefault(false)
         val payload = buildJsonObject {
             put("description", "NovaStats — miroir agent (temporaire)")
             put("public", false)
             putJsonObject("files") {
                 putJsonObject("nova_status.txt") { put("content", statusTxt) }
                 putJsonObject("nova_backup.b64") { put("content", b64) }
-                if (gistId.isNotEmpty()) put("nova_backup.json", JsonNull) // purge l'ancien fichier non compressé (> 1 Mo)
+                if (oldFileExists) put("nova_backup.json", JsonNull) // purge l'ancien fichier non compressé (> 1 Mo)
             }
         }.toString()
         val request = (
@@ -80,7 +89,7 @@ object AgentSync {
         if (!resp.isSuccessful) {
             val hint = when (resp.code) {
                 401, 403 -> " — token invalide ou sans le scope « gist »"
-                422 -> " — export trop volumineux pour l'API Gist (> 10 Mo)"
+                422 -> " — " + body.take(140) // raison exacte renvoyée par GitHub (fichier absent, payload invalide…)
                 else -> ""
             }
             return@withContext "⚠️ Synchro échouée (HTTP ${resp.code}$hint)"
