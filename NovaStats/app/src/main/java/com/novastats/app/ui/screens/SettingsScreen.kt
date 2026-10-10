@@ -791,6 +791,47 @@ private fun DataPage() {
             }
         }
 
+        SectionTitle("🤖 Synchro agent (temporaire)")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                val agentOn by settings.agentSync.collectAsStateWithLifecycle(initialValue = false)
+                val agentTokenSaved by settings.agentToken.collectAsStateWithLifecycle(initialValue = null)
+                val agentGist by settings.agentGistId.collectAsStateWithLifecycle(initialValue = null)
+                val agentLast by settings.agentLastSync.collectAsStateWithLifecycle(initialValue = null)
+                var tokenInput by remember(agentTokenSaved) { mutableStateOf(agentTokenSaved.orEmpty()) }
+                ToggleRow(
+                    "Synchroniser vers un Gist privé GitHub",
+                    "Envoie l'export COMPLET (écoutes, titres, artistes, albums, certifications, Panthéon, Hall of Fame) après chaque recalcul de stats, au plus une fois toutes les 10 min. Fonction temporaire pour peaufiner l'app.",
+                    agentOn
+                ) { scope.launch { settings.setAgentSync(it) } }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tokenInput, onValueChange = { tokenInput = it }, singleLine = true,
+                    label = { Text("Token GitHub (scope : gist)") }, modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = { scope.launch { settings.setAgentToken(tokenInput.trim()); status = "🔑 Token enregistré" } },
+                    enabled = tokenInput.trim() != agentTokenSaved.orEmpty(),
+                    modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("💾 Enregistrer le token") }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Dernière synchro : ${agentLast?.let { formatDate(it) } ?: "jamais"}${agentGist?.let { " · Gist ${it.take(8)}…" } ?: ""}",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = { scope.launch { status = "🔄 Synchro en cours…"; status = com.novastats.app.service.AgentSync.push(app, force = true) ?: "Synchro impossible" } },
+                    enabled = scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
+                ) { Text("🔄 Synchroniser maintenant") }
+                Text(
+                    "Le token n'est envoyé qu'à api.github.com. En fin d'utilisation : désactive l'interrupteur, efface le token, puis révoque-le sur github.com → Settings → Developer settings.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+
         SectionTitle("🔧 Maintenance")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
