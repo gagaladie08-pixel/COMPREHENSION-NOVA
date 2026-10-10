@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.NovaStatsApp
@@ -103,6 +104,8 @@ fun StatsScreen() {
         if (period == Period.GLOBAL) db.albumDao().topAllTime(TOP_LIMIT) else db.albumDao().topForPeriod(range.fromIso, range.toIso, TOP_LIMIT)
     }.collectAsStateWithLifecycle(initialValue = emptyList())
 
+
+
     val q = TitleNormalizer.normalizeKey(query)
     fun matches(vararg fields: String?) = q.isBlank() || fields.any { it != null && TitleNormalizer.normalizeKey(it).contains(q) }
 
@@ -115,14 +118,19 @@ fun StatsScreen() {
         return
     }
 
-    val filteredTracks = remember(tracks, q) { tracks.mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
-    val filteredArtists = remember(artists, q) { artists.mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
-    val filteredAlbums = remember(albums, q) { albums.mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
+    // ▶ écoutes / ⏱ durées : même classement, autre ordre — le tri par minutes révèle d'autres gagnants.
+    var byDuration by remember { mutableStateOf(false) }
+    val filteredTracks = remember(tracks, q, byDuration) { (if (byDuration) tracks.sortedByDescending { it.periodDurationMs } else tracks).mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
+    val filteredArtists = remember(artists, q, byDuration) { (if (byDuration) artists.sortedByDescending { it.periodDurationMs } else artists).mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
+    val filteredAlbums = remember(albums, q, byDuration) { (if (byDuration) albums.sortedByDescending { it.periodDurationMs } else albums).mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
 
     val total = when (tab) { 0 -> filteredTracks.size; 1 -> filteredArtists.size; else -> filteredAlbums.size }
+    // Le podium met en avant le top 3 : la liste démarre alors à la 4ᵉ place (pas de doublon).
+    val podiumOn = q.isBlank() && total >= 3
+    val listTotal = if (podiumOn) total - 3 else total
     // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de sous-onglet / période / recherche
     var visible by remember(tab, period, q) { mutableIntStateOf(TOP_INITIAL) }
-    val shown = minOf(visible, total)
+    val shown = minOf(visible, listTotal)
 
     val listState = rememberLazyListState()
     // Changement de période : on remonte en haut pour revoir le bandeau
@@ -152,10 +160,20 @@ fun StatsScreen() {
                     )
                 )
                 Text(
-                    periodCaption(period, range) + if (period == Period.GLOBAL) " · Top $TOP_LIMIT" else "",
+                    periodCaption(period, range) + if (period == Period.GLOBAL) " · Top $TOP_LIMIT ${if (byDuration) "par durées" else "par écoutes"}" else "",
                     color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
                 )
+                // 🎯 Dominance du n°1 : quand un titre écrase la période, on le dit.
+                if (q.isBlank() && summary.playCount > 0) {
+                    val t1 = tracks.firstOrNull()
+                    val share = if (t1 != null) t1.periodPlays * 100 / summary.playCount else 0
+                    if (t1 != null && share >= 10) Text(
+                        "🎯 « ${t1.track.title} » pèse $share % de tes écoutes sur la période",
+                        color = theme.textSecondary.copy(alpha = 0.9f), style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp), textAlign = TextAlign.Center
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
@@ -214,6 +232,27 @@ fun StatsScreen() {
                         )
                     )
                 }
+                SortToggle(byDuration) { byDuration = it }
+                Spacer(Modifier.height(2.dp))
+            }
+        }
+
+        /* ---------- Podium 🥇🥈🥉 (masqué pendant une recherche) ---------- */
+        if (podiumOn) {
+            item(key = "podium") {
+                PodiumRow(
+                    when (tab) {
+                        0 -> filteredTracks.take(3).map { (pos, t) ->
+                            PodiumItem(pos, t.track.title, t.artistName, t.periodPlays, t.track.coverUrl, false) { detail = DetailTarget.Track(t.track.trackId, period) }
+                        }
+                        1 -> filteredArtists.take(3).map { (pos, a) ->
+                            PodiumItem(pos, a.artist.name, null, a.periodPlays, a.artist.photoUrl, true) { detail = DetailTarget.Artist(a.artist.artistId, period) }
+                        }
+                        else -> filteredAlbums.take(3).map { (pos, al) ->
+                            PodiumItem(pos, al.album.title, al.artistName, al.periodPlays, al.album.coverUrl, false) { detail = DetailTarget.Album(al.album.albumId, period) }
+                        }
+                    }
+                )
             }
         }
 
@@ -226,31 +265,69 @@ fun StatsScreen() {
                 }
             }
         } else when (tab) {
-            0 -> itemsIndexed(filteredTracks.take(shown), key = { _, (_, t) -> "t" + t.track.trackId }) { _, (pos, t) ->
+            // Liste démarrée après le podium (drop 3) quand il est affiché ; les positions restent réelles.
+            0 -> itemsIndexed((if (podiumOn) filteredTracks.drop(3) else filteredTracks).take(shown), key = { _, (_, t) -> "t" + t.track.trackId }) { _, (pos, t) ->
                 RankRow(
                     pos, t.track.title, listOfNotNull(t.artistName, t.albumTitle).joinToString(" · "), t.periodPlays, t.periodDurationMs, t.track.coverUrl,
                     onLongClick = { detail = DetailTarget.Track(t.track.trackId, period) }
                 )
             }
-            1 -> itemsIndexed(filteredArtists.take(shown), key = { _, (_, a) -> "a" + a.artist.artistId }) { _, (pos, a) ->
+            1 -> itemsIndexed((if (podiumOn) filteredArtists.drop(3) else filteredArtists).take(shown), key = { _, (_, a) -> "a" + a.artist.artistId }) { _, (pos, a) ->
                 val sub = PantheonStatus.fromDb(a.artist.pantheonStatus)?.let { "${it.emoji} ${it.label.uppercase()}" }
                 RankRow(
                     pos, a.artist.name, sub, a.periodPlays, a.periodDurationMs, a.artist.photoUrl, circle = true,
                     onLongClick = { detail = DetailTarget.Artist(a.artist.artistId, period) }
                 )
             }
-            else -> itemsIndexed(filteredAlbums.take(shown), key = { _, (_, al) -> "al" + al.album.albumId }) { _, (pos, al) ->
+            else -> itemsIndexed((if (podiumOn) filteredAlbums.drop(3) else filteredAlbums).take(shown), key = { _, (_, al) -> "al" + al.album.albumId }) { _, (pos, al) ->
                 RankRow(
                     pos, al.album.title, al.artistName, al.periodPlays, al.periodDurationMs, al.album.coverUrl,
                     onLongClick = { detail = DetailTarget.Album(al.album.albumId, period) }
                 )
             }
         }
-        if (total > shown) item(key = "more") { LoadMoreButton(total - shown) { visible += TOP_STEP } }
+        if (listTotal > shown) item(key = "more") { LoadMoreButton(listTotal - shown) { visible += TOP_STEP } }
         item(key = "bottom") { Box(Modifier.height(24.dp)) }
     }
     }
 
+}
+
+private data class PodiumItem(
+    val pos: Int, val title: String, val subtitle: String?, val plays: Int,
+    val coverUrl: String?, val circle: Boolean, val onClick: () -> Unit
+)
+
+/** 🥇🥈🥉 Le top 3 en cartes, ordre podium [2ᵉ, 1ᵉʳ, 3ᵉ] — le n°1 plus grand au centre. */
+@Composable
+private fun PodiumRow(items: List<PodiumItem>) {
+    val theme = Nova.theme
+    if (items.isEmpty()) return
+    val order = listOfNotNull(items.getOrNull(1), items.getOrNull(0), items.getOrNull(2))
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom
+    ) {
+        order.forEach { it ->
+            val first = it.pos == 1
+            Column(
+                Modifier.weight(1f).clickable { it.onClick() },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(if (first) "🥇" else if (it.pos == 2) "🥈" else "🥉", fontSize = if (first) 26.sp else 20.sp)
+                Spacer(Modifier.height(4.dp))
+                CoverArt(it.coverUrl, it.title, circle = it.circle, size = if (first) 84 else 64)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    it.title, color = theme.text, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = if (first) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center
+                )
+                Text("${formatCount(it.plays)} ▶", color = theme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }
 
 private fun elapsedDays(range: com.novastats.app.domain.DateRange): Int {

@@ -55,6 +55,8 @@ import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.produceState
+import com.novastats.app.data.repository.HonorGuest
+import com.novastats.app.data.repository.HonorGuests
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 
@@ -189,6 +191,20 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
         animationSpec = infiniteRepeatable(tween(if (global) 1400 else 2200), RepeatMode.Reverse), label = "glowAlpha"
     )
     val coverSize = if (global) 96 else 72
+    // 🎤 Invités décisifs : sans les écoutes de leur version, cette consécration n'existerait pas
+    val hofDb = (LocalContext.current.applicationContext as NovaStatsApp).database
+    val decisiveGuests by produceState(initialValue = emptyList<HonorGuest>(), key1 = card.entityId) {
+        if (card.entityType != EntityType.TRACK) return@produceState
+        value = runCatching {
+            card.entries.flatMap { e ->
+                when (e.h.periodType) {
+                    Period.GLOBAL.dbName -> HonorGuests.decisiveOnDay(hofDb, card.entityId, e.h.entryDate)
+                    Period.MONTHLY.dbName -> { val r = Dates.monthOf(Dates.parse(e.h.entryDate)); HonorGuests.decisiveInRange(hofDb, card.entityId, r.fromIso, r.toIso) }
+                    else -> { val r = Dates.weekOf(Dates.parse(e.h.entryDate)); HonorGuests.decisiveInRange(hofDb, card.entityId, r.fromIso, r.toIso) }
+                }
+            }.distinctBy { it.artistId }
+        }.getOrDefault(emptyList())
+    }
     // Global → carte 100 % de la largeur (pas de marge), glow intense + particules étoilées
     val cardShape = RoundedCornerShape(if (global) 0.dp else 16.dp)
     Column(
@@ -237,6 +253,9 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
         Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("▶ ${formatCount(card.playsAtEntry)} écoutes à l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             certificationLabel(cert)?.let { Text(it, color = theme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold) }
+        }
+        decisiveGuests.forEach { g ->
+            Text("🎤 ${g.artistName} (via « ${g.viaTitle} ») — décisif(ve) pour cette consécration", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
         }
     }
 }

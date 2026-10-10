@@ -2,4 +2,7 @@
 <paths>
     <!-- Cartes partageables (Nova Rewind, etc.) rendues dans le cache de l'app -->
     <cache-path name="share" path="share/" />
+    <!-- Sauvegardes JSON : Android/data/<pkg>/files/backups/ — partagé pour les sortir de l'appareil,
+         car ce dossier est supprimé à la désinstallation. -->
+    <external-files-path name="backups" path="backups/" />
 </paths>

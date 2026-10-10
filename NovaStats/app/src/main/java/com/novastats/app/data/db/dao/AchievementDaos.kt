@@ -72,7 +72,11 @@ data class ArtistCertRow(
     @androidx.room.ColumnInfo(name = "entity_id") val entityId: Long,
     val level: String,
     val multiplier: Int,
-    val name: String?
+    val name: String?,
+    /** Date d'obtention du palier — affichée dans le pop-up Panthéon. */
+    @androidx.room.ColumnInfo(name = "certified_at") val certifiedAt: Long = 0,
+    /** Temps mis pour atteindre le palier depuis la première écoute (null si inconnu). */
+    @androidx.room.ColumnInfo(name = "time_to_certify_ms") val timeToCertifyMs: Long? = null
 )
 
 /** Ligne d'un record (Top 10) avec les infos d'affichage de l'entité. */
@@ -100,9 +104,9 @@ interface CertificationDao {
     @Query("SELECT al.album_id AS entity_id, al.title AS name, IFNULL(a.name, 'Artistes variés') AS subtitle, al.cover_url AS image_url, al.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id LEFT JOIN certifications c ON c.entity_id = al.album_id AND c.entity_type = 'ALBUM' WHERE al.play_count > 0 ORDER BY al.play_count DESC")
     fun albumCandidates(): Flow<List<CertCandidate>>
     @Query("SELECT level, COUNT(*) AS n FROM certifications WHERE entity_type = :type GROUP BY level") fun countsByLevel(type: String): Flow<List<LevelCount>>
-    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id IS NOT NULL")
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id IS NOT NULL")
     fun artistCertRows(): Flow<List<ArtistCertRow>>
-    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
     suspend fun certsOfArtist(artistId: Long): List<ArtistCertRow>
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM certification_history h ORDER BY h.certified_at DESC LIMIT :limit")
@@ -255,6 +259,53 @@ interface RecordDao {
         """
     )
     suspend fun tiedAt(type: String, period: String?, category: String, sub: String?, value: Double): Int
+
+    /** 🕰️ Records établis triés par date d'établissement (fil chronologique + éphéméride + cérémonie). */
+    @Query("SELECT * FROM records_cache WHERE value_date IS NOT NULL ORDER BY value_date DESC LIMIT :limit")
+    suspend fun recentByValueDate(limit: Int): List<RecordCacheEntity>
+
+    /** 🎯 Détenteur actuel d'un record typé (bloc « en direct »). */
+    @Query("SELECT * FROM records_cache WHERE record_type = :type AND period_type = :period AND category = :category ORDER BY value DESC LIMIT 1")
+    suspend fun holder(type: String, period: String, category: String): RecordCacheEntity?
+
+    /** 🕰️ Records établis AVEC noms, triés par date d'établissement (fil cliquable + page « tombés »). */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.value_date IS NOT NULL
+        ORDER BY r.value_date DESC LIMIT :limit
+        """
+    )
+    suspend fun recentRows(limit: Int): List<RecordRow>
+
+    /** 🎯 Toutes les lignes cachées des records demandés (page « en direct » des majeurs). */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.record_type IN (:types)
+        """
+    )
+    suspend fun rowsForTypes(types: List<String>): List<RecordRow>
 
     /** Toutes les lignes de cache d'une entité (tous records / périodes / sous-sections) — contexte de la fiche. */
     @Query("SELECT * FROM records_cache WHERE category = :category AND entity_id = :entityId ORDER BY record_type, period_type, subcategory")
