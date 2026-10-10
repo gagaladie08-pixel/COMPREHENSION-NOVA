@@ -332,27 +332,41 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
     /* ---------------- Changer artiste / album d'un titre ---------------- */
 
     /**
-     * 👻 Purge anti-récidive des fiches fantômes : détections abandonnées (CANCELLED > 24 h,
-     * PENDING > 14 j), puis albums et artistes qui ne référencent plus rien. Liste blanche
-     * d'artistes préservés passée par l'appelant. Un seul recalcul, une seule trace.
+     * 👻 Purge anti-récidive des fiches fantômes, en cascade :
+     *  1. détections abandonnées (CANCELLED > 24 h, PENDING > 14 j) ;
+     *  2. fiches titres sans aucune écoute ni version enfant ;
+     *  3. albums qui ne référencent plus rien ;
+     *  4. artistes qui ne référencent plus rien (liste blanche préservée).
+     * Chaque suppression passe par les deleteIfUnused éprouvés (contrôles FK complets).
+     * Une ligne d'audit est écrite MÊME quand rien n'est purgé, pour diagnostiquer à distance.
      */
-    suspend fun purgeEmptyShells(keepArtists: List<String>): Triple<Int, Int, Int> = operationMutex.withLock {
+    suspend fun purgeEmptyShells(keepArtists: List<String>): String = operationMutex.withLock {
         _busy.value = true
         try {
             val now = System.currentTimeMillis()
             val abandoned = db.scrobbleDao().deleteAbandoned(now - 24 * 3600_000L, now - 14 * 24 * 3600_000L)
-            val albums = db.albumDao().deleteAllUnused()
-            val artists = db.artistDao().deleteAllUnusedExcept(keepArtists)
-            if (abandoned + albums + artists > 0) {
-                log(Type.GHOST_PURGE, "SYSTEM", 0L, null,
-                    "$abandoned détection(s) abandonnée(s) · $albums album(s) vide(s) · $artists artiste(s) vide(s)",
-                    "purge coquilles")
+            var tracks = 0
+            for (t in db.trackDao().allList()) tracks += db.trackDao().deleteIfUnused(t.trackId)
+            var albums = 0
+            for (a in db.albumDao().all()) albums += db.albumDao().deleteIfUnused(a.albumId)
+            val keep = keepArtists.toSet()
+            var artists = 0
+            for (a in db.artistDao().byIds(db.artistDao().allIds())) {
+                if (a.name in keep) continue
+                artists += db.artistDao().deleteIfUnused(a.artistId)
+            }
+            val summary = "$abandoned détection(s) abandonnée(s) · $tracks titre(s) · $albums album(s) · $artists artiste(s) vide(s)"
+            com.novastats.app.util.RebuildAudit.context?.let {
+                com.novastats.app.util.RebuildAudit.write(it, "👻 Purge fantômes : $summary")
+            }
+            if (abandoned + tracks + albums + artists > 0) {
+                log(Type.GHOST_PURGE, "SYSTEM", 0L, null, summary, "purge coquilles")
                 library?.clearCaches()
                 _status.value = "👻 Coquilles purgées · recalcul…"
                 rebuilder.rebuildAll(fullBillboard = true)
-                _status.value = "✅ $abandoned détection(s), $albums album(s), $artists artiste(s) purgé(s)"
+                _status.value = "✅ $summary purgé(s)"
             }
-            Triple(abandoned, albums, artists)
+            summary
         } finally { _busy.value = false }
     }
 

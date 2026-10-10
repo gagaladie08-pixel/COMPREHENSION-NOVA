@@ -517,23 +517,6 @@ interface ArtistDao {
     fun allByPlays(): Flow<List<ArtistEntity>>
 
     @Query("SELECT artist_id FROM artists") suspend fun allIds(): List<Long>
-
-    /**
-     * 👻 Purge en lot : artistes sans titre, sans crédit, sans album et sans écoute — sauf liste blanche.
-     * NB : NOT EXISTS sur une table de valeurs (et non « name NOT IN ») : en SQLite, NOT IN sur une
-     * sous-requête vide vaut NULL et ne supprimerait jamais rien.
-     */
-    @Query(
-        """
-        DELETE FROM artists
-        WHERE NOT EXISTS (SELECT 1 FROM (SELECT :keep AS k) WHERE k = artists.name)
-          AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = artists.artist_id)
-          AND NOT EXISTS (SELECT 1 FROM track_artists ta WHERE ta.artist_id = artists.artist_id)
-          AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.artist_id = artists.artist_id)
-          AND NOT EXISTS (SELECT 1 FROM scrobbles s WHERE s.artist_id = artists.artist_id)
-        """
-    )
-    suspend fun deleteAllUnusedExcept(keep: List<String>): Int
     @Query("DELETE FROM artists WHERE artist_id = :id AND NOT EXISTS (SELECT 1 FROM tracks WHERE artist_id = :id) AND NOT EXISTS (SELECT 1 FROM track_artists WHERE artist_id = :id) AND NOT EXISTS (SELECT 1 FROM albums WHERE artist_id = :id) AND NOT EXISTS (SELECT 1 FROM scrobbles WHERE artist_id = :id)")
     suspend fun deleteIfUnused(id: Long): Int
 
@@ -820,17 +803,6 @@ interface AlbumDao {
     fun mostPlayed(limit: Int = 100): Flow<List<RankedAlbum>>
 
     @Query("SELECT * FROM albums") suspend fun all(): List<AlbumEntity>
-
-    /** 👻 Purge en lot : albums sans titre, sans lien multi-artistes et sans aucune écoute (même abandonnée). */
-    @Query(
-        """
-        DELETE FROM albums
-        WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = albums.album_id)
-          AND NOT EXISTS (SELECT 1 FROM track_albums ta WHERE ta.album_id = albums.album_id)
-          AND NOT EXISTS (SELECT 1 FROM scrobbles s WHERE s.album_id = albums.album_id)
-        """
-    )
-    suspend fun deleteAllUnused(): Int
 
     /** 🧟 Purge les coquilles : albums sans AUCUN titre rattaché et sans AUCUNE écoute (après réattribution fantôme). */
     @Query(
