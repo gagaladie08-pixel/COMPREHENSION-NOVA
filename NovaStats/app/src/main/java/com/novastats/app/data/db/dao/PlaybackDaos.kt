@@ -286,19 +286,6 @@ interface ScrobbleDao {
 
     @Query("SELECT * FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allConfirmedOrdered(): List<ScrobbleEntity>
-}
-
-@Dao
-interface DailyPlayDao {
-    @Upsert
-    suspend fun upsert(dailyPlay: DailyPlayEntity)
-
-    @Query("SELECT * FROM daily_plays WHERE track_id = :trackId AND date = :date")
-    suspend fun get(trackId: Long, date: String): DailyPlayEntity?
-
-    @Query("DELETE FROM daily_plays")
-    suspend fun clear()
-
     /**
      * 🧟 Albums fantômes : les écoutes pointant vers un album qui n'a PLUS aucun titre rattaché
      * sont réattribuées à l'album ACTUEL de leur titre (jamais forcées si le titre n'a pas d'album).
@@ -311,6 +298,19 @@ interface DailyPlayDao {
         """
     )
     suspend fun reattachOrphanAlbumPlays(): Int
+
+}
+
+@Dao
+interface DailyPlayDao {
+    @Upsert
+    suspend fun upsert(dailyPlay: DailyPlayEntity)
+
+    @Query("SELECT * FROM daily_plays WHERE track_id = :trackId AND date = :date")
+    suspend fun get(trackId: Long, date: String): DailyPlayEntity?
+
+    @Query("DELETE FROM daily_plays")
+    suspend fun clear()
 
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
