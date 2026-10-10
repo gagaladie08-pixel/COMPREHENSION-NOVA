@@ -72,6 +72,8 @@ class NovaStatsApp : Application() {
             runCatching { com.novastats.app.util.StartupRepair.run(this@NovaStatsApp) }
             // 🐢 Une fois la réparation tentée : on alerte si le dernier recalcul était anormalement lent.
             runCatching { com.novastats.app.util.StartupHealthAlert.run(this@NovaStatsApp) }
+            // 🧹 Nettoyage automatique des pollutions (suffixes d'interface, fausses chansons, crédits pris comme titres).
+            runCatching { com.novastats.app.data.repository.LibraryCleanup.run(this@NovaStatsApp) }
         }
         com.novastats.app.service.Watchdog.schedule(this)
         com.novastats.app.ui.theme.IconSwitcher.install(this)

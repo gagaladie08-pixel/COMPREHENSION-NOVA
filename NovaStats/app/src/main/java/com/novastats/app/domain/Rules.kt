@@ -158,6 +158,44 @@ object TitleNormalizer {
         "audio", "video", "mv", "m/v", "hd", "4k"
     )
 
+    /**
+     * 🧹 Suffixes d'interface des lecteurs collés au nom d'artiste (« Burna Boy • Recommandé Pour Vous »).
+     * Liste blanche : on ne coupe qu'après un « • » suivi d'un motif connu — jamais un vrai nom.
+     */
+    val UI_ARTIST_SUFFIXES = listOf(
+        "recommandé pour vous", "recommandes pour vous", "suggestions", "à suivre", "a suivre",
+        "vos titres les plus écoutés", "vos titres les plus ecoutes", "en vogue", "tendances",
+        "recommended for you", "mixed for you", "your top songs", "related artists"
+    )
+
+    /** Retire un suffixe d'interface du nom d'artiste (« Burna Boy • Recommandé Pour Vous » → « Burna Boy »). */
+    fun cleanArtistName(raw: String): String {
+        val name = raw.trim()
+        val idx = name.indexOfLast('•')
+        if (idx <= 0) return name
+        val suffix = name.substring(idx + 1).trim().lowercase()
+        return if (UI_ARTIST_SUFFIXES.any { suffix == it || suffix.startsWith(it) }) name.substring(0, idx).trim().ifBlank { name } else name
+    }
+
+    private val episodeRegex = Regex("\\bs\\d{1,2}\\s?e\\d{1,2}\\b")
+    private val fileExtRegex = Regex("\\.(mp3|m4a|flac|ogg|webm|mkv)\\b")
+
+    /**
+     * 🗂️ Empreinte d'un nom de fichier/émission brut (vidéo Mnet, épisode S01 E01, .mp3…) — pas un vrai titre.
+     * Score conservateur : il faut au moins deux indices (ou un indice fort) pour envoyer en quarantaine.
+     */
+    fun isFileDump(title: String): Boolean {
+        val t = title.lowercase()
+        var score = 0
+        if ("♬" in title || "mnet" in t || episodeRegex.containsMatchIn(t)) score += 2
+        if (t.count { it == '_' } >= 2) score++
+        if ("@" in t) score++
+        if (fileExtRegex.containsMatchIn(t)) score += 2
+        if ("http" in t || "www." in t) score += 2
+        if ("회_" in title || "방송" in title) score++
+        return score >= 2
+    }
+
     /** Éditions d'album fusionnées avec l'album principal (Deluxe, Expanded, Japan/UK Edition, Platinum, International…). */
     val ALBUM_EDITION_KEYWORDS = listOf(
         "deluxe", "expanded", "edition", "édition", "version", "remaster", "remastered", "anniversary", "bonus",
@@ -308,6 +346,8 @@ object TitleNormalizer {
             .map { it.trim().trim('(', ')', '[', ']') }
             .filter { it.isNotBlank() }
             .map { part -> Regex("\u0001(\\d+)\u0001").replace(part) { m -> tokens[m.groupValues[1].toInt()] }.trim() }
+            .filter { it.isNotBlank() }
+            .map { cleanArtistName(it) }
             .filter { it.isNotBlank() }
             .distinctBy { normalizeKey(it) }
     }
