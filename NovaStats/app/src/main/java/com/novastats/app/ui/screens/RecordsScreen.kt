@@ -28,6 +28,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -144,7 +145,14 @@ fun RecordsScreen() {
                 item {
                     OutlinedTextField(
                         value = query, onValueChange = { query = it }, singleLine = true,
-                        placeholder = { Text("🔍 Un titre, un artiste, un album… dans tous les records") },
+                        placeholder = { Text("🔍 Un titre, un artiste, un album… dans tous les records", color = theme.textSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = theme.primary,
+                            unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f),
+                            focusedTextColor = theme.text,
+                            unfocusedTextColor = theme.text,
+                            cursorColor = theme.primary
+                        ),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                     )
                     Spacer(Modifier.height(8.dp))
