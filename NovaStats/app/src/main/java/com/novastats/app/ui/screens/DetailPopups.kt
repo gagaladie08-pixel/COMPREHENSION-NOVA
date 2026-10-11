@@ -139,7 +139,7 @@ fun CertBadge(level: CertLevel?, multiplier: Int = 1, fallback: String = "Non ce
 }
 
 @Composable
-fun DetailPopupHost(target: DetailTarget?, onDismiss: () -> Unit, onOpen: (DetailTarget) -> Unit = {}) {
+fun DetailPopupHost(target: DetailTarget?, onOpen: (DetailTarget) -> Unit = {}, onDismiss: () -> Unit) {
     if (target == null) return
     when (target) {
         is DetailTarget.Track -> TrackPopup(target.id, target.period, onDismiss)

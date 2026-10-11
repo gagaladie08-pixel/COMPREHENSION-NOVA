@@ -277,7 +277,7 @@ fun HallOfFameScreen() {
     }
     }
 
-    DetailPopupHost(detail, { detail = null }) { detail = it }
+    DetailPopupHost(detail, onOpen = { detail = it }) { detail = null }
 }
 
 /** 🏛️ Premium (1) : dominations en cours à un pas d'une intronisation (calculé depuis les snapshots). */
