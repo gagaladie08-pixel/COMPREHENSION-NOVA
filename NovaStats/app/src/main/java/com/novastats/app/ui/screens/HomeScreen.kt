@@ -547,6 +547,7 @@ private fun hofEntryLabel(type: String) = when (type) {
     "DIRECT_DEBUT" -> "Direct #1"
     "LONG_RUN" -> "Long run"
     "TRIPLE_DEBUT" -> "Triple début"
+    "ALL_KILL" -> "All-kill"
     "LEGENDARY_RUN" -> "Run légendaire"
     else -> type
 }

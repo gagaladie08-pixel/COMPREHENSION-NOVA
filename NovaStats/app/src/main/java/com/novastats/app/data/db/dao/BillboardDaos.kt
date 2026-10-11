@@ -271,4 +271,15 @@ interface BillboardDao {
     @Query("SELECT title FROM tracks WHERE track_id = :id") suspend fun nameOfTrack(id: Long): String?
     @Query("SELECT name FROM artists WHERE artist_id = :id") suspend fun nameOfArtist(id: Long): String?
     @Query("SELECT title FROM albums WHERE album_id = :id") suspend fun nameOfAlbum(id: Long): String?
+
+    /* ===== 🌍 Vrai Triple Debut : première apparition dans chaque chart ===== */
+
+    @Query("SELECT COUNT(*) FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id WHERE s.type = :type AND s.date < :before AND st.track_id = :id")
+    suspend fun appearedBeforeTrack(type: String, before: String, id: Long): Int
+
+    @Query("SELECT COUNT(*) FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id WHERE s.type = :type AND s.date < :before AND sa.artist_id = :id")
+    suspend fun appearedBeforeArtist(type: String, before: String, id: Long): Int
+
+    @Query("SELECT COUNT(*) FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id WHERE s.type = :type AND s.date < :before AND sa.album_id = :id")
+    suspend fun appearedBeforeAlbum(type: String, before: String, id: Long): Int
 }

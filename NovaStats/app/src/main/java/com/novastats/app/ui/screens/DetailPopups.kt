@@ -865,17 +865,18 @@ private fun CertLine(c: ArtistCertRow) {
 /* ================================ 7. 🏛️ HALL OF FAME ================================ */
 
 private val HofDirectDebut = Color(0xFF7B2FBE)
+private val HofAllKill = Color(0xFFDC2626)
 private val HofGlobal = Color(0xFF0D1BFF)
 
 fun hofBadgeLabel(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "🚀 DIRECT DEBUT"; HallOfFameRules.LONG_RUN -> "👑 LONG RUN"
-    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
+    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.ALL_KILL -> "💥 ALL KILL"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
 }
 fun hofBadgeColor(type: String): Color = when (type) {
-    HallOfFameRules.DIRECT_DEBUT -> HofDirectDebut; HallOfFameRules.LONG_RUN -> NovaColors.Gold; else -> HofGlobal
+    HallOfFameRules.DIRECT_DEBUT -> HofDirectDebut; HallOfFameRules.LONG_RUN -> NovaColors.Gold; HallOfFameRules.ALL_KILL -> HofAllKill; else -> HofGlobal
 }
 fun hofBadgePrestige(type: String) = when (type) {
-    HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
+    HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 4; HallOfFameRules.ALL_KILL -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
 }
 
 private data class HofDetail(
@@ -920,7 +921,7 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
     val det = d
     val main = det?.entries?.maxByOrNull { hofBadgePrestige(it.entryType) }?.entryType ?: HallOfFameRules.DIRECT_DEBUT
     val color = hofBadgeColor(main)
-    val isGlobal = main == HallOfFameRules.TRIPLE_DEBUT || main == HallOfFameRules.LEGENDARY_RUN
+    val isGlobal = main == HallOfFameRules.TRIPLE_DEBUT || main == HallOfFameRules.ALL_KILL || main == HallOfFameRules.LEGENDARY_RUN
 
     NovaPopupCard(
         borderColor = color, onDismiss = onDismiss, glowDp = if (isGlobal) 28 else 14, backdropUrl = det?.imageUrl,

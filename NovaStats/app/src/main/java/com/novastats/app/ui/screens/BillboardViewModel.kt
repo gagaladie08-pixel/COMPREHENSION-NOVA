@@ -251,7 +251,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
             when (e.entryType) {
                 "DIRECT_DEBUT" -> "⚡ Entrée directe"
                 "LONG_RUN" -> "👑 Long règne (${e.weeksAt1} ${BillboardDates.unitLabel(Period.WEEKLY, e.weeksAt1)})"
-                "TRIPLE_DEBUT" -> "🚀 Triple début"
+                "TRIPLE_DEBUT" -> "🌍 Triple début"
+                "ALL_KILL" -> "💥 All-kill"
                 else -> "🌟 Règne légendaire"
             } + " — ${e.periodType}"
         }

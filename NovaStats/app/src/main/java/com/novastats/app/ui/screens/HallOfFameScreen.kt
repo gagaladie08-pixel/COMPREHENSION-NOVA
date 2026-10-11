@@ -72,6 +72,7 @@ import java.util.Locale
 /* Couleurs du cahier des charges */
 private val DirectDebutColor = Color(0xFF7B2FBE)
 private val LongRunColor = NovaColors.Gold
+private val AllKillColor = Color(0xFFDC2626)
 private val GlobalColor = Color(0xFF0D1BFF)
 
 private val ceremonyFmt = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)
@@ -93,19 +94,20 @@ private data class HofCard(
 }
 
 private fun badgePrestige(type: String) = when (type) {
-    HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
+    HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 4; HallOfFameRules.ALL_KILL -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
 }
 private fun badgeLabel(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "🚀 DIRECT DEBUT"; HallOfFameRules.LONG_RUN -> "👑 LONG RUN"
-    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
+    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.ALL_KILL -> "💥 ALL KILL"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
 }
 private fun badgeColor(type: String) = when (type) {
-    HallOfFameRules.DIRECT_DEBUT -> DirectDebutColor; HallOfFameRules.LONG_RUN -> LongRunColor; else -> GlobalColor
+    HallOfFameRules.DIRECT_DEBUT -> DirectDebutColor; HallOfFameRules.LONG_RUN -> LongRunColor; HallOfFameRules.ALL_KILL -> AllKillColor; else -> GlobalColor
 }
 private fun badgeRule(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "Règle : entrer directement #1 d'un chart hebdo ou mensuel, pour la toute première fois."
     HallOfFameRules.LONG_RUN -> "Règle : ${HallOfFameRules.LONG_RUN_WEEKS} semaines consécutives #1 hebdo, ou ${HallOfFameRules.LONG_RUN_MONTHS} mois consécutifs #1 mensuel."
-    HallOfFameRules.TRIPLE_DEBUT -> "Règle : #1 des charts Daily, Weekly et Monthly le même jour."
+    HallOfFameRules.TRIPLE_DEBUT -> "Règle : #1 des charts Daily, Weekly et Monthly le même jour, qui est aussi sa toute première apparition (jour, semaine, mois) dans les charts."
+    HallOfFameRules.ALL_KILL -> "Règle : #1 des charts Daily, Weekly et Monthly le même jour, sans condition de début."
     HallOfFameRules.LEGENDARY_RUN -> "Règle : ${HallOfFameRules.LEGENDARY_WEEKS_AT_1} semaines #1 hebdo au total."
     else -> type
 }
@@ -143,7 +145,7 @@ fun HallOfFameScreen() {
         value = runCatching { db.hallOfFameDao().all() }.getOrDefault(emptyList())
     }
     val counters = remember(allHof) {
-        listOf(HallOfFameRules.DIRECT_DEBUT, HallOfFameRules.LONG_RUN, HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.LEGENDARY_RUN)
+        listOf(HallOfFameRules.DIRECT_DEBUT, HallOfFameRules.LONG_RUN, HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL, HallOfFameRules.LEGENDARY_RUN)
             .map { t -> t to allHof.count { it.entryType == t } }
     }
     val longest = remember(allHof) {
@@ -207,7 +209,7 @@ fun HallOfFameScreen() {
                 when (period) {
                     Period.WEEKLY.dbName -> "🚀 Direct Debut : entrée directe au #1 hebdo · 👑 Long Run : 3 semaines consécutives au #1"
                     Period.MONTHLY.dbName -> "🚀 Direct Debut : entrée directe au #1 mensuel · 👑 Long Run : 2 mois consécutifs au #1"
-                    else -> "🌍 Triple Debut : #1 Daily + Weekly + Monthly le même jour · 🏅 Legendary Run : 10× #1 hebdo"
+                    else -> "🌍 Triple Debut : triple #1 au 1ᵉʳ jour / 1ʳᵉ semaine / 1ᵉʳ mois · 💥 All-Kill : #1 Daily + Weekly + Monthly le même jour · 🏅 Legendary Run : 10× #1 hebdo"
                 },
                 color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 16.dp)
             )
@@ -310,14 +312,22 @@ private suspend fun computeAntechamber(db: NovaDatabase): List<String> {
                 out += "${name(mTop.entityId)} : #1 ce mois-ci — encore ${HallOfFameRules.LONG_RUN_MONTHS - run} mois pour 👑 Long Run"
             }
         }
-        // 🌍 Triple #1 en cours (jour + semaine + mois)
+        // 💥 / 🌍 Triple #1 en cours (jour + semaine + mois)
+        suspend fun appBefore(period: Period, before: String, id: Long) = when (t) {
+            EntityType.TRACK -> dao.appearedBeforeTrack(period.dbName, before, id)
+            EntityType.ARTIST -> dao.appearedBeforeArtist(period.dbName, before, id)
+            else -> dao.appearedBeforeAlbum(period.dbName, before, id)
+        }
         val dTop = top1(todayIso, todayIso)
         if (dTop != null) {
             val d = dTop.entityId
             when {
-                wTop?.entityId == d && mTop?.entityId == d -> out += "${name(d)} : triple #1 en cours — 🌍 intronisation à la clôture du jour"
-                wTop?.entityId == d -> out += "${name(d)} : #1 jour + semaine — ne manque que le mois pour 🌍"
-                mTop?.entityId == d -> out += "${name(d)} : #1 jour + mois — ne manque que la semaine pour 🌍"
+                wTop?.entityId == d && mTop?.entityId == d -> {
+                    val vrai = appBefore(Period.DAILY, todayIso, d) == 0 && appBefore(Period.WEEKLY, weekIso, d) == 0 && appBefore(Period.MONTHLY, monthIso, d) == 0
+                    out += if (vrai) "${name(d)} : vrai triple début en cours — 🌍 + 💥 à la clôture du jour" else "${name(d)} : triple #1 en cours — 💥 à la clôture du jour"
+                }
+                wTop?.entityId == d -> out += "${name(d)} : #1 jour + semaine — ne manque que le mois pour 💥 All-Kill"
+                mTop?.entityId == d -> out += "${name(d)} : #1 jour + mois — ne manque que la semaine pour 💥 All-Kill"
             }
         }
     }

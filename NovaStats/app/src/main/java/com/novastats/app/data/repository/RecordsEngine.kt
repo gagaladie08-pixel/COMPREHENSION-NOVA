@@ -384,6 +384,7 @@ class RecordsEngine(private val db: NovaDatabase) {
             emit(out, "MOST_HOF", null, cat, null, agg(mine.filter { it.periodType != "GLOBAL" }), now)
             val global = mine.filter { it.periodType == "GLOBAL" }
             emit(out, "MOST_GLOBAL", null, cat, "TRIPLE_DEBUT", agg(global.filter { it.entryType == "TRIPLE_DEBUT" }), now)
+            emit(out, "MOST_GLOBAL", null, cat, "ALL_KILL", agg(global.filter { it.entryType == "ALL_KILL" }), now)
             emit(out, "MOST_GLOBAL", null, cat, "LEGENDARY_RUN", agg(global.filter { it.entryType == "LEGENDARY_RUN" }), now)
             emit(out, "MOST_GLOBAL", null, cat, "ALL", agg(global), now)
         }

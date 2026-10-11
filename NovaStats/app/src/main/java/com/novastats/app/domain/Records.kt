@@ -105,7 +105,7 @@ object RecordCatalog {
     val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }
     fun sweepZoneOf(sub: String?): Int = zoneLimit(sub?.substringBefore("_"))
     fun sweepSolo(sub: String?): Boolean = sub?.endsWith("_SOLO") == true
-    val globalSubs = listOf(RecordSub("TRIPLE_DEBUT", "🌍 Triple Debut"), RecordSub("LEGENDARY_RUN", "🏅 Legendary Run"), RecordSub("ALL", "🌍 All Global"))
+    val globalSubs = listOf(RecordSub("TRIPLE_DEBUT", "🌍 Triple Debut"), RecordSub("ALL_KILL", "💥 All Kill"), RecordSub("LEGENDARY_RUN", "🏅 Legendary Run"), RecordSub("ALL", "🌍 All Global"))
 
     val ALL: List<RecordDef> = listOf(
         RecordDef(1, "MOST_CUMULATIVE", "📆", "Most Cumulative", "Top 10 des éléments avec le plus de jours / semaines / mois dans le chart", chartPeriods, all3),

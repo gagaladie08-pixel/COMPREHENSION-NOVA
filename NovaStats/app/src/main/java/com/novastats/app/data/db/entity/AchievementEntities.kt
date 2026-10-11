@@ -66,7 +66,7 @@ data class HallOfFameEntity(
     @ColumnInfo(name = "entity_type") val entityType: String,
     /** WEEKLY / MONTHLY / GLOBAL */
     @ColumnInfo(name = "period_type") val periodType: String,
-    /** DIRECT_DEBUT / LONG_RUN / TRIPLE_DEBUT / LEGENDARY_RUN */
+    /** DIRECT_DEBUT / LONG_RUN / TRIPLE_DEBUT / ALL_KILL / LEGENDARY_RUN */
     @ColumnInfo(name = "entry_type") val entryType: String,
     @ColumnInfo(name = "entry_date") val entryDate: String,
     @ColumnInfo(name = "reign_start") val reignStart: String? = null,

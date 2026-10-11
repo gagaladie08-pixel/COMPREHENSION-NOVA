@@ -196,6 +196,7 @@ object HallOfFameRules {
     const val DIRECT_DEBUT = "DIRECT_DEBUT"
     const val LONG_RUN = "LONG_RUN"
     const val TRIPLE_DEBUT = "TRIPLE_DEBUT"
+    const val ALL_KILL = "ALL_KILL"
     const val LEGENDARY_RUN = "LEGENDARY_RUN"
 
     const val LONG_RUN_WEEKS = 3
