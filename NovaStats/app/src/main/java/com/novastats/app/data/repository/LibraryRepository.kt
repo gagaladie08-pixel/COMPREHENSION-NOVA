@@ -163,6 +163,22 @@ class LibraryRepository(private val db: NovaDatabase) {
             return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
         }
 
+        // ---- 1bis. Variante « méta » (« (From F1 The Movie) », « (Taylor's Version) », « (Album Version) »…) :
+        // si le titre nu existe déjà pour cet artiste, c'est la même œuvre → rattachée comme version du root
+        // au lieu de créer une fiche séparée (les covers restent des œuvres à part).
+        TitleNormalizer.metaBareTitle(normalized.title)?.let { bare ->
+            val bareRoot = db.trackDao().findByTitleAndArtist(bare, primaryArtistId)
+            if (bareRoot != null) {
+                val root = bareRoot.originalTrackId ?: bareRoot.trackId
+                val variant = db.trackDao().findByTitleAndArtist(normalized.title, primaryArtistId)
+                val trackId = variant?.trackId ?: db.trackDao().insert(
+                    TrackEntity(title = normalized.title, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId, durationMs = durationMs, genre = genre, isRemix = true, originalTrackId = root)
+                )
+                if (variant != null && variant.originalTrackId == null && variant.trackId != root) db.trackDao().linkToRoot(trackId, root)
+                return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
+            }
+        }
+
         // ---- 2. Titre « normal » : même titre + même artiste principal → même titre, SAUF si le jeu d'invités diffère (versions)
         val plainTitle = normalized.title
         val existingPlain = db.trackDao().findByTitleAndArtist(plainTitle, primaryArtistId)
@@ -228,10 +244,15 @@ class LibraryRepository(private val db: NovaDatabase) {
         return Resolved(trackId, primaryArtistId, albumId, artistIds).also { trackCache[fullKey] = it; peekCache[baseKey] = it }
     }
 
-    /** Versions orphelines « Titre (feat. X) » / « Titre (with X) » d'un des artistes → rattachées au root qui vient d'apparaître. */
+    /**
+     * Versions orphelines « Titre (…) » d'un des artistes → rattachées au root qui vient d'apparaître :
+     * « (feat. X) » / « (with X) », remix, ou variante « méta » (« (From F1 The Movie) », « (Taylor's Version) »…).
+     * Les covers restent des œuvres à part.
+     */
     private suspend fun adoptOrphans(rootId: Long, plainTitle: String, artistIds: List<Long>) {
         db.trackDao().orphanVersions(rootId, plainTitle, artistIds).forEach { v ->
-            if (v.isRemix || v.title.startsWith("$plainTitle (feat.") || v.title.startsWith("$plainTitle (with")) db.trackDao().linkToRoot(v.trackId, rootId)
+            val metaVariant = v.title.startsWith("$plainTitle (") && !v.title.contains("(cover", true)
+            if (v.isRemix || v.title.startsWith("$plainTitle (feat.") || v.title.startsWith("$plainTitle (with") || metaVariant) db.trackDao().linkToRoot(v.trackId, rootId)
         }
     }
 

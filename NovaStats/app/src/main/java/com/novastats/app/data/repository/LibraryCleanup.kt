@@ -23,6 +23,9 @@ import kotlinx.coroutines.withContext
  *  5. anti-récidive : les détections abandonnées (annulées depuis 24 h, ou en attente depuis 14 j)
  *     sont effacées, puis les fiches artistes/albums qui ne référencent plus rien sont purgées.
  *     Les vraies voix des Saja Boys sont préservées (liste blanche).
+ *  6. doublons vérifiés : la même œuvre en deux fiches jamais rattachées (« Messy (From F1 The Movie) » /
+ *     « Messy », « Enchanted (Taylor's Version) » / « Enchanted »…) → les 15 paires connues sont
+ *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]).
  *
  * Aucune écoute n'est supprimée : on renomme, fusionne et déplace uniquement, via [DataEditorManager]
  * (chaque geste est tracé dans l'historique d'édition). Idempotent : un second passage ne trouve plus rien.
@@ -136,5 +139,30 @@ object LibraryCleanup {
                 keepArtists = listOf(quarantine, "Danny Chung", "Kevin Woo", "Neckwav", "samUIL Lee")
             )
         }
+
+        // ---- 6. Doublons vérifiés (même œuvre, deux fiches) → rattachés à leur racine, en un lot ----
+        val duplicatePairs = listOf(
+            932L to 115L,    // ROSÉ — « Messy » ← « Messy (From F1 The Movie) »
+            1218L to 903L,   // Rihanna — « Lift Me Up » ← « Lift Me Up (From Black Panther…) »
+            102L to 930L,    // LISA — « Moonlit Floor » ← « Moonlit Floor (Kiss Me) »
+            1117L to 1020L,  // Beyoncé — « Upgrade U (Album Version) » ← « Upgrade U »
+            1162L to 1154L,  // Lil Nas X — « Old Town Road » 3ᵉ fiche ← racine liée
+            1163L to 1157L,  // Lil Nas X — « INDUSTRY BABY » 3ᵉ fiche ← racine liée
+            1300L to 968L,   // Ariana Grande — « yes, and » ← « yes, and? »
+            1228L to 508L,   // Taylor Swift — « Enchanted » ← « Enchanted (Taylor's Version) »
+            805L to 1229L,   // Taylor Swift — « Fearless (Taylor's Version) » ← « Fearless »
+            500L to 910L,    // Taylor Swift — « Red (Taylor's Version) » ← « Red »
+            479L to 501L,    // Taylor Swift — « State Of Grace » ← « State Of Grace (Taylor's Version) »
+            655L to 482L,    // Taylor Swift — « Welcome To New York (Taylor's Version) » ← « Welcome To New York »
+            503L to 639L,    // Taylor Swift — « Actually Romantic (Track by Track) » ← « Actually Romantic »
+            1294L to 795L,   // XLOV — « EXTANCY » ← « EXTANCY (Wumuti&Rui) »
+            635L to 457L     // Lady Gaga — « Joanne (Where Do You Think You're Goin'?) » ← « Joanne »
+        )
+        val toLink = duplicatePairs.filter { (versionId, rootId) ->
+            val version = db.trackDao().getById(versionId)
+            val root = db.trackDao().getById(rootId)
+            version != null && root != null && version.originalTrackId == null && root.originalTrackId == null
+        }
+        if (toLink.isNotEmpty()) runCatching { editor.linkVersionsBatch(toLink) }
     }
 }

@@ -280,6 +280,20 @@ object TitleNormalizer {
         return NormalizedTitle(title = title.ifBlank { raw.trim() }, featuredArtists = featured.distinctBy { normalizeKey(it) }, isVersion = isVersion)
     }
 
+    /**
+     * 🧬 Titre nu d'une variante « méta » : « Song (From F1 The Movie) » / « Song (Taylor's Version) » /
+     * « Song (Album Version) » / « Song (Kiss Me) » → « Song ». Les parenthèses contenant « cover » ne sont
+     * jamais retirées (une cover est une œuvre à part). Retourne null si rien à retirer.
+     */
+    fun metaBareTitle(title: String): String? {
+        var stripped = false
+        val out = bracketRegex.replace(title) { m ->
+            if (m.groupValues[1].lowercase().contains("cover")) m.value else { stripped = true; "" }
+        }
+        val clean = spaceRegex.replace(out, " ").trim()
+        return if (stripped && clean.isNotBlank() && clean != title) clean else null
+    }
+
     /** Sépare "A, B & C feat. D" en liste d'artistes. */
     /** Compilations ("Various Artists", "NOW That's What I Call Music"…) : jamais de crédit album. */
     private val compilationRegex = Regex("""(?i)(now that'?s what i call|nrj music awards|nrj hits|hits? 20\d\d|top hits|compilation|\bvol(ume)?\.? \d+\b.*(hits|party|dance))""")

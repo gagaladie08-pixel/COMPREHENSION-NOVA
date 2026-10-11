@@ -269,6 +269,20 @@ class DataEditorManager(private val db: NovaDatabase, private val rebuilder: Sta
 
     /** Lie une fiche de version/remix à son original sans fusionner ni déplacer ses écoutes. */
     suspend fun linkTrackAsVersion(versionId: Long, originalCandidateId: Long) = perform("Version liée à l'original", rebuild = true) {
+        linkVersionInternal(versionId, originalCandidateId)
+    }
+
+    /** 🔗 Rattache un lot de doublons connus à leur racine : UNE opération, UN recalcul. Retourne le nombre réellement rattaché. */
+    suspend fun linkVersionsBatch(pairs: List<Pair<Long, Long>>): Int = perform("${pairs.size} doublon(s) rattaché(s)", rebuild = true) {
+        var linked = 0
+        for ((versionId, rootId) in pairs) {
+            val ok = runCatching { linkVersionInternal(versionId, rootId) }.isSuccess
+            if (ok) linked++
+        }
+        linked
+    }
+
+    private suspend fun linkVersionInternal(versionId: Long, originalCandidateId: Long) {
         require(versionId != originalCandidateId) { "Choisis deux titres différents" }
         db.withTransaction {
             val version = db.trackDao().getById(versionId) ?: error("Version introuvable")
