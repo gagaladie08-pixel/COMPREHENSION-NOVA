@@ -25,8 +25,9 @@ import kotlinx.coroutines.withContext
  *     Les vraies voix des Saja Boys sont préservées (liste blanche).
  *  6. doublons vérifiés : la même œuvre en deux fiches jamais rattachées (« Messy (From F1 The Movie) » /
  *     « Messy », crédits d'artistes variables d'une source à l'autre…) → les 22 paires connues sont
- *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]), et le doublon d'artiste
- *     « The Black Eyed Peas » est fusionné avec « Black Eyed Peas ».
+ *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]), et les 4 doublons
+ *     d'artistes (« The Black Eyed Peas », « RM », « Brendon Urie of Panic! At The Disco », « The Weekend »)
+ *     sont fusionnés ([DataEditorManager.mergeArtistsBatch]).
  *
  * Aucune écoute n'est supprimée : on renomme, fusionne et déplace uniquement, via [DataEditorManager]
  * (chaque geste est tracé dans l'historique d'édition). Idempotent : un second passage ne trouve plus rien.
@@ -173,11 +174,19 @@ object LibraryCleanup {
         }
         if (toLink.isNotEmpty()) runCatching { editor.linkVersionsBatch(toLink) }
 
-        // « The Black Eyed Peas » = « Black Eyed Peas » : même groupe, crédit variable selon les sources.
-        val theBep = db.artistDao().findByNameNoCase("The Black Eyed Peas")
-        val bep = db.artistDao().findByNameNoCase("Black Eyed Peas")
-        if (theBep != null && bep != null && theBep.artistId != bep.artistId) runCatching {
-            editor.mergeArtists(theBep.artistId, bep.artistId)
+        // ---- 6b. Doublons d'artistes vérifiés : même personne/groupe, crédit variable selon les sources ----
+        val artistMerges = listOf(
+            "The Black Eyed Peas" to "Black Eyed Peas",
+            "RM" to "RM of BTS",
+            "Brendon Urie of Panic! At The Disco" to "Brendon Urie",
+            "The Weekend" to "The Weeknd"
+        )
+        val artistMergePairs = mutableListOf<Pair<Long, Long>>()
+        for ((fromName, intoName) in artistMerges) {
+            val from = db.artistDao().findByNameNoCase(fromName)
+            val into = db.artistDao().findByNameNoCase(intoName)
+            if (from != null && into != null && from.artistId != into.artistId) artistMergePairs += from.artistId to into.artistId
         }
+        if (artistMergePairs.isNotEmpty()) runCatching { editor.mergeArtistsBatch(artistMergePairs) }
     }
 }
