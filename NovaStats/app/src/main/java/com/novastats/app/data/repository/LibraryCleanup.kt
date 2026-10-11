@@ -24,8 +24,9 @@ import kotlinx.coroutines.withContext
  *     sont effacées, puis les fiches artistes/albums qui ne référencent plus rien sont purgées.
  *     Les vraies voix des Saja Boys sont préservées (liste blanche).
  *  6. doublons vérifiés : la même œuvre en deux fiches jamais rattachées (« Messy (From F1 The Movie) » /
- *     « Messy », « Enchanted (Taylor's Version) » / « Enchanted »…) → les 15 paires connues sont
- *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]).
+ *     « Messy », crédits d'artistes variables d'une source à l'autre…) → les 22 paires connues sont
+ *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]), et le doublon d'artiste
+ *     « The Black Eyed Peas » est fusionné avec « Black Eyed Peas ».
  *
  * Aucune écoute n'est supprimée : on renomme, fusionne et déplace uniquement, via [DataEditorManager]
  * (chaque geste est tracé dans l'historique d'édition). Idempotent : un second passage ne trouve plus rien.
@@ -156,7 +157,14 @@ object LibraryCleanup {
             655L to 482L,    // Taylor Swift — « Welcome To New York (Taylor's Version) » ← « Welcome To New York »
             503L to 639L,    // Taylor Swift — « Actually Romantic (Track by Track) » ← « Actually Romantic »
             1294L to 795L,   // XLOV — « EXTANCY » ← « EXTANCY (Wumuti&Rui) »
-            635L to 457L     // Lady Gaga — « Joanne (Where Do You Think You're Goin'?) » ← « Joanne »
+            635L to 457L,    // Lady Gaga — « Joanne (Where Do You Think You're Goin'?) » ← « Joanne »
+            973L to 1069L,   // One Kiss — crédits inversés [Calvin Harris, Dua Lipa] ← [Dua Lipa, Calvin Harris]
+            1216L to 254L,   // Rihanna — « Friend Of Mine » ← « Friend Of Mine - from the Smurfs Movie Soundtrack »
+            231L to 1068L,   // « Prisoner » [Miley seule] ← [Dua Lipa, Miley Cyrus] (1175 suit via repointVersions)
+            1124L to 1043L,  // « GIRL LIKE ME » [The Black Eyed Peas] ← [Black Eyed Peas, Shakira] (897 suit)
+            412L to 1014L,   // « Bang Bang » [Ariana seule] ← [Jessie J, Nicki Minaj, Ariana Grande]
+            527L to 1103L,   // « Taki Taki » [Cardi B] ← [DJ Snake, Cardi B, Ozuna, Selena Gomez] (racine = crédit complet)
+            1266L to 797L    // XLOV — « supernova » ← « supernova (Cover) »
         )
         val toLink = duplicatePairs.filter { (versionId, rootId) ->
             val version = db.trackDao().getById(versionId)
@@ -164,5 +172,12 @@ object LibraryCleanup {
             version != null && root != null && version.originalTrackId == null && root.originalTrackId == null
         }
         if (toLink.isNotEmpty()) runCatching { editor.linkVersionsBatch(toLink) }
+
+        // « The Black Eyed Peas » = « Black Eyed Peas » : même groupe, crédit variable selon les sources.
+        val theBep = db.artistDao().findByNameNoCase("The Black Eyed Peas")
+        val bep = db.artistDao().findByNameNoCase("Black Eyed Peas")
+        if (theBep != null && bep != null && theBep.artistId != bep.artistId) runCatching {
+            editor.mergeArtists(theBep.artistId, bep.artistId)
+        }
     }
 }
