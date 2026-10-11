@@ -287,13 +287,16 @@ interface ScrobbleDao {
     @Query("SELECT * FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allConfirmedOrdered(): List<ScrobbleEntity>
     /**
-     * 🧟 Albums fantômes : les écoutes pointant vers un album qui n'a PLUS aucun titre rattaché
-     * sont réattribuées à l'album ACTUEL de leur titre (jamais forcées si le titre n'a pas d'album).
+     * 🧟 Albums fantômes + fuites d'album : les écoutes pointant vers un album qui n'a PLUS aucun titre
+     * rattaché, OU arrivées SANS tag album (`album_id` nul), sont réattribuées à l'album ACTUEL de leur
+     * titre (jamais forcées si le titre n'a pas d'album). Sans ça, une source qui ne reporte pas l'album
+     * prive l'album de ses écoutes alors que le titre les compte.
      */
     @Query(
         """
         UPDATE scrobbles SET album_id = (SELECT t.album_id FROM tracks t WHERE t.track_id = scrobbles.track_id)
-        WHERE album_id IN (SELECT a.album_id FROM albums a WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.album_id))
+        WHERE (album_id IS NULL
+               OR album_id IN (SELECT a.album_id FROM albums a WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.album_id)))
           AND (SELECT t2.album_id FROM tracks t2 WHERE t2.track_id = scrobbles.track_id) IS NOT NULL
         """
     )
