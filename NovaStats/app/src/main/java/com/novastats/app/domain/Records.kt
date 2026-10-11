@@ -96,10 +96,12 @@ object RecordCatalog {
     val multiChartLevels = listOf(RecordSub("DWMY", "🌍 D+W+M+Y"), RecordSub("DWM", "🔥 D+W+M"), RecordSub("DW", "⚡ D+W"), RecordSub("WM", "⚡ W+M"), RecordSub("MY", "⚡ M+Y"))
     /** Zones des records de longévité / retours (25-27) : Top 10, Top 20, Top 50, chart complet. */
     val lifespanZones = listOf(RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("CHART", "🌍 Chart"))
-    fun zoneLimit(sub: String?): Int = when (sub) { "TOP1" -> 1; "TOP3" -> 3; "TOP5" -> 5; "TOP10" -> 10; "TOP20" -> 20; "TOP50" -> 50; else -> Int.MAX_VALUE }
-    fun zoneLabel(sub: String?): String = when (sub) { "TOP1" -> "le #1"; "TOP3" -> "le Top 3"; "TOP5" -> "le Top 5"; "TOP10" -> "le Top 10"; "TOP20" -> "le Top 20"; "TOP50" -> "le Top 50"; else -> "le chart" }
+    fun zoneLimit(sub: String?): Int = when (sub) { "TOP1" -> 1; "TOP2" -> 2; "TOP3" -> 3; "TOP5" -> 5; "TOP10" -> 10; "TOP15" -> 15; "TOP20" -> 20; "TOP50" -> 50; else -> Int.MAX_VALUE }
+    fun zoneLabel(sub: String?): String = when (sub) { "TOP1" -> "le #1"; "TOP2" -> "le Top 2"; "TOP3" -> "le Top 3"; "TOP5" -> "le Top 5"; "TOP10" -> "le Top 10"; "TOP15" -> "le Top 15"; "TOP20" -> "le Top 20"; "TOP50" -> "le Top 50"; else -> "le chart" }
     /** Sections de Fastest Rise (16) : la zone à atteindre. */
     val riseZones = listOf(RecordSub("TOP1", "👑 Top 1"), RecordSub("TOP3", "🥉 Top 3"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"))
+    /** Sections de Most Weeks Blocked (22) : la zone où l'entité a stagné sans jamais atteindre le #1. */
+    val blockedZones = listOf(RecordSub("TOP2", "🥈 Top 2"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP15", "📊 Top 15"), RecordSub("TOP20", "📈 Top 20"))
     /** Podium Sweep (29) : zone × mode (Solo = uniquement des titres sans featuring ; Standard = feat. compris). */
     val sweepZones = listOf("TOP3" to "Top 3", "TOP5" to "Top 5", "TOP10" to "Top 10")
     val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }
@@ -139,7 +141,8 @@ object RecordCatalog {
         RecordDef(20, "BIGGEST_CLIMBER", "🧗", "Biggest Climber", "Plus grand écart entre position d'entrée et peak", chartPeriods, all3, unit = RecordUnit.POSITIONS, screen = "CLIMB"),
         RecordDef(21, "MULTI_CHART", "🌐", "Multi-Chart Domination", "Présent simultanément dans plusieurs charts", emptyList(), all3,
             mapOf(RecordCategory.TRACK to multiChartLevels, RecordCategory.ARTIST to multiChartLevels, RecordCategory.ALBUM to multiChartLevels), RecordUnit.TIMES),
-        RecordDef(22, "MOST_BLOCKED_TOP5", "🚧", "Most Weeks Blocked at Top 5", "Le plus de périodes dans le Top 5 sans jamais atteindre le #1", chartPeriods, all3),
+        RecordDef(22, "MOST_BLOCKED_TOP5", "🚧", "Most Weeks Blocked", "Le plus de périodes dans le Top 2 / 5 / 10 / 15 / 20 sans jamais atteindre le #1", chartPeriods, all3,
+            mapOf(RecordCategory.TRACK to blockedZones, RecordCategory.ARTIST to blockedZones, RecordCategory.ALBUM to blockedZones)),
         RecordDef(23, "MOST_SIMULTANEOUS", "🎯", "Most Simultaneous Songs", "Le plus de titres en même temps dans une zone du chart", chartPeriods, artistAlbum,
             mapOf(RecordCategory.ARTIST to songsAlbums.flatMap { s -> zones.map { z -> RecordSub("${s.dbName}_${z.dbName}", "${s.label} · ${z.label}") } }, RecordCategory.ALBUM to zones), RecordUnit.COUNT),
         RecordDef(24, "MOST_SUCCESSIVE_1", "🔁", "Most Successive #1", "Le plus de #1 successifs avec des titres différents, sans interruption", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
@@ -266,11 +269,11 @@ object RecordMath {
         return RecordResult(0, climb.toDouble(), peak.date, "entré #${entry.position} → peak #${peak.position}")
     }
 
-    /** Périodes dans le Top 5 pour une entité n'ayant jamais atteint le #1 : (n, meilleure position). */
-    fun blockedTop5(series: List<RecordAppearance>): Pair<Int, Int>? {
+    /** Périodes passées dans une zone (Top 2 / 5 / 10 / 15 / 20) pour une entité n'ayant jamais atteint le #1 : (n, meilleure position). */
+    fun blockedTop(series: List<RecordAppearance>, max: Int): Pair<Int, Int>? {
         val peak = series.minOfOrNull { it.position } ?: return null
         if (peak == 1) return null
-        val n = series.count { it.position <= 5 }
+        val n = series.count { it.position <= max }
         return if (n > 0) n to peak else null
     }
 

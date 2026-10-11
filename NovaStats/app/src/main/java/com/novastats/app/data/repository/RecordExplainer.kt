@@ -479,19 +479,21 @@ class RecordExplainer(private val db: NovaDatabase) {
                 )
             }
             "MOST_BLOCKED_TOP5" -> {
-                val top5 = s.filter { it.position <= 5 }
+                val max = RecordCatalog.zoneLimit(sub)
+                val zone = RecordCatalog.zoneLabel(sub).removePrefix("le ")
+                val topZ = s.filter { it.position <= max }
                 val all = allSeries(cat, p)
                 val blockers = HashMap<Long, Int>()
-                for (a in top5) all.forEach { (oid, os) -> if (oid != id && os.any { it.date == a.date && it.position == 1 }) blockers[oid] = (blockers[oid] ?: 0) + 1 }
+                for (a in topZ) all.forEach { (oid, os) -> if (oid != id && os.any { it.date == a.date && it.position == 1 }) blockers[oid] = (blockers[oid] ?: 0) + 1 }
                 val items = blockers.entries.sortedByDescending { it.value }.take(5).map { (oid, n) ->
-                    val (nm, img) = nameOf(cat.dbName, oid); Item(cat.dbName, oid, nm, "#1 pendant $n de ses ${top5.size} passages en Top 5", img)
+                    val (nm, img) = nameOf(cat.dbName, oid); Item(cat.dbName, oid, nm, "#1 pendant $n de ses ${topZ.size} passages en $zone", img)
                 }
                 Story(
-                    "🚧 ${top5.size} ${unit(p, top5.size)} dans le Top 5, jamais #1",
-                    "$name a passé ${top5.size} ${unit(p, top5.size)} dans le Top 5 du $chart sans jamais décrocher la première place : sa meilleure position reste ${pos(peak.position)} (${on(p, peak.date)}). " +
+                    "🚧 ${topZ.size} ${unit(p, topZ.size)} dans $zone, jamais #1",
+                    "$name a passé ${topZ.size} ${unit(p, topZ.size)} dans $zone du $chart sans jamais décrocher la première place : sa meilleure position reste ${pos(peak.position)} (${on(p, peak.date)}). " +
                         (if (items.isNotEmpty()) "Celui qui lui a barré la route le plus souvent : ${items.first().name}." else ""),
-                    base + ("Passages en Top 5" to "${top5.size}") + ("Passages à la #2" to "${s.count { it.position == 2 }}"),
-                    "Trajectoire (Top 5 en surbrillance)", points(p, s, { it.position <= 5 }),
+                    base + ("Passages en $zone" to "${topZ.size}") + ("Passages à la #2" to "${s.count { it.position == 2 }}"),
+                    "Trajectoire ($zone en surbrillance)", points(p, s, { it.position <= max }),
                     "Ceux qui occupaient le #1 pendant ce temps", items
                 )
             }
@@ -593,7 +595,8 @@ class RecordExplainer(private val db: NovaDatabase) {
                 }
             }
             "BIGGEST_PERIOD" -> {
-                val best = s.maxBy { it.plays }
+                // Une entité peut occuper plusieurs places du classement : raconter la période de la ligne cliquée si identifiable.
+                val best = s.firstOrNull { it.plays.toDouble() == value } ?: s.maxBy { it.plays }
                 val others = s.filter { it !== best }
                 val avg = if (others.isEmpty()) 0 else others.sumOf { it.plays } / others.size
                 val word = when (p) { Period.DAILY -> "une seule journée"; Period.WEEKLY -> "une seule semaine"; else -> "un seul mois" }

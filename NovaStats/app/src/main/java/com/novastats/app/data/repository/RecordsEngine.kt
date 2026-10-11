@@ -123,7 +123,11 @@ class RecordsEngine(private val db: NovaDatabase) {
         emit(out, "MOST_CUMULATIVE_TOP10", p, cat, null, each { id, s -> RecordResult(id, RecordMath.cumulative(s, 10).toDouble(), s.lastOrNull { it.position <= 10 }?.date) }, now)
         emit(out, "MOST_TIME_AT_1", p, cat, null, each { id, s -> RecordResult(id, RecordMath.timesAt1(s).toDouble(), s.lastOrNull { it.position == 1 }?.date) }, now)
         if (p != Period.YEARLY) {
-            emit(out, "BIGGEST_PERIOD", p, cat, null, each { id, s -> s.maxByOrNull { it.plays }?.let { RecordResult(id, it.plays.toDouble(), it.date, "#${it.position} ce jour-là") } }, now)
+            // Une même entité peut occuper plusieurs places du top 10 : on garde ses 10 meilleures périodes,
+            // puis la sélection globale d'emit() ne conserve que les 10 meilleures valeurs absolues (+ ex æquo).
+            emit(out, "BIGGEST_PERIOD", p, cat, null, series.flatMap { (id, s) ->
+                s.sortedByDescending { it.plays }.take(10).map { RecordResult(id, it.plays.toDouble(), it.date, "#${it.position} ce jour-là") }
+            }, now)
         }
         emit(out, "BIGGEST_DEBUT", p, cat, null, each { id, s -> s.first().let { RecordResult(id, it.plays.toDouble(), it.date, "entré #${it.position}") } }, now)
         emit(out, "BIGGEST_COMEBACK", p, cat, null, each { _, s -> RecordMath.biggestComeback(s, RecordCatalog.comebackMinAbsence(p)) }, now)
@@ -144,7 +148,10 @@ class RecordsEngine(private val db: NovaDatabase) {
         emit(out, "SLEEPER_HIT", p, cat, null, each { _, s -> RecordMath.sleeperHit(s) }, now)
         emit(out, "LONGEST_ROAD", p, cat, null, each { id, s -> RecordMath.periodsToReach(s, 1)?.let { (n, d) -> if (n > 0) RecordResult(id, n.toDouble(), d, "#1 après $n ${RecordCatalog.unitLabel(p, n > 1)}") else null } }, now)
         emit(out, "BIGGEST_CLIMBER", p, cat, null, each { _, s -> RecordMath.biggestClimber(s) }, now)
-        emit(out, "MOST_BLOCKED_TOP5", p, cat, null, each { id, s -> RecordMath.blockedTop5(s)?.let { (n, peak) -> RecordResult(id, n.toDouble(), s.lastOrNull { it.position <= 5 }?.date, "meilleure position #$peak") } }, now)
+        for (z in RecordCatalog.blockedZones) {
+            val max = RecordCatalog.zoneLimit(z.dbName)
+            emit(out, "MOST_BLOCKED_TOP5", p, cat, z.dbName, each { id, s -> RecordMath.blockedTop(s, max)?.let { (n, peak) -> RecordResult(id, n.toDouble(), s.lastOrNull { it.position <= max }?.date, "meilleure position #$peak") } }, now)
+        }
     }
 
     /* ---------------- Records "propriétaire" (4-8, 23, 24) ---------------- */

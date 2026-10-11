@@ -245,6 +245,7 @@ interface RecordDao {
                          FROM records_cache x
                          WHERE x.record_type = r.record_type AND IFNULL(x.period_type, '') = IFNULL(r.period_type, '')
                            AND x.category = r.category AND IFNULL(x.subcategory, '') = IFNULL(r.subcategory, ''))
+        GROUP BY r.record_type, IFNULL(r.period_type, ''), r.category, IFNULL(r.subcategory, '')
         ORDER BY r.record_type, r.period_type, r.subcategory
         """
     )
@@ -253,7 +254,7 @@ interface RecordDao {
     /** Nombre d'entités à égalité au #1 d'un classement. */
     @Query(
         """
-        SELECT COUNT(*) FROM records_cache x
+        SELECT COUNT(DISTINCT x.entity_id) FROM records_cache x
         WHERE x.record_type = :type AND IFNULL(x.period_type, '') = IFNULL(:period, '') AND x.category = :category AND IFNULL(x.subcategory, '') = IFNULL(:sub, '')
           AND x.value = :value
         """
