@@ -28,6 +28,8 @@ import kotlinx.coroutines.withContext
  *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]), et les 4 doublons
  *     d'artistes (« The Black Eyed Peas », « RM », « Brendon Urie of Panic! At The Disco », « The Weekend »)
  *     sont fusionnés ([DataEditorManager.mergeArtistsBatch]).
+ *  7. « cas Upgrade U » : chansons dont l'enregistrement officiel est le duo (aucune version solo) et que des
+ *     scrobbles incohérents avaient dédoublonnées → fusion complète en une seule carte ([DataEditorManager.mergeTracksBatch]).
  *
  * Aucune écoute n'est supprimée : on renomme, fusionne et déplace uniquement, via [DataEditorManager]
  * (chaque geste est tracé dans l'historique d'édition). Idempotent : un second passage ne trouve plus rien.
@@ -188,5 +190,50 @@ object LibraryCleanup {
             if (from != null && into != null && from.artistId != into.artistId) artistMergePairs += from.artistId to into.artistId
         }
         if (artistMergePairs.isNotEmpty()) runCatching { editor.mergeArtistsBatch(artistMergePairs) }
+
+        // ---- 7. « Cas Upgrade U » : l'enregistrement officiel EST le duo (pas de version solo existante).
+        // Les fiches « Original » / « with X » pointent vers le même fichier : fusion complète en une carte
+        // (mergeTracks), la survivante gardant le crédit complet. La correction de titre mémorisée empêche
+        // le doublon de renaître au prochain scrobble. Sont exclus les titres ayant une vraie version solo
+        // (Video Phone, BREAK MY SOUL, Karma, Say So…) : leurs variantes restent des versions.
+        val sameRecordingMerges = listOf(
+            809L to 1164L,   // Let Me Love You ← (with Lil Wayne)
+            1288L to 1036L,  // SPAGHETTI ← (with J-hope)
+            47L to 1139L,    // Stateside ← (with Zara Larsson)
+            1009L to 398L,   // lovely ← (with Khalid)
+            1115L to 849L,   // Bring Your Love ← (with Sabrina Carpenter)
+            412L to 1014L,   // Bang Bang [Ariana] ← trio officiel
+            527L to 1103L,   // Taki Taki [Cardi B] ← quatuor officiel
+            231L to 1068L,   // Prisoner [Miley] ← [Dua Lipa, Miley Cyrus]
+            1175L to 1068L,  // Prisoner (with Dua Lipa) ← idem
+            973L to 1069L,   // One Kiss crédits inversés ← crédits complets
+            1003L to 336L,   // Bed ← (with Ariana Grande)
+            898L to 1137L,   // When I'm With You ← (with Tyla)
+            100L to 1141L,   // Born Again ← (with Doja Cat, RAYE)
+            445L to 1188L,   // ALREADY ← (with Major Lazer, Shatta Wale)
+            65L to 1140L,    // Work ← (with Drake)
+            1277L to 1273L,  // ENERGY ← (with Beam)
+            109L to 1197L,   // Love Hangover ← (with Dominic Fike)
+            1283L to 1196L,  // ExtraL ← (with Doechii)
+            98L to 1136L,    // New Woman ← (with ROSALÍA)
+            259L to 1146L,   // Talk That Talk ← (with JAY-Z)
+            145L to 1150L,   // Killah ← (with Gesaffelstein)
+            1122L to 894L,   // Bizarre ← (with Martin Garrix)
+            97L to 1135L,    // APT. ← (with Bruno Mars)
+            480L to 1151L,   // Everything Has Changed ← (with Ed Sheeran)
+            1005L to 340L,   // Get On Your Knees ← (with Ariana Grande)
+            1085L to 734L,   // Never Forget You ← (with MNEK)
+            416L to 1143L,   // Don't Call Me Angel ← trio officiel
+            1024L to 444L,   // MY POWER ← (with DJ LAG, Yemi Alade…)
+            1019L to 434L,   // PROTECTOR ← (with Rumi Carter)
+            897L to 1043L,   // GIRL LIKE ME (with Shakira) ← GIRL LIKE ME
+            1117L to 1020L,  // Upgrade U (Album Version) ← Upgrade U
+            1296L to 1237L,  // Golden ← Golden (with EJAE, AUDREY NUNA, REI AMI…)
+            1297L to 1239L   // Le Son De Nos Voix ← Le Son De Nos Voix (with … Cast)
+        )
+        val validMerges = sameRecordingMerges.filter { (from, into) ->
+            from != into && db.trackDao().getById(from) != null && db.trackDao().getById(into) != null
+        }
+        if (validMerges.isNotEmpty()) runCatching { editor.mergeTracksBatch(validMerges) }
     }
 }
