@@ -27,7 +27,8 @@ import kotlinx.coroutines.withContext
  *     « Messy », crédits d'artistes variables d'une source à l'autre…) → les 22 paires connues sont
  *     rattachées à leur racine en un lot ([DataEditorManager.linkVersionsBatch]), et les 4 doublons
  *     d'artistes (« The Black Eyed Peas », « RM », « Brendon Urie of Panic! At The Disco », « The Weekend »)
- *     sont fusionnés ([DataEditorManager.mergeArtistsBatch]).
+ *     sont fusionnés ([DataEditorManager.mergeArtistsBatch]), et les coquilles d'albums en double
+ *     (MONTERO ×2, Set the World On Fire) rejoignent leur fiche propriétaire ([DataEditorManager.mergeAlbumsBatch]).
  *  7. « cas Upgrade U » : chansons dont l'enregistrement officiel est le duo (aucune version solo) et que des
  *     scrobbles incohérents avaient dédoublonnées → fusion complète en une seule carte ([DataEditorManager.mergeTracksBatch]).
  *
@@ -191,6 +192,17 @@ object LibraryCleanup {
             if (from != null && into != null && from.artistId != into.artistId) artistMergePairs += from.artistId to into.artistId
         }
         if (artistMergePairs.isNotEmpty()) runCatching { editor.mergeArtistsBatch(artistMergePairs) }
+
+        // ---- 6c. Doublons d'albums : coquilles sans artiste créées par d'anciens imports → fiche propriétaire ----
+        val albumMerges = listOf(
+            410L to 267L,  // MONTERO (coquille) ← MONTERO [Lil Nas X]
+            413L to 267L,  // MONTERO (coquille) ← idem
+            401L to 108L   // Set the World On Fire (coquille) ← [Lil Nas X]
+        )
+        val validAlbumMerges = albumMerges.filter { (from, into) ->
+            from != into && db.albumDao().getById(from) != null && db.albumDao().getById(into) != null
+        }
+        if (validAlbumMerges.isNotEmpty()) runCatching { editor.mergeAlbumsBatch(validAlbumMerges) }
 
         // ---- 7. « Cas Upgrade U » : l'enregistrement officiel EST le duo (pas de version solo existante).
         // Les fiches « Original » / « with X » pointent vers le même fichier : fusion complète en une carte
