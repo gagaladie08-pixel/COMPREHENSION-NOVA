@@ -277,7 +277,7 @@ fun HallOfFameScreen() {
     }
     }
 
-    DetailPopupHost(detail) { detail = null }
+    DetailPopupHost(detail, { detail = null }) { detail = it }
 }
 
 /** 🏛️ Premium (1) : dominations en cours à un pas d'une intronisation (calculé depuis les snapshots). */
@@ -421,7 +421,7 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
     val runner by produceState<RunnerUpRow?>(initialValue = null, key1 = "${card.entityId}|${mainEntry.h.entryType}|${mainEntry.h.entryDate}") {
         val snapPeriod = when (mainEntry.h.entryType) {
             HallOfFameRules.LEGENDARY_RUN -> Period.WEEKLY.dbName
-            HallOfFameRules.TRIPLE_DEBUT -> Period.DAILY.dbName
+            HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL -> Period.DAILY.dbName
             else -> mainEntry.h.periodType
         }
         value = runCatching {

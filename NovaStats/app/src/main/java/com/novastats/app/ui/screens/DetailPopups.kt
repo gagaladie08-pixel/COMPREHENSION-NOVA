@@ -86,6 +86,9 @@ import com.novastats.app.domain.ScoredCandidate
 import kotlinx.coroutines.launch
 import com.novastats.app.data.db.dao.DayCount
 import com.novastats.app.data.db.dao.PriorRow
+import com.novastats.app.data.db.dao.RunnerUpRow
+import com.novastats.app.data.db.entity.RecordCacheEntity
+import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import java.text.SimpleDateFormat
@@ -136,14 +139,14 @@ fun CertBadge(level: CertLevel?, multiplier: Int = 1, fallback: String = "Non ce
 }
 
 @Composable
-fun DetailPopupHost(target: DetailTarget?, onDismiss: () -> Unit) {
+fun DetailPopupHost(target: DetailTarget?, onDismiss: () -> Unit, onOpen: (DetailTarget) -> Unit = {}) {
     if (target == null) return
     when (target) {
         is DetailTarget.Track -> TrackPopup(target.id, target.period, onDismiss)
         is DetailTarget.Artist -> ArtistPopup(target.id, target.period, onDismiss)
         is DetailTarget.Album -> AlbumPopup(target.id, target.period, onDismiss)
         is DetailTarget.Pantheon -> PantheonPopup(target.artistId, onDismiss)
-        is DetailTarget.HallOfFame -> HallOfFamePopup(target.entityId, target.entityType, onDismiss)
+        is DetailTarget.HallOfFame -> HallOfFamePopup(target.entityId, target.entityType, onDismiss, onOpen)
     }
 }
 
@@ -879,15 +882,37 @@ fun hofBadgePrestige(type: String) = when (type) {
     HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 4; HallOfFameRules.ALL_KILL -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
 }
 
+private fun hofBadgeEmoji(type: String) = when (type) {
+    HallOfFameRules.DIRECT_DEBUT -> "🚀"; HallOfFameRules.LONG_RUN -> "👑"; HallOfFameRules.TRIPLE_DEBUT -> "🌍"
+    HallOfFameRules.ALL_KILL -> "💥"; else -> "🏅"
+}
+
+/** 🧐 Récit de l'intronisation la plus prestigieuse (section « Pourquoi il est là »). */
+private fun hofNarrative(e: HallOfFameEntity, runner: RunnerUpRow?): String {
+    val r = runner?.let {
+        val margin = maxOf(e.playCountAtEntry - it.playCount, 0)
+        " Le dauphin ${it.name} (${formatCount(it.playCount)} écoutes) était à ${formatCount(margin)} écoutes derrière."
+    } ?: ""
+    return when (e.entryType) {
+        HallOfFameRules.DIRECT_DEBUT -> "Entré directement #1 du chart ${e.periodType.lowercase()} le ${formatIso(e.entryDate)}, avec ${formatCount(e.playCountAtEntry)} écoutes, pour sa toute première apparition.$r"
+        HallOfFameRules.LONG_RUN -> "${if (e.weeksAt1 > 0) "${e.weeksAt1} semaines consécutives" else "Des périodes consécutives"} au #1 — un règne que personne n'a contesté.${e.reignStart?.let { " Du ${formatIso(it)} au ${formatIso(e.reignEnd ?: it)}." } ?: ""}$r"
+        HallOfFameRules.ALL_KILL -> "Le ${formatIso(e.entryDate)}, #1 du jour, de la semaine et du mois en même temps : domination totale des trois charts.$r"
+        HallOfFameRules.TRIPLE_DEBUT -> "Le ${formatIso(e.entryDate)}, #1 du jour, de la semaine et du mois — et c'était sa toute première apparition dans les trois charts. Un début de légende.$r"
+        else -> "${e.weeksAt1} semaines #1 hebdo au total : territoire légendaire.$r"
+    }
+}
+
 private data class HofDetail(
     val name: String, val subtitle: String?, val imageUrl: String?, val entries: List<HallOfFameEntity>,
     /** Courbe de toutes les positions hebdo (null = hors chart) + ancres + stats. */
     val positions: List<Int?>, val anchors: List<LocalDate>, val stats: ChartHistoryStats, val chartPeriod: Period,
-    val cert: CertificationEntity?, val playCount: Int
+    val cert: CertificationEntity?, val playCount: Int,
+    val runners: Map<Long, RunnerUpRow?> = emptyMap(), val guests: List<HonorGuest> = emptyList(),
+    val pantheon: String? = null, val numberOnes: List<RecordCacheEntity> = emptyList()
 )
 
 @Composable
-private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () -> Unit) {
+private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () -> Unit, onOpen: (DetailTarget) -> Unit = {}) {
     val app = LocalContext.current.applicationContext as NovaStatsApp
     val db = app.database
     val theme = Nova.theme
@@ -912,10 +937,39 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
         val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
         val anchors = if (appearances.isEmpty()) emptyList() else BillboardDates.allAnchors(chartPeriod, appearances.minOf { it.date }, Dates.today())
         val byDate = appearances.associateBy { it.date }
+        // 🥈 Dauphin (#2) de chaque intronisation — marge de domination
+        val runners = entries.associate { e ->
+            e.hofId to runCatching {
+                val snap = when (e.entryType) {
+                    HallOfFameRules.LEGENDARY_RUN -> Period.WEEKLY.dbName
+                    HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL -> Period.DAILY.dbName
+                    else -> e.periodType
+                }
+                when (entityType) {
+                    EntityType.TRACK -> dao.runnerUpTrack(snap, e.entryDate)
+                    EntityType.ARTIST -> dao.runnerUpArtist(snap, e.entryDate)
+                    else -> dao.runnerUpAlbum(snap, e.entryDate)
+                }
+            }.getOrNull()
+        }
+        // 🎤 Invités décisifs (titres uniquement)
+        val guests = if (entityType == EntityType.TRACK) runCatching {
+            entries.flatMap { e ->
+                when (e.periodType) {
+                    Period.GLOBAL.dbName -> HonorGuests.decisiveOnDay(db, entityId, e.entryDate)
+                    Period.MONTHLY.dbName -> { val r = Dates.monthOf(Dates.parse(e.entryDate)); HonorGuests.decisiveInRange(db, entityId, r.fromIso, r.toIso) }
+                    else -> { val r = Dates.weekOf(Dates.parse(e.entryDate)); HonorGuests.decisiveInRange(db, entityId, r.fromIso, r.toIso) }
+                }
+            }.distinctBy { it.artistId }
+        }.getOrDefault(emptyList()) else emptyList()
+        // 🏅 Autres honneurs : Panthéon (artiste) + records actuellement détenus au #1
+        val pantheon = if (entityType == EntityType.ARTIST) db.pantheonDao().forArtist(entityId)?.currentStatus else null
+        val numberOnes = runCatching { db.recordDao().heldNumberOnes(entityType, entityId) }.getOrDefault(emptyList())
         d = HofDetail(
             name ?: "Inconnu", subtitle, image, entries,
             anchors.map { byDate[it]?.position }, anchors, ChartHistory.stats(appearances, anchors), chartPeriod,
-            db.certificationDao().current(entityId, entityType), plays
+            db.certificationDao().current(entityId, entityType), plays,
+            runners, guests, pantheon, numberOnes
         )
     }
     val det = d
@@ -959,14 +1013,33 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
             PopupBadge("👑", "${s.longestRunAt1}", "Série #1", color)
             PopupBadge("🔟", "${s.longestRunTop10}", "Série Top 10", color)
         }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+            PopupBadge("🔥", "${s.maxPlays}", "Record ▶ / sem.", color)
+            PopupBadge("🎯", "${s.timesAtPeak}", "Fois au peak", color)
+            PopupBadge("🎊", "${det.entries.size}", "Intronisations", color)
+        }
+
+        // 🧐 Pourquoi il est là : récit de l'intronisation la plus prestigieuse
+        val mainEntry = det.entries.maxByOrNull { hofBadgePrestige(it.entryType) }
+        if (mainEntry != null) {
+            PopupSection("🧐 Pourquoi il est là", color)
+            Text(hofNarrative(mainEntry, det.runners[mainEntry.hofId]), color = theme.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+        }
 
         PopupSection("📈 Montée au sommet & règne (${det.chartPeriod.label})", color)
         if (det.positions.isEmpty()) Text("Pas d'historique Billboard disponible.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         else {
             val maxPos = (det.positions.filterNotNull().maxOrNull() ?: 10).coerceAtLeast(5).toFloat()
             val peakIdx = s.peak?.let { pk -> det.anchors.indexOf(pk.date).takeIf { it >= 0 } }
+            // 🚩 Drapeaux d'intronisation sur la courbe + ligne or du #1
+            val entryMarkers = det.entries.sortedBy { hofBadgePrestige(it.entryType) }.mapNotNull { e ->
+                val idx = det.anchors.indexOf(BillboardDates.anchor(Period.WEEKLY, Dates.parse(e.entryDate)))
+                if (idx >= 0) idx to hofBadgeEmoji(e.entryType) else null
+            }.toMap()
             NovaCurveChart(det.positions.map { it?.toFloat() }, Modifier.fillMaxWidth().height(170.dp), color = color, invertY = true, minY = 1f, maxY = maxPos,
                 gridValues = listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos), peakIndex = peakIdx, showPoints = true,
+                markers = entryMarkers, thresholds = listOf(1f to NovaColors.Gold),
                 xLabels = det.anchors.map { axisDate(it.toString()) })
         }
 
@@ -978,8 +1051,55 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
                 val reign = e.reignStart?.let { rs -> "du ${formatIso(rs)} au ${formatIso(e.reignEnd ?: rs)}" }
                 if (e.weeksAt1 > 0 || reign != null) Text("👑 ${if (e.weeksAt1 > 0) "${e.weeksAt1} semaine${if (e.weeksAt1 > 1) "s" else ""} au #1" else "Règne"}${reign?.let { " · $it" } ?: ""}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 Text("▶ ${formatCount(e.playCountAtEntry)} écoutes au moment de l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                det.runners[e.hofId]?.let { r ->
+                    val margin = e.playCountAtEntry - r.playCount
+                    Text(
+                        if (margin > 0) "🥈 Dauphin battu : ${r.name} · ${formatCount(margin)} écoutes de retard" else "🥈 Dauphin ce jour-là : ${r.name} · ${formatCount(r.playCount)} écoutes",
+                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         }
+
+        // 🎤 Invités décisifs (titres)
+        if (det.guests.isNotEmpty()) {
+            PopupSection("🎤 Invités décisifs", color)
+            det.guests.forEach { g ->
+                Text("🎤 ${g.artistName} (via « ${g.viaTitle} ») — cette consécration n'existerait pas sans ses écoutes", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 1.dp))
+            }
+        }
+        // 🏅 Autres honneurs : Panthéon, records #1 détenus, fiche complète
+        PopupSection("🏅 Autres honneurs", color)
+        if (entityType == EntityType.ARTIST && det.pantheon != null) {
+            PantheonStatus.fromDb(det.pantheon)?.let { ps ->
+                Text("${ps.emoji} Panthéon : ${ps.label} — toucher pour ouvrir", color = theme.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable { onOpen(DetailTarget.Pantheon(entityId)) })
+            }
+        }
+        if (det.numberOnes.isNotEmpty()) {
+            Text("🏆 Actuellement #1 de ${det.numberOnes.size} record${if (det.numberOnes.size > 1) "s" else ""} :", color = theme.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            det.numberOnes.take(3).forEach { r ->
+                val def = RecordCatalog.ALL.firstOrNull { it.id == r.recordType }
+                Text("• ${def?.emoji ?: "🏆"} ${def?.title ?: r.recordType}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Text(
+            when (entityType) {
+                EntityType.TRACK -> "🎵 Ouvrir la fiche complète du titre"
+                EntityType.ARTIST -> "🎤 Ouvrir la fiche complète de l'artiste"
+                else -> "💿 Ouvrir la fiche complète de l'album"
+            },
+            color = theme.accent, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(vertical = 4.dp).clickable {
+                onOpen(
+                    when (entityType) {
+                        EntityType.TRACK -> DetailTarget.Track(entityId)
+                        EntityType.ARTIST -> DetailTarget.Artist(entityId)
+                        else -> DetailTarget.Album(entityId)
+                    }
+                )
+            }
+        )
 
         PopupSection("📊 Aujourd'hui", color)
         PopupInfoRow("Écoutes actuelles", "${formatCount(det.playCount)} ▶")
