@@ -244,7 +244,7 @@ class RecordExplainer(private val db: NovaDatabase) {
         when (def.id) {
             "MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_TIME_AT_1", "MOST_CONSISTENT", "MOST_BLOCKED_TOP5",
             "BIGGEST_JUMP", "BIGGEST_FALL", "BIGGEST_COMEBACK", "BIGGEST_CLIMBER", "SLEEPER_HIT", "FASTEST_RISE", "LONGEST_ROAD",
-            "BIGGEST_PERIOD", "BIGGEST_DEBUT", "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
+            "BIGGEST_PERIOD", "BIGGEST_DEBUT", "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name, value)
             "PODIUM_SWEEP" -> podiumSweep(period ?: Period.WEEKLY, cat, sub, id, name)
             "LONGEST_LISTENING_STREAK" -> listeningStreak(cat, id, name)
             "MOST_RECORDS" -> mostRecords(cat, id, name)
@@ -416,7 +416,7 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     /* ---------------- records sur la trajectoire de l'élément ---------------- */
 
-    private suspend fun chartStory(def: RecordDef, p: Period, cat: RecordCategory, sub: String?, id: Long, name: String): Story {
+    private suspend fun chartStory(def: RecordDef, p: Period, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double? = null): Story {
         val s = series(cat, p, id)
         if (s.isEmpty()) return Story(def.title, "$name n'a plus d'historique dans le chart ${p.frLabel.lowercase()} (les records seront recalculés à la prochaine écoute).")
         val chart = "chart ${p.frLabel.lowercase()}"
@@ -597,6 +597,7 @@ class RecordExplainer(private val db: NovaDatabase) {
             "BIGGEST_PERIOD" -> {
                 // Une entité peut occuper plusieurs places du classement : raconter la période de la ligne cliquée si identifiable.
                 val best = s.firstOrNull { it.plays.toDouble() == value } ?: s.maxBy { it.plays }
+                // (value = valeur de la ligne cliquée ; défaut = meilleur pic absolu)
                 val others = s.filter { it !== best }
                 val avg = if (others.isEmpty()) 0 else others.sumOf { it.plays } / others.size
                 val word = when (p) { Period.DAILY -> "une seule journée"; Period.WEEKLY -> "une seule semaine"; else -> "un seul mois" }

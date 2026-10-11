@@ -58,8 +58,8 @@ class RecordMathTest {
 
     @Test
     fun `bloque au top 5 sans numero 1`() {
-        assertEquals(3 to 2, RecordMath.blockedTop5(s(0 to 2, 1 to 3, 2 to 4, 3 to 9)))
-        assertNull(RecordMath.blockedTop5(s(0 to 2, 1 to 1)))
+        assertEquals(3 to 2, RecordMath.blockedTop(s(0 to 2, 1 to 3, 2 to 4, 3 to 9), 5))
+        assertNull(RecordMath.blockedTop(s(0 to 2, 1 to 1), 5))
     }
 
     @Test
