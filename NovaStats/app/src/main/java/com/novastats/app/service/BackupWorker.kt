@@ -28,6 +28,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         if (!forced && !app.settings.autoBackup.first()) return Result.success()
         return try {
             writeBackup(app)
+            runCatching { AgentSync.push(app) }
             Result.success()
         } catch (e: CancellationException) {
             throw e

@@ -204,13 +204,17 @@ fun PopupSection(text: String, color: Color = Nova.theme.primary) {
 
 /** Tableau horizontal des positions par période : Daily · Weekly · Monthly · Yearly · Global. */
 @Composable
-fun PositionsTable(ranks: Map<Period, Int?>) {
+fun PositionsTable(ranks: Map<Period, Int?>, onNavigate: ((Period) -> Unit)? = null) {
     val theme = Nova.theme
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Period.entries.forEach { p ->
             val r = ranks[p]
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(p.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            val clickable = onNavigate != null && r != null
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = if (clickable) Modifier.clickable { onNavigate?.invoke(p) } else Modifier
+            ) {
+                Text(p.label, color = if (clickable) theme.primary else theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                 Text(
                     positionLabel(r), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium,
                     color = when (r) { null -> theme.textSecondary.copy(alpha = 0.6f); 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; 3 -> Color(0xFFCD7F32); else -> theme.text }

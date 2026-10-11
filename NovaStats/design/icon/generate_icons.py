@@ -321,6 +321,96 @@ SPLASH_AVD_XML = f'''{HEADER}{GEN}<animated-vector xmlns:android="http://schemas
 '''
 
 # ---------------------------------------------------------------- main
+# ---------------------------------------------------------------- PNG 512 px (visuel Play Store)
+# L'APK n'embarque aucun PNG (icône adaptative en vecteurs). Le Play Store, lui, exige une image
+# 512×512 : ces fichiers ne servent qu'à la fiche, d'où leur place hors de res/.
+STORE_PNG = os.path.join(OUT_PNG, "png")
+PNG_SIZE = 512
+S = PNG_SIZE / 108.0  # viewport 108 → 512 px
+
+
+def _chunk(tag, data):
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+
+def write_png(path, size, pixel_at):
+    """Écrit un PNG RGBA 8 bits sans aucune dépendance externe (zlib + struct, déjà importés)."""
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)  # filtre « None » par ligne
+        for x in range(size):
+            raw += bytes(pixel_at(x, y))
+    png = (b"\x89PNG\r\n\x1a\n"
+           + _chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+           + _chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+           + _chunk(b"IEND", b""))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+def _rgb(h):
+    h = h.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _mix(a, b, t):
+    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _axis(px, py, x0, y0, x1, y1):
+    """Position [0..1] d'un point sur l'axe d'un dégradé linéaire (mêmes coordonnées que le XML)."""
+    dx, dy = x1 - x0, y1 - y0
+    length = dx * dx + dy * dy
+    if length == 0:
+        return 0.0
+    return min(1.0, max(0.0, ((px - x0) * dx + (py - y0) * dy) / length))
+
+
+def _in_poly(px, py, poly):
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > py) != (y2 > py) and px < (x2 - x1) * (py - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def _rounded_bar(px, py, x, h, w):
+    """Barre verticale à bouts arrondis, centrée sur y = 54 (mêmes cotes que WAVE_*)."""
+    top, bottom = 54 - h / 2.0, 54 + h / 2.0
+    r = w / 2.0
+    if top + r <= py <= bottom - r and x - r <= px <= x + r:
+        return True
+    for cy in (top + r, bottom - r):  # les deux demi-disques d'extrémité
+        if (px - x) ** 2 + (py - cy) ** 2 <= r * r:
+            return True
+    return False
+
+
+def store_pixel(theme):
+    bg_top, bg_bottom = _rgb(theme["background"]), _rgb(theme["surface"])
+    n_from, n_to = _rgb(theme["primary"]), _rgb(theme["secondary"])
+    accent = _rgb(theme["accent"])
+
+    def pixel_at(ix, iy):
+        # Centre du pixel, ramené dans le viewport 108.
+        px, py = (ix + 0.5) / S, (iy + 0.5) / S
+        rgb = _mix(bg_top, bg_bottom, py / 108.0)  # fond : dégradé vertical background → surface
+        if _in_poly(px, py, N_POLY):
+            rgb = _mix(n_from, n_to, _axis(px, py, GRAD["x0"], GRAD["y0"], GRAD["x1"], GRAD["y1"]))
+        # Onde par-dessus le N, comme dans le vecteur où WAVE_PATH est tracé après N_PATH.
+        for x, h in zip(WAVE_X, WAVE_H):
+            if _rounded_bar(px, py, float(x), float(h), WAVE_W):
+                rgb = _mix(rgb, accent, 0.7)
+                break
+        return rgb + (255,)
+
+    return pixel_at
+
+
 def write(path, content):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -346,7 +436,11 @@ def main():
         for t in themes
     )
     write(os.path.join(OUT_PNG, "manifest_aliases.xml"), aliases + "\n")
+    # Visuels 512×512 pour la fiche Play Store (jamais dans l'APK).
+    for t in themes:
+        write_png(os.path.join(STORE_PNG, f"play_store_512_{t['id']}.png"), PNG_SIZE, store_pixel(t))
     print(f"{len(themes)} thèmes → vecteurs écrits dans {RES}")
+    print(f"{len(themes)} visuels {PNG_SIZE}×{PNG_SIZE} → {STORE_PNG}")
 
 if __name__ == "__main__":
     import sys

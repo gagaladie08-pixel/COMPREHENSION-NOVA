@@ -118,9 +118,14 @@ class LibraryRepository(private val db: NovaDatabase) {
         val rawTitle = if (applyCorrections) corrected("TITLE", rawTitleIn) ?: rawTitleIn else rawTitleIn
         val rawArtists = if (applyCorrections) corrected("ARTIST", rawArtistsIn) ?: rawArtistsIn else rawArtistsIn
         val rawAlbum = if (applyCorrections) corrected("ALBUM", rawAlbumIn) else rawAlbumIn
+        // 🗂️ Quarantaine : nom de fichier/émission brut ou artiste sans nom → artiste « À trier », jamais de fiche fantôme.
+        val dumped = TitleNormalizer.isFileDump(rawTitle) || rawArtists.isBlank() ||
+            rawArtists.equals("<unknown>", true) || rawArtists.equals("unknown", true)
+        val effectiveArtists = if (dumped) QUARANTINE_ARTIST else rawArtists
+        val effectiveAlbum = if (dumped) null else rawAlbum
         val normalized = TitleNormalizer.normalizeTitle(rawTitle)
         // Cascade artistes : 1) champ artiste du player (lui-même "A & B, C" — noms protégés jamais découpés)  2) feat. dans le titre
-        val playerArtists = TitleNormalizer.splitArtists(rawArtists)
+        val playerArtists = TitleNormalizer.splitArtists(effectiveArtists)
         val artistNames = (playerArtists + normalized.featuredArtists)
             .distinctBy { TitleNormalizer.normalizeKey(it) }
             .ifEmpty { listOf("Artiste inconnu") }
@@ -140,7 +145,7 @@ class LibraryRepository(private val db: NovaDatabase) {
         val guestIds = artistIds.drop(1)
         val guestKeys = guestIds.map { "#$it" }.toSet()
         // Album crédité uniquement s'il s'agit d'un album de l'artiste principal ; jamais pour une compilation
-        val albumId = rawAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
+        val albumId = effectiveAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
             ?.let { resolveAlbumLocked(it, primaryArtistId, albumArtist, forceShared = null, artistIds = artistIds) }
 
         // ---- 1. Remix / version AVEC artiste featuring (« Song (Remix) feat. Drake ») → titre distinct « Song (feat. Drake) », lié à l'original
@@ -233,6 +238,9 @@ class LibraryRepository(private val db: NovaDatabase) {
     companion object {
         /** Type de correction (`user_corrections`) : titre d'album normalisé → « 1 » (partagé) / « 0 » (normal). */
         const val CORRECTION_ALBUM_SHARED = "ALBUM_SHARED"
+
+        /** 🗂️ Artiste de quarantaine : fausses chansons (fichiers vidéo, épisodes…) en attente de tri manuel. */
+        const val QUARANTINE_ARTIST = "🗂️ À trier"
 
         /** Comparaison des jeux d'invités (clé « #artistId » ou toute clé stable). */
         /**
@@ -352,6 +360,9 @@ class LibraryRepository(private val db: NovaDatabase) {
     suspend fun relinkAll(onProgress: (String) -> Unit = {}): RelinkResult {
         clearCaches()
         loadArtistExceptions(seedDefaults = true)
+        // 🔎 Diagnostic : la reliason supprime les écoutes en doublon (UNIQUE track_id+started_at).
+        val auditContext = com.novastats.app.util.RebuildAudit.context
+        val auditBefore = if (auditContext != null) com.novastats.app.util.RebuildAudit.snapshot(db) else null
         val rows = db.scrobbleDao().allForRelink()
         var moved = 0
         var duplicates = 0
@@ -378,6 +389,20 @@ class LibraryRepository(private val db: NovaDatabase) {
             }
         }
         db.trackDao().flattenRoots()
+        val previousAudit = auditBefore
+        if (auditContext != null && previousAudit != null) {
+            runCatchingCancellable {
+                val delta = com.novastats.app.util.RebuildAudit.diff(
+                    previousAudit,
+                    com.novastats.app.util.RebuildAudit.snapshot(db)
+                )
+                com.novastats.app.util.RebuildAudit.write(
+                    auditContext,
+                    "🔗 Reliason terminée : $moved déplacée(s), $duplicates doublon(s) supprimé(s)" +
+                        (delta?.let { " · $it" } ?: " · aucune perte de ligne")
+                )
+            }
+        }
         return RelinkResult(moved, duplicates)
     }
 

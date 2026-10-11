@@ -211,7 +211,16 @@ interface ScrobbleDao {
     fun summary(fromMs: Long, toMs: Long): Flow<PeriodSummary>
 
     /** Date (epoch ms) de la N-ième écoute confirmée d'un titre — dates rétroactives des certifications. */
-    @Query("SELECT started_at FROM scrobbles WHERE status = 'CONFIRMED' AND (track_id = :trackId OR track_id IN (SELECT track_id FROM tracks WHERE original_track_id = :trackId)) ORDER BY started_at LIMIT 1 OFFSET :n - 1")
+    @Query(
+        """
+        WITH RECURSIVE fam AS (
+            SELECT :trackId AS t
+            UNION ALL
+            SELECT v.track_id FROM tracks v JOIN fam f ON v.original_track_id = f.t
+        )
+        SELECT started_at FROM scrobbles WHERE status = 'CONFIRMED' AND track_id IN (SELECT t FROM fam) ORDER BY started_at LIMIT 1 OFFSET :n - 1
+        """
+    )
     suspend fun nthPlayOfTrack(trackId: Long, n: Int): Long?
 
     /** Écoutes dont le titre doit être re-résolu (liens artistes / versions) : valeurs brutes du lecteur si connues. */
@@ -223,8 +232,13 @@ interface ScrobbleDao {
     /** Écoute au même instant sur le titre cible OU une version de son groupe (original + versions liées) — le titre exact d'abord. */
     @Query(
         """
+        WITH RECURSIVE fam AS (
+            SELECT :rootId AS t
+            UNION ALL
+            SELECT v.track_id FROM tracks v JOIN fam f ON v.original_track_id = f.t
+        )
         SELECT * FROM scrobbles WHERE started_at = :startedAt
-          AND (track_id = :trackId OR track_id = :rootId OR track_id IN (SELECT track_id FROM tracks WHERE original_track_id = :rootId))
+          AND (track_id = :trackId OR track_id IN (SELECT t FROM fam))
         ORDER BY (track_id = :trackId) DESC LIMIT 1
         """
     )
@@ -272,6 +286,33 @@ interface ScrobbleDao {
 
     @Query("SELECT * FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allConfirmedOrdered(): List<ScrobbleEntity>
+    /**
+     * 🧟 Albums fantômes : les écoutes pointant vers un album qui n'a PLUS aucun titre rattaché
+     * sont réattribuées à l'album ACTUEL de leur titre (jamais forcées si le titre n'a pas d'album).
+     */
+    @Query(
+        """
+        UPDATE scrobbles SET album_id = (SELECT t.album_id FROM tracks t WHERE t.track_id = scrobbles.track_id)
+        WHERE album_id IN (SELECT a.album_id FROM albums a WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.album_id))
+          AND (SELECT t2.album_id FROM tracks t2 WHERE t2.track_id = scrobbles.track_id) IS NOT NULL
+        """
+    )
+    suspend fun reattachOrphanAlbumPlays(): Int
+
+    /**
+     * 👻 Détections abandonnées : CANCELLED depuis plus de 24 h (détection annulée, pas une écoute)
+     * ou PENDING vieilles de plus de 14 j (file d'attente expirée). Elles maintenaient en vie des
+     * fiches artistes/albums fantômes : les libérer permet à la purge des coquilles d'aboutir.
+     */
+    @Query(
+        """
+        DELETE FROM scrobbles
+        WHERE (status = 'CANCELLED' AND started_at < :cancelledBefore)
+           OR (status = 'PENDING' AND started_at < :pendingBefore)
+        """
+    )
+    suspend fun deleteAbandoned(cancelledBefore: Long, pendingBefore: Long): Int
+
 }
 
 @Dao
@@ -288,11 +329,16 @@ interface DailyPlayDao {
     /** Reconstruction complète depuis les scrobbles confirmés (jour local). */
     @Query(
         """
+        WITH RECURSIVE true_root AS (
+            SELECT track_id, track_id AS root_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT t.track_id, r.root_id FROM tracks t JOIN true_root r ON t.original_track_id = r.track_id
+        )
         INSERT INTO daily_plays (track_id, root_id, artist_id, album_id, date, play_count, total_duration_ms)
-        SELECT s.track_id, IFNULL(t.original_track_id, s.track_id), s.artist_id, s.album_id,
+        SELECT s.track_id, IFNULL(r.root_id, s.track_id), s.artist_id, s.album_id,
                date(s.started_at / 1000, 'unixepoch', 'localtime') AS d,
                COUNT(*), SUM(s.duration_listened_ms)
-        FROM scrobbles s LEFT JOIN tracks t ON t.track_id = s.track_id WHERE s.status = 'CONFIRMED'
+        FROM scrobbles s LEFT JOIN true_root r ON r.track_id = s.track_id WHERE s.status = 'CONFIRMED'
         GROUP BY s.track_id, d
         """
     )
@@ -335,7 +381,27 @@ interface DailyPlayDao {
     suspend fun firstDate(): String?
     /** Toutes les lignes (titre, artiste principal, album, jour) avec au moins une écoute — base des séries d'écoute (record 28). */
     @Query("SELECT root_id AS track_id, artist_id, album_id, date FROM daily_plays WHERE play_count > 0 ORDER BY date") suspend fun allEntityDays(): List<DailyEntityRow>
+    /** 🎯 Jours actifs (au moins une écoute) depuis [from] — pour la streak d'écoute en cours. */
+    @Query("SELECT date FROM daily_plays WHERE date >= :from GROUP BY date HAVING SUM(play_count) > 0 ORDER BY date")
+    suspend fun activeDaysSince(from: String): List<String>
+
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE root_id = :id GROUP BY date ORDER BY date") suspend fun seriesForTrack(id: Long): List<DayCount>
+
+    /** 🎤 Contrefactuel des honneurs : écoutes d'un titre (famille) sur un jour. */
+    @Query("SELECT IFNULL(SUM(play_count), 0) FROM daily_plays WHERE root_id = :root AND date = :day")
+    suspend fun playsOnDay(root: Long, day: String): Int
+
+    /** 🎤 Contrefactuel des honneurs : écoutes d'un titre (famille) sur une période. */
+    @Query("SELECT IFNULL(SUM(play_count), 0) FROM daily_plays WHERE root_id = :root AND date BETWEEN :from AND :to")
+    suspend fun playsInRange(root: Long, from: String, to: String): Int
+
+    /** 🎤 Contrefactuel des honneurs : meilleur autre titre du jour (le dauphin). */
+    @Query("SELECT IFNULL(MAX(pc), 0) FROM (SELECT SUM(play_count) AS pc FROM daily_plays WHERE date = :day AND root_id != :root GROUP BY root_id)")
+    suspend fun runnerUpOnDay(root: Long, day: String): Int
+
+    /** 🎤 Contrefactuel des honneurs : meilleur autre titre de la période (le dauphin). */
+    @Query("SELECT IFNULL(MAX(pc), 0) FROM (SELECT SUM(play_count) AS pc FROM daily_plays WHERE date BETWEEN :from AND :to AND root_id != :root GROUP BY root_id)")
+    suspend fun runnerUpInRange(root: Long, from: String, to: String): Int
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE album_id = :id GROUP BY date ORDER BY date") suspend fun seriesForAlbum(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE artist_id = :id GROUP BY date ORDER BY date") suspend fun seriesForArtist(id: Long): List<DayCount>
     @Query("SELECT DISTINCT date FROM daily_plays WHERE date BETWEEN :from AND :to ORDER BY date") suspend fun activeDatesBetween(from: String, to: String): List<String>
@@ -355,6 +421,10 @@ interface DailyStatsDao {
     /** Record : la journée avec le plus d'écoutes. */
     @Query("SELECT * FROM daily_stats ORDER BY play_count DESC, total_duration_ms DESC LIMIT 1")
     fun bestDay(): Flow<DailyStatsEntity?>
+
+    /** Les journées depuis :fromIso inclus, en ordre chronologique (sparkline d'activité de l'Accueil). */
+    @Query("SELECT * FROM daily_stats WHERE date >= :fromIso ORDER BY date ASC")
+    fun since(fromIso: String): Flow<List<DailyStatsEntity>>
 
     @Query("DELETE FROM daily_stats")
     suspend fun clear()

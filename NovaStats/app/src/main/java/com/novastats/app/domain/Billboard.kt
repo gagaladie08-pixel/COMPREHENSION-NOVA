@@ -93,7 +93,7 @@ object BillboardDates {
         Period.WEEKLY -> "Semaine ${Dates.isoWeekNumber(anchor)} · ${anchor.format(shortFmt)} – ${anchor.plusDays(6).format(shortFmt)}"
         Period.MONTHLY -> anchor.format(monthFmt).replaceFirstChar { it.uppercase() }
         Period.YEARLY -> anchor.year.toString()
-        Period.GLOBAL -> "All-time · semaine ${Dates.isoWeekNumber(anchor)}"
+        Period.GLOBAL -> "All-time · à la semaine du ${anchor.format(shortFmt)}"
     }
 }
 
@@ -196,6 +196,7 @@ object HallOfFameRules {
     const val DIRECT_DEBUT = "DIRECT_DEBUT"
     const val LONG_RUN = "LONG_RUN"
     const val TRIPLE_DEBUT = "TRIPLE_DEBUT"
+    const val ALL_KILL = "ALL_KILL"
     const val LEGENDARY_RUN = "LEGENDARY_RUN"
 
     const val LONG_RUN_WEEKS = 3

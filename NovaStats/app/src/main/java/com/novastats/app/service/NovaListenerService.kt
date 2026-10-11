@@ -454,6 +454,8 @@ class NovaListenerService : NotificationListenerService() {
                 com.novastats.app.util.runCatchingCancellable { AchievementNotifier.notify(context, news) }
                     .onFailure { DetectionState.error(it) }
                 EnrichmentWorker.enqueue(context)
+                // 🤖 Synchro agent (temporaire) : miroir complet vers le Gist, au plus une fois / 10 min.
+                com.novastats.app.util.runCatchingCancellable { AgentSync.autoPush(application) }
             } catch (t: kotlinx.coroutines.CancellationException) {
                 throw t
             } catch (t: Throwable) {

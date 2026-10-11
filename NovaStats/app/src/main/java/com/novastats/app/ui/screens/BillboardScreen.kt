@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.novastats.app.ui.navigation.BillboardFocus
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.Chart
 import com.novastats.app.domain.Dates
@@ -82,6 +82,11 @@ import com.novastats.app.ui.theme.prideWash
 import com.novastats.app.ui.theme.NovaColors
 import java.time.Instant
 import androidx.compose.runtime.produceState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import java.time.ZoneOffset
 
@@ -98,10 +103,13 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val theme = Nova.theme
     val state by vm.state.collectAsStateWithLifecycle()
     val history by vm.history.collectAsStateWithLifecycle()
+    val compare by vm.compare.collectAsStateWithLifecycle()
+    val focus by BillboardFocus.state.collectAsStateWithLifecycle()
+    var pendingFocus by remember { mutableStateOf<BillboardFocus.Focus?>(null) }
+    var highlightId by remember { mutableStateOf<Long?>(null) }
     var showPicker by remember { mutableStateOf(false) }
 
     var searching by remember { mutableStateOf(false) }
-    var yearEnd by remember { mutableStateOf(false) }
 
     val rows = state.filtered
     val limit = state.limit
@@ -109,20 +117,37 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     // Lignes à afficher : uniquement le classement réel (plus de places vides « — »)
     val totalRows = rows.size
     // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de chart / période / date / recherche
-    var visible by remember(state.chart, state.period, state.anchor, state.query) { mutableIntStateOf(TOP_INITIAL) }
+    var visible by remember(state.chart, state.period, state.anchor, state.query, state.sortDuration) { mutableIntStateOf(TOP_INITIAL) }
     val shown = minOf(visible, totalRows)
     val listState = rememberLazyListState()
     LaunchedEffect(state.period, state.anchor) { listState.scrollToItem(0) }
+    // 🚪 Téléporteur Stats → Billboard : applique chart/période, attend les lignes, surligne la cible
+    LaunchedEffect(focus) {
+        val f = focus ?: return@LaunchedEffect
+        vm.search("")
+        state.movementFilter?.let { vm.toggleMovementFilter(it) }
+        vm.selectChart(f.chart)
+        vm.selectPeriod(f.period)
+        pendingFocus = f
+        BillboardFocus.consume()
+    }
+    LaunchedEffect(pendingFocus, state.items) {
+        val f = pendingFocus ?: return@LaunchedEffect
+        if (state.items.isEmpty()) return@LaunchedEffect
+        val idx = state.items.indexOfFirst { it.entityId == f.entityId }
+        if (idx < 0) { pendingFocus = null; return@LaunchedEffect }
+        if (visible < idx + 1) visible = idx + 1
+        highlightId = f.entityId
+        kotlinx.coroutines.delay(80)
+        listState.scrollToItem(2 + idx)
+        pendingFocus = null
+    }
+    LaunchedEffect(highlightId) {
+        if (highlightId != null) { kotlinx.coroutines.delay(2600); highlightId = null }
+    }
 
     // 🎨 Pochette du n°1 du chart affiché, en fond d'écran
     val artUrl = state.items.firstOrNull()?.coverUrl
-
-    // 🏆 Year-End Charts (écran plein, retour = Billboard)
-    if (yearEnd) {
-        BackHandler { yearEnd = false }
-        YearEndScreen { yearEnd = false }
-        return
-    }
 
     ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -131,23 +156,6 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
             Column(Modifier.fillMaxWidth()) {
                 // 1. Périodes
                 PeriodSegment(state.period) { vm.selectPeriod(it) }
-
-                // 🏆 Bilan de l'année civile
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
-                        .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.30f), theme.secondary.copy(alpha = 0.22f), Color.Transparent)))
-                        .clickable { yearEnd = true }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🏆", fontSize = 20.sp)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Year-End Charts", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text("Le bilan complet de chaque année civile", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text("›", color = theme.primary, fontSize = 22.sp)
-                }
 
                 // 2. Navigation dans l'historique (appui long sur la date → calendrier)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -178,6 +186,11 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 if (state.hasAnyData) SummaryBanner(state)
                 // 4. Carte « #1 de la période » : la pochette du #1 en fond, titre, artiste, écoutes, règne
                 state.summary.numberOne?.let { one -> if (state.items.isNotEmpty()) NumberOneCard(one, state) { vm.openHistory(one) } }
+                // 5. Carrousel « histoires » (hebdo + mensuel) : nouvelle entrée, dominance, longévité, progression
+                if (state.period == Period.WEEKLY || state.period == Period.MONTHLY) {
+                    val stories = remember(state.items, state.summary, state.chart, state.period) { buildStories(state) }
+                    if (stories.isNotEmpty()) StoriesCarousel(stories, state.period)
+                }
             }
         }
 
@@ -222,6 +235,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                         shape = RoundedCornerShape(12.dp)
                     )
                 }
+                SortToggle(state.sortDuration) { vm.toggleSort() }
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -255,7 +269,7 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 
             val realShown = minOf(shown, rows.size)
             items(rows.take(realShown), key = { it.entityId }) { item ->
-                ChartRow(item, state.period, onLongPress = { vm.openHistory(item) })
+                ChartRow(item, state.period, showDuration = state.sortDuration, highlighted = item.entityId == highlightId, onLongPress = { vm.openHistory(item) })
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }
 
@@ -295,7 +309,13 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         ) { DatePicker(state = pickerState, showModeToggle = false) }
     }
 
-    history?.let { ChartHistoryDialog(it, onDismiss = vm::closeHistory) }
+    history?.let {
+        ChartHistoryDialog(
+            it, onDismiss = { vm.clearCompare(); vm.closeHistory() },
+            compare = compare, candidates = state.items,
+            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = { vm.shareHistory(theme) }
+        )
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -315,8 +335,18 @@ private fun SummaryBanner(state: BillboardUiState) {
         {
             // ⏱️ Temps d'écoute et ▶ écoutes de la période, variation vs période précédente (maquette utilisateur)
             if (s.totalPlays > 0 || s.prevPlays > 0) {
-                TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
-                TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
+                if (state.period == Period.GLOBAL) {
+                    // Le % comparerait deux cumuls énormes (« +0,4 % ») : on affiche plutôt ce qui est entré cette semaine.
+                    val dDur = s.totalDurationMs - s.prevDurationMs
+                    val dPlays = s.totalPlays - s.prevPlays
+                    TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs),
+                        deltaText = "${if (dDur >= 0) "+" else "-"}${formatDuration(kotlin.math.abs(dDur))} cette semaine", prevPrefix = "cumul à la semaine précédente")
+                    TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes",
+                        deltaText = "${if (dPlays >= 0) "+" else "-"}${formatCount(kotlin.math.abs(dPlays))} écoutes cette semaine", prevPrefix = "cumul à la semaine précédente")
+                } else {
+                    TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
+                    TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
+                }
                 Spacer(Modifier.height(4.dp))
             }
             s.numberOne?.let { one ->
@@ -387,20 +417,27 @@ private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -
 
 /** « ⏱️ 17h 38min ↑ +13 % » + « vs période précédente : 15h 29min ». */
 @Composable
-private fun TrendLine(emoji: String, value: String, cur: Double, prev: Double, prevLabel: String) {
+private fun TrendLine(
+    emoji: String, value: String, cur: Double, prev: Double, prevLabel: String,
+    /** Global : au lieu du % (croissance du cumul), on affiche le delta absolu de la semaine (« +87 écoutes cette semaine »). */
+    deltaText: String? = null, prevPrefix: String = "vs période précédente"
+) {
     val theme = Nova.theme
     val pct = if (prev <= 0.0) null else ((cur - prev) / prev * 100).toInt()
-    val up = pct == null || pct >= 0
+    val up = cur >= prev
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("$emoji ", style = MaterialTheme.typography.titleMedium)
         Text(value, color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.width(8.dp))
         Text(
-            when { pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %" },
+            when {
+                deltaText != null -> deltaText
+                pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %"
+            },
             color = if (up) NovaColors.Up else NovaColors.Down, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium
         )
     }
-    Text("vs période précédente : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+    Text("$prevPrefix : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -459,7 +496,7 @@ fun movementColor(m: Movement): Color = when (m) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
+private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = false, highlighted: Boolean = false, onLongPress: () -> Unit) {
     val theme = Nova.theme
     val isOne = item.position == 1
     val bg = when (item.position) {
@@ -485,6 +522,7 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
                 }
             )
             .then(if (pride) Modifier.prideWash(flag, alpha = if (item.position <= 3) 0.14f else 0.07f).prideStripe(flag) else Modifier.background(bg))
+            .then(if (highlighted) Modifier.border(2.dp, NovaColors.Gold, RoundedCornerShape(14.dp)) else Modifier)
             .combinedClickable(onClick = {}, onLongClick = onLongPress)
             .padding(horizontal = 12.dp, vertical = if (isOne) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -518,7 +556,7 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
             val positionPeak = m !is Movement.New && item.position == item.peakPosition && item.timesAtPeak <= 1
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (positionPeak) { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
-                Text("${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
+                Text(if (showDuration) formatDuration(item.durationMs) else "${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
             }
             if (item.isPlaysPeak) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             if (m !is Movement.New && m !is Movement.Reentry) {
@@ -534,3 +572,123 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
     }
 }
 
+
+/** Carte du carrousel « histoires » — un fait, une pochette. */
+private data class Story(val coverUrl: String?, val circle: Boolean, val text: String)
+
+/** Dix faits possibles calculés sur le snapshot affiché ; chaque carte absente = fait manquant. */
+private fun buildStories(st: BillboardUiState): List<Story> {
+    val items = st.items
+    if (items.isEmpty()) return emptyList()
+    val chartName = st.chart.label.removePrefix("Nova ")
+    val de: (ChartItem) -> String = { it.secondary?.let { a -> " de $a" } ?: "" }
+    val out = mutableListOf<Story>()
+    // 1. Entrée directe (New n°1) sinon meilleure nouvelle entrée
+    val newBest = items.filter { it.movement is Movement.New }.minByOrNull { it.position }
+    if (newBest != null && newBest.position == 1) {
+        out += Story(newBest.coverUrl, newBest.circle, "« ${newBest.name} »" + de(newBest) + " est entré directement n°1 du classement $chartName. Une entrée directe.")
+    } else if (newBest != null) {
+        out += Story(newBest.coverUrl, newBest.circle, "« ${newBest.name} »" + de(newBest) + " est la meilleure nouvelle entrée du classement $chartName, directement à la ${newBest.position}ᵉ place.")
+    }
+    // 2. Dominance : l'artiste qui occupe le plus de places
+    if (st.chart != Chart.ARTIST_50) {
+        items.groupBy { it.secondary.orEmpty() }.filter { it.key.isNotBlank() && it.value.size >= 2 }
+            .maxByOrNull { it.value.size }?.let { (artist, rows) ->
+                val one = items.first()
+                out += if (one.secondary == artist)
+                    Story(one.coverUrl, one.circle, "$artist occupe le plus grand nombre de places dans le classement $chartName (${rows.size}). Son titre « ${one.name} » est numéro 1.")
+                else {
+                    val best = rows.minByOrNull { it.position }!!
+                    Story(best.coverUrl, best.circle, "$artist occupe le plus grand nombre de places dans le classement $chartName (${rows.size}), avec « ${best.name} » en meilleure position (#${best.position}).")
+                }
+            }
+    }
+    // 3. Duel au sommet : l'écart #1 / #2
+    val one = items.first()
+    val two = items.getOrNull(1)
+    if (two != null) {
+        val gap = one.plays - two.plays
+        out += if (gap <= 10)
+            Story(one.coverUrl, one.circle, "« ${one.name} » et « ${two.name} » ne sont séparés que de $gap écoute${if (gap > 1) "s" else ""} en tête du classement $chartName.")
+        else Story(one.coverUrl, one.circle, "« ${one.name} » mène le classement $chartName avec $gap écoutes d'avance sur « ${two.name} ».")
+    }
+    // 4. Longévité : le plus grand nombre de périodes consécutives dans le chart
+    items.maxByOrNull { it.periodsInChart }?.takeIf { it.periodsInChart > 1 }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " détient le record de longévité du classement $chartName, avec ${r.periodsInChart} ${BillboardDates.unitLabel(st.period, r.periodsInChart)} d'affilée.")
+    }
+    // 5. Plus forte progression de la période
+    st.summary.biggestClimber?.let { c ->
+        val up = c.movement as? Movement.Up ?: return@let
+        out += Story(c.coverUrl, c.circle, "« ${c.name} »" + de(c) + " signe la plus forte progression du classement $chartName, gagnant ${up.places} place${if (up.places > 1) "s" else ""} pour atteindre la ${c.position}ᵉ position.")
+    }
+    // 6. Plus forte chute de la période
+    st.summary.biggestFaller?.let { f ->
+        val down = f.movement as? Movement.Down ?: return@let
+        out += Story(f.coverUrl, f.circle, "« ${f.name} »" + de(f) + " signe la plus forte chute de la période, perdant ${down.places} place${if (down.places > 1) "s" else ""} — maintenant #${f.position}.")
+    }
+    // 7. Le retour : meilleure réentrée
+    items.filter { it.movement is Movement.Reentry }.minByOrNull { it.position }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " fait son retour dans le classement $chartName, directement à la ${r.position}ᵉ place.")
+    }
+    // 8. Dynastie : le n°1 actuel déjà couronné plusieurs fois
+    st.summary.numberOne?.takeIf { it.timesAtPeak > 1 }?.let { n ->
+        out += Story(n.coverUrl, n.circle, "« ${n.name} »" + de(n) + " a maintenant été n°1 à ${n.timesAtPeak} reprises dans ce classement.")
+    }
+    // 9. Record personnel : meilleure période historique d'une ligne du chart
+    items.filter { it.isPlaysPeak }.minByOrNull { it.position }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " vient de vivre sa meilleure période historique : ${r.plays} écoutes, un record personnel.")
+    }
+    return out
+}
+
+/** Carrousel façon Spotify Charts : swipe horizontal, auto-défilement après 45 s, pastilles + flèches. */
+@Composable
+private fun StoriesCarousel(stories: List<Story>, period: Period) {
+    val theme = Nova.theme
+    val pagerState = rememberPagerState(pageCount = { stories.size })
+    val scope = rememberCoroutineScope()
+    // Défilement auto : 45 s par carte ; le minuteur repart à chaque changement de page (swipe inclus)
+    LaunchedEffect(pagerState.currentPage, stories.size) {
+        if (stories.size > 1) {
+            delay(45_000)
+            pagerState.animateScrollToPage((pagerState.currentPage + 1) % stories.size)
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Text(
+            if (period == Period.MONTHLY) "Voici un aperçu de ce qui anime tes écoutes ce mois-ci."
+            else "Voici un aperçu de ce qui anime tes écoutes cette semaine.",
+            color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+        HorizontalPager(state = pagerState) { page ->
+            val story = stories[page]
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                    .background(theme.primary.copy(alpha = 0.16f)).padding(16.dp)
+            ) {
+                CoverArt(story.coverUrl, story.text, circle = story.circle, size = 180)
+                Spacer(Modifier.height(12.dp))
+                Text(story.text, color = theme.text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val cur = pagerState.currentPage
+            stories.forEachIndexed { k, _ ->
+                Box(
+                    Modifier.size(10.dp).clip(RoundedCornerShape(50))
+                        .background(if (k == cur) theme.text else theme.textSecondary.copy(alpha = 0.45f))
+                        .clickable { scope.launch { pagerState.animateScrollToPage(k) } }
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { scope.launch { pagerState.animateScrollToPage((cur - 1 + stories.size) % stories.size) } }, enabled = stories.size > 1) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Histoire précédente", tint = theme.text)
+            }
+            IconButton(onClick = { scope.launch { pagerState.animateScrollToPage((cur + 1) % stories.size) } }, enabled = stories.size > 1) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Histoire suivante", tint = theme.text)
+            }
+        }
+    }
+}

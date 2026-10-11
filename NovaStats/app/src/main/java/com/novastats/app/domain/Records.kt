@@ -70,6 +70,12 @@ object RecordCatalog {
     )
     fun inGroup(g: RecordGroup): List<RecordDef> = groupOf.filterValues { it == g }.keys.mapNotNull { id -> ALL.firstOrNull { it.id == id } }
 
+    /** Records dont la casse mérite une cérémonie : les plus durs à obtenir et à battre (choix utilisateur). */
+    val MAJOR: Set<String> = setOf(
+        "MOST_TIME_AT_1", "MOST_CUMULATIVE", "LONGEST_LIFESPAN", "PODIUM_SWEEP",
+        "LONGEST_LISTENING_STREAK", "BIGGEST_PERIOD", "BIGGEST_JUMP", "FASTEST_CERT"
+    )
+
     /** Index de période (jours epoch / semaines ISO / mois / années) — partagé moteur + explications. */
     fun periodIndex(date: java.time.LocalDate, p: Period): Int = when (p) {
         Period.DAILY -> date.toEpochDay().toInt()
@@ -99,7 +105,7 @@ object RecordCatalog {
     val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }
     fun sweepZoneOf(sub: String?): Int = zoneLimit(sub?.substringBefore("_"))
     fun sweepSolo(sub: String?): Boolean = sub?.endsWith("_SOLO") == true
-    val globalSubs = listOf(RecordSub("TRIPLE_DEBUT", "🌍 Triple Debut"), RecordSub("LEGENDARY_RUN", "🏅 Legendary Run"), RecordSub("ALL", "🌍 All Global"))
+    val globalSubs = listOf(RecordSub("TRIPLE_DEBUT", "🌍 Triple Debut"), RecordSub("ALL_KILL", "💥 All Kill"), RecordSub("LEGENDARY_RUN", "🏅 Legendary Run"), RecordSub("ALL", "🌍 All Global"))
 
     val ALL: List<RecordDef> = listOf(
         RecordDef(1, "MOST_CUMULATIVE", "📆", "Most Cumulative", "Top 10 des éléments avec le plus de jours / semaines / mois dans le chart", chartPeriods, all3),

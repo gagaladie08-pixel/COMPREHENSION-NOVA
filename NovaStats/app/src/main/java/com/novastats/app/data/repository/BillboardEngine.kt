@@ -29,7 +29,7 @@ import java.time.LocalDate
  *  - [refreshCurrent] (après chaque écoute / ouverture) publie les snapshots manquants jusqu'à la dernière période close.
  *  - Global : total all-time arrêté à la fin de chaque semaine ; mouvements vs semaine précédente.
  *  - Chaque snapshot ne dépend que des snapshots STRICTEMENT antérieurs → recalcul idempotent.
- *  - Alimente le Hall of Fame (Direct Debut / Long Run / Triple Debut / Legendary Run) sur périodes closes.
+ *  - Alimente le Hall of Fame (Direct Debut / Long Run / Triple Debut / All-Kill / Legendary Run) sur périodes closes.
  */
 class BillboardEngine(private val db: NovaDatabase) {
 
@@ -241,7 +241,7 @@ class BillboardEngine(private val db: NovaDatabase) {
         if (period == Period.DAILY) evaluateTripleDebut(anchor)
     }
 
-    /** Triple Debut (Global) : même #1 le jour [day], sa semaine et son mois — pour chaque type d'entité. */
+    /** 💥 All-Kill + 🌍 vrai Triple Debut (Global) : même #1 le jour [day], sa semaine et son mois. */
     private suspend fun evaluateTripleDebut(day: LocalDate) {
         val iso = day.format(Dates.ISO)
         val week = BillboardDates.anchor(Period.WEEKLY, day).format(Dates.ISO)
@@ -249,8 +249,23 @@ class BillboardEngine(private val db: NovaDatabase) {
         for (entityType in listOf(EntityType.TRACK, EntityType.ARTIST, EntityType.ALBUM)) {
             val daily = numberOne(Period.DAILY, iso, entityType) ?: continue
             if (numberOne(Period.WEEKLY, week, entityType) != daily || numberOne(Period.MONTHLY, month, entityType) != daily) continue
-            induct(daily, entityType, HallOfFameRules.TRIPLE_DEBUT, Period.GLOBAL.dbName, iso, iso, 0, 0)
+            // 💥 All-Kill : triple #1 le même jour, sans condition de début.
+            induct(daily, entityType, HallOfFameRules.ALL_KILL, Period.GLOBAL.dbName, iso, iso, 0, 0)
+            // 🌍 vrai Triple Debut : en plus, ce jour est sa toute première apparition (jour, semaine, mois) dans les charts.
+            if (!appearedBefore(Period.DAILY, iso, entityType, daily) &&
+                !appearedBefore(Period.WEEKLY, week, entityType, daily) &&
+                !appearedBefore(Period.MONTHLY, month, entityType, daily)
+            ) {
+                induct(daily, entityType, HallOfFameRules.TRIPLE_DEBUT, Period.GLOBAL.dbName, iso, iso, 0, 0)
+            }
         }
+    }
+
+    /** L'entité a-t-elle déjà paru dans ce chart avant [beforeIso] ? (vrai début = non) */
+    private suspend fun appearedBefore(period: Period, beforeIso: String, entityType: String, id: Long): Boolean = when (entityType) {
+        EntityType.TRACK -> dao.appearedBeforeTrack(period.dbName, beforeIso, id) > 0
+        EntityType.ARTIST -> dao.appearedBeforeArtist(period.dbName, beforeIso, id) > 0
+        else -> dao.appearedBeforeAlbum(period.dbName, beforeIso, id) > 0
     }
 
     private suspend fun induct(id: Long, entityType: String, entryType: String, periodType: String, iso: String, reignStart: String?, weeksAt1: Int, plays: Int) {
