@@ -283,13 +283,26 @@ object TitleNormalizer {
     /**
      * 🧬 Titre nu d'une variante « méta » : « Song (From F1 The Movie) » / « Song (Taylor's Version) » /
      * « Song (Album Version) » / « Song (Kiss Me) » → « Song ». Les parenthèses contenant « cover » ne sont
-     * jamais retirées (une cover est une œuvre à part). Retourne null si rien à retirer.
+     * jamais retirées (une cover est une œuvre à part). Les tags tronqués (parenthèse ouverte non fermée,
+     * « Song (Extended ») sont traités pareil si le début du groupe porte un mot de version ou feat/with.
+     * Retourne null si rien à retirer.
      */
     fun metaBareTitle(title: String): String? {
         var stripped = false
-        val out = bracketRegex.replace(title) { m ->
+        val closed = bracketRegex.replace(title) { m ->
             if (m.groupValues[1].lowercase().contains("cover")) m.value else { stripped = true; "" }
         }
+        // 🩹 Tag tronqué : parenthèse ouverte jamais fermée (« Video Phone (Extended ») → traitée comme un
+        // groupe de version si elle commence par un mot de version (« extended », « remix »…) ou feat/with.
+        val open = closed.lastIndexOf('(')
+        val out = if (open >= 0 && ')' !in closed.substring(open)) {
+            val inner = closed.substring(open + 1).lowercase().trim()
+            val isFeat = inner.startsWith("feat") || inner.startsWith("ft ") || inner.startsWith("with ")
+            if (!inner.contains("cover") && (isFeat || VERSION_KEYWORDS.any { inner.contains(it) })) {
+                stripped = true
+                closed.substring(0, open)
+            } else closed
+        } else closed
         val clean = spaceRegex.replace(out, " ").trim()
         return if (stripped && clean.isNotBlank() && clean != title) clean else null
     }

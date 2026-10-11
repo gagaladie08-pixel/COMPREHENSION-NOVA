@@ -167,7 +167,8 @@ object LibraryCleanup {
             1124L to 1043L,  // « GIRL LIKE ME » [The Black Eyed Peas] ← [Black Eyed Peas, Shakira] (897 suit)
             412L to 1014L,   // « Bang Bang » [Ariana seule] ← [Jessie J, Nicki Minaj, Ariana Grande]
             527L to 1103L,   // « Taki Taki » [Cardi B] ← [DJ Snake, Cardi B, Ozuna, Selena Gomez] (racine = crédit complet)
-            1266L to 797L    // XLOV — « supernova » ← « supernova (Cover) »
+            1266L to 797L,   // XLOV — « supernova » ← « supernova (Cover) »
+            1301L to 1025L   // « Video Phone (Extended » (tag tronqué, le vrai remix 5:04) ← famille Video phone
         )
         val toLink = duplicatePairs.filter { (versionId, rootId) ->
             val version = db.trackDao().getById(versionId)
