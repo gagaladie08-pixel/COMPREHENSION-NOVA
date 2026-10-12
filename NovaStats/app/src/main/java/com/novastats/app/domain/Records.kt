@@ -225,6 +225,27 @@ object RecordCatalog {
         }
     }
 
+    /** Durée exacte des deux records de vitesse : secondes et millisecondes restent visibles partout. */
+    fun formatFastDuration(ms: Long): String {
+        val safe = ms.coerceAtLeast(0L)
+        if (safe < 1_000L) return "$safe ms"
+        val totalSeconds = safe / 1_000L
+        val days = totalSeconds / 86_400L
+        val hours = (totalSeconds % 86_400L) / 3_600L
+        val minutes = (totalSeconds % 3_600L) / 60L
+        val seconds = totalSeconds % 60L
+        val millis = safe % 1_000L
+        fun two(n: Long) = n.toString().padStart(2, '0')
+        val secondsPart = if (millis == 0L) "${two(seconds)} s" else "${two(seconds)},${millis.toString().padStart(3, '0')} s"
+        return when {
+            days > 0 -> "$days j ${two(hours)} h ${two(minutes)} min $secondsPart"
+            hours > 0 -> "$hours h ${two(minutes)} min $secondsPart"
+            minutes > 0 -> "$minutes min $secondsPart"
+            millis > 0L -> "$totalSeconds,${millis.toString().padStart(3, '0')} s"
+            else -> "$totalSeconds s"
+        }
+    }
+
     /** Absence minimale pour un comeback (en nombre de périodes). */
     fun comebackMinAbsence(period: Period): Int = when (period) {
         Period.DAILY -> 5; Period.WEEKLY -> 3; Period.MONTHLY -> 2; Period.YEARLY -> 1; Period.GLOBAL -> 1

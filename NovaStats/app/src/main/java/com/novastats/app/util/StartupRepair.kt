@@ -45,16 +45,32 @@ object StartupRepair {
             if (attempted) return@withContext
             attempted = true
             mutex.withLock {
-                val pending = runCatching { detectInterrupted(DetectionState.state.value.log) }.getOrNull()
-                    ?: return@withLock
-
                 val context = app.applicationContext
-                RebuildAudit.write(context, "🩹 Recalcul interrompu à l'étape « $pending » : réparation au lancement")
-                runCatching { app.rebuilder.rebuildAll() }
-                    .onFailure { t ->
+                val pending = runCatching { detectInterrupted(DetectionState.state.value.log) }.getOrNull()
+                if (pending != null) {
+                    RebuildAudit.write(context, "🩹 Recalcul interrompu à l'étape « $pending » : réparation au lancement")
+                    val rebuilt = runCatching { app.rebuilder.rebuildAll() }
+                    if (rebuilt.isFailure) {
+                        val t = rebuilt.exceptionOrNull()!!
                         // rebuildAll journalise déjà son échec ; on ajoute seulement l'origine.
                         RebuildAudit.write(context, "🩹 Réparation au lancement en échec (${t.javaClass.simpleName})")
+                        return@withLock
                     }
+                }
+
+                // La migration v11 crée un historique Fastest distinct. Le remplir une fois sans
+                // lancer de recalcul global : certifications, écoutes et records sans rapport restent intacts.
+                val prefs = context.getSharedPreferences("nova_startup_repair", android.content.Context.MODE_PRIVATE)
+                if (!prefs.getBoolean("fastest_pantheon_v11_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "⚡ Réparation ciblée Fastest Panthéon : recalcul des dates et de la voie d'accès")
+                        app.rebuilder.rebuildFastestRecordsOnly()
+                        RebuildAudit.write(context, "✅ Fastest Panthéon et ses deux caches recalculés")
+                        prefs.edit().putBoolean("fastest_pantheon_v11_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Réparation ciblée Fastest Panthéon en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
             }
         }
     }

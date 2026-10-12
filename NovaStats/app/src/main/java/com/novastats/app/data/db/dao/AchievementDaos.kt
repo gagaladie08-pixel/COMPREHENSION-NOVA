@@ -21,6 +21,7 @@ import com.novastats.app.data.db.entity.NotificationFeedEntity
 import com.novastats.app.data.db.entity.NovaAwardEntity
 import com.novastats.app.data.db.entity.NovaAwardHistoryEntity
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
+import com.novastats.app.data.db.entity.PantheonSpeedHistoryEntity
 import com.novastats.app.data.db.entity.PantheonStatusEntity
 import com.novastats.app.data.db.entity.RecordCacheEntity
 import com.novastats.app.data.db.entity.SnapshotAlbumEntity
@@ -124,6 +125,11 @@ interface PantheonDao {
     fun all(): Flow<List<PantheonStatusEntity>>
     @Query("SELECT * FROM pantheon_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun history(artistId: Long): List<PantheonHistoryEntity>
     @Query("SELECT * FROM pantheon_history") suspend fun allHistory(): List<PantheonHistoryEntity>
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSpeedHistory(h: PantheonSpeedHistoryEntity): Long
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSpeedHistoryAll(rows: List<PantheonSpeedHistoryEntity>)
+    @Query("SELECT * FROM pantheon_speed_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun speedHistory(artistId: Long): List<PantheonSpeedHistoryEntity>
+    @Query("SELECT * FROM pantheon_speed_history") suspend fun allSpeedHistory(): List<PantheonSpeedHistoryEntity>
+    @Query("DELETE FROM pantheon_speed_history") suspend fun clearSpeedHistory()
     @Query("SELECT * FROM pantheon_status") suspend fun allCurrent(): List<PantheonStatusEntity>
     @Query("SELECT p.*, a.name AS name, a.photo_url AS photo_url, a.play_count AS play_count FROM pantheon_status p JOIN artists a ON a.artist_id = p.artist_id ORDER BY p.status_date DESC")
     fun rows(): Flow<List<PantheonRow>>
@@ -326,6 +332,7 @@ interface RecordDao {
     @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
     @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>
     @Query("DELETE FROM records_cache WHERE record_type = :type") suspend fun clearType(type: String)
+    @Query("DELETE FROM records_cache WHERE record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON')") suspend fun clearFastestRecords()
     @Query("DELETE FROM records_cache") suspend fun clear()
 }
 

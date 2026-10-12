@@ -145,6 +145,92 @@ object PantheonRules {
     }
 }
 
+/** Voie réellement la plus rapide pour chaque étape du Panthéon — utilisée exclusivement par Fastest Panthéon. */
+enum class PantheonRoute(val dbName: String, val label: String) {
+    PLAYS("PLAYS", "Écoutes"),
+    CERTIFICATIONS("CERTIFICATIONS", "Certifications"),
+    BOTH("BOTH", "Écoutes + certifications"),
+    LEGACY_ESTIMATE("LEGACY_ESTIMATE", "Estimation historique");
+
+    companion object {
+        fun fromDb(value: String?): PantheonRoute = entries.firstOrNull { it.dbName == value } ?: LEGACY_ESTIMATE
+    }
+}
+
+/** Une certification historique attribuée à un artiste (titres crédités ou albums propriétaires). */
+data class PantheonCertificationEvent(
+    val entityType: String,
+    val entityId: Long,
+    val certification: Certification,
+    val reachedAt: Long
+)
+
+data class PantheonPathDate(val dateReached: Long, val route: PantheonRoute)
+
+/**
+ * Reconstitue la première date où le portefeuille de certifications a réellement débloqué chaque statut.
+ * Les événements au même instant sont appliqués ensemble : un lot importé ne crée pas de faux ordre interne.
+ */
+object PantheonProgression {
+    fun certificationDates(events: Iterable<PantheonCertificationEvent>): Map<PantheonStatus, Long> {
+        val ordered = events.asSequence()
+            .filter { it.entityType == "TRACK" || it.entityType == "ALBUM" }
+            .filter { it.reachedAt > 0L }
+            .sortedWith(compareBy<PantheonCertificationEvent> { it.reachedAt }
+                .thenBy { it.entityType }
+                .thenBy { it.entityId }
+                .thenBy { it.certification.rank })
+            .toList()
+        if (ordered.isEmpty()) return emptyMap()
+
+        val current = HashMap<Pair<String, Long>, Certification>()
+        val trackCounts = IntArray(CertLevel.entries.size)
+        val albumCounts = IntArray(CertLevel.entries.size)
+        val reached = LinkedHashMap<PantheonStatus, Long>()
+        var i = 0
+        while (i < ordered.size) {
+            val instant = ordered[i].reachedAt
+            while (i < ordered.size && ordered[i].reachedAt == instant) {
+                val event = ordered[i++]
+                val key = event.entityType to event.entityId
+                val previous = current[key]
+                if (previous == null || event.certification > previous) {
+                    val counts = if (event.entityType == "TRACK") trackCounts else albumCounts
+                    previous?.let { counts[it.level.ordinal]-- }
+                    current[key] = event.certification
+                    counts[event.certification.level.ordinal]++
+                }
+            }
+            val status = highestCertificationStatus(trackCounts, albumCounts) ?: continue
+            PantheonStatus.entries.take(status.ordinal + 1).forEach { reached.putIfAbsent(it, instant) }
+        }
+        return reached
+    }
+
+    /** Compare les dates d'obtention des deux voies; en cas d'égalité, les deux ont débloqué le statut ensemble. */
+    fun earliest(playsAt: Long?, certificationsAt: Long?): PantheonPathDate? = when {
+        playsAt == null && certificationsAt == null -> null
+        playsAt != null && certificationsAt != null && playsAt == certificationsAt -> PantheonPathDate(playsAt, PantheonRoute.BOTH)
+        certificationsAt == null || (playsAt != null && playsAt < certificationsAt) -> PantheonPathDate(playsAt!!, PantheonRoute.PLAYS)
+        else -> PantheonPathDate(certificationsAt!!, PantheonRoute.CERTIFICATIONS)
+    }
+
+    private fun highestCertificationStatus(tracks: IntArray, albums: IntArray): PantheonStatus? {
+        fun atLeast(counts: IntArray, level: CertLevel): Int =
+            (level.ordinal until counts.size).sumOf { counts[it] }
+        val legend = atLeast(tracks, CertLevel.DIAMOND) >= 5 && atLeast(albums, CertLevel.DIAMOND) >= 2
+        val mythique = legend && CertLevel.entries.all { tracks[it.ordinal] >= 2 && albums[it.ordinal] >= 2 }
+        return when {
+            mythique -> PantheonStatus.MYTHIQUE
+            legend -> PantheonStatus.LEGENDE
+            atLeast(tracks, CertLevel.PLATINUM) >= 5 && atLeast(albums, CertLevel.PLATINUM) >= 2 -> PantheonStatus.MEGASTAR
+            atLeast(tracks, CertLevel.GOLD) >= 5 && atLeast(albums, CertLevel.GOLD) >= 2 -> PantheonStatus.SUPERSTAR
+            atLeast(tracks, CertLevel.SILVER) >= 5 && atLeast(albums, CertLevel.SILVER) >= 2 -> PantheonStatus.STAR
+            else -> null
+        }
+    }
+}
+
 /* =========================== DÉTECTION — Normalisation =========================== */
 
 object TitleNormalizer {

@@ -2,11 +2,13 @@ package com.novastats.app.data.repository
 
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.dao.PriorRow
+import com.novastats.app.data.db.dao.DayCount
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonStatus
+import com.novastats.app.domain.PantheonRoute
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.RecordCatalog
@@ -15,6 +17,9 @@ import com.novastats.app.domain.RecordDef
 import com.novastats.app.domain.RecordMath
 import kotlinx.coroutines.flow.first
 import java.time.format.DateTimeFormatter
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -30,6 +35,50 @@ class RecordExplainer(private val db: NovaDatabase) {
     /** Une case de la constellation Multi-Chart, au meilleur jour commun observé. */
     data class ChartRank(val code: String, val label: String, val position: Int?)
     data class MultiChartVisual(val stages: List<ChartRank>, val top2: Boolean, val bestDate: String?)
+    data class SpeedStage(
+        val key: String,
+        val label: String,
+        val date: String,
+        val elapsedMs: Long,
+        val splitMs: Long,
+        val playCount: Int,
+        val activeDays: Int,
+        val route: String? = null
+    )
+    data class SpeedActivityBucket(val date: String, val label: String, val plays: Int, val activeDays: Int, val padding: Boolean = false)
+    enum class SpeedCalendarGrain { DAYS, WEEKS, MONTHS }
+    data class SpeedRival(
+        val id: Long,
+        val type: String,
+        val name: String,
+        val imageUrl: String?,
+        val durationMs: Long,
+        val gapMs: Long,
+        val percentGap: Double,
+        val tied: Boolean
+    )
+    data class SpeedVisual(
+        val startDate: String,
+        val finishDate: String,
+        val elapsedMs: Long,
+        val elapsedDays: Int,
+        val activeDays: Int,
+        val rank: Int,
+        val boardSize: Int,
+        val recordHolder: Boolean,
+        val tiedAtTop: Int,
+        val rival: SpeedRival?,
+        val stages: List<SpeedStage>,
+        val calendarGrain: SpeedCalendarGrain,
+        val calendar: List<SpeedActivityBucket>
+    )
+    private data class SpeedStageSource(
+        val key: String,
+        val label: String,
+        val at: Long,
+        val plays: Int,
+        val route: String? = null
+    )
     /** Un classement de record détenu (#1, ex æquo compris) — fiche Most Records. */
     data class Held(val def: RecordDef, val period: Period?, val category: RecordCategory, val sub: String?, val row: com.novastats.app.data.db.entity.RecordCacheEntity, val tied: Int)
     data class Story(
@@ -51,7 +100,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** Suffixe des valeurs de la frise (défaut « ▶ ») — ex. « siège(s) » pour la skyline de domination. */
         val timelineValueSuffix: String? = null,
         /** 🌐 Carte premium « constellation » du meilleur jour multi-chart. */
-        val multiChartVisual: MultiChartVisual? = null
+        val multiChartVisual: MultiChartVisual? = null,
+        /** ⚡ Fiche premium chrono : rival, splits d'étapes, voie Panthéon et calendrier d'activité. */
+        val speedVisual: SpeedVisual? = null
     )
 
     /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
@@ -778,41 +829,261 @@ class RecordExplainer(private val db: NovaDatabase) {
         val type = if (cat == RecordCategory.ALBUM) EntityType.ALBUM else EntityType.TRACK
         val history = db.certificationDao().history(id, type)
         val level = CertLevel.entries.firstOrNull { it.dbName == sub }
-        val row = history.filter { it.level == sub && (it.timeToCertifyMs ?: 0L) > 0 }.minByOrNull { it.timeToCertifyMs!! }
+        val row = history.filter { it.level == sub && (it.timeToCertifyMs ?: 0L) > 0L }
+            .minByOrNull { it.timeToCertifyMs!! }
             ?: return Story("⚡ Fastest Certification", "Aucune certification ${level?.label ?: sub} trouvée pour $name.")
         val ms = row.timeToCertifyMs!!
         val firstPlay = row.certifiedAt - ms
-        val items = history.sortedBy { it.certifiedAt }.map { h ->
+        val thresholdHistory = history
+            .filter { it.playCountAtCert <= row.playCountAtCert && it.certifiedAt <= row.certifiedAt }
+            .distinctBy { it.playCountAtCert }
+            .sortedBy { it.playCountAtCert }
+        val stages = thresholdHistory.map { h ->
             val l = CertLevel.entries.firstOrNull { it.dbName == h.level }
-            Item(type, id, "${l?.emoji ?: "🏅"} ${l?.label ?: h.level}${if (h.multiplier > 1) " ×${h.multiplier}" else ""}", "${on(Period.DAILY, Dates.toIso(h.certifiedAt))} · ${h.playCountAtCert} ▶ · ${RecordCatalog.formatDurationAdaptive(h.timeToCertifyMs ?: 0L)} après la 1re écoute", null, h.id == row.id)
+            SpeedStageSource(
+                key = "${h.level}:${h.multiplier}",
+                label = "${l?.emoji ?: "🏅"} ${l?.label ?: h.level} ×${h.multiplier}",
+                at = h.certifiedAt,
+                plays = h.playCountAtCert
+            )
         }
+        val daily = if (type == EntityType.ALBUM) db.dailyPlayDao().seriesForAlbum(id) else db.dailyPlayDao().seriesForTrack(id)
+        val visual = speedVisual("FASTEST_CERT", cat, sub, id, firstPlay, row.certifiedAt, ms, daily, stages)
+        val onDate = on(Period.DAILY, Dates.toIso(row.certifiedAt))
+        val kind = if (type == EntityType.ALBUM) "album" else "titre"
+        val pace = String.format(Locale.FRANCE, "%.1f", row.playCountAtCert / (ms / 86_400_000.0).coerceAtLeast(1.0))
+        val outcome = speedOutcome(name, visual)
+        val facts = listOf(
+            "Première écoute" to on(Period.DAILY, Dates.toIso(firstPlay)),
+            "Certification" to onDate,
+            "Écoutes au palier" to "${row.playCountAtCert} ▶" + if (row.multiplier > 1) " · ×${row.multiplier}" else "",
+            "Temps écoulé" to "${RecordCatalog.formatFastDuration(ms)} · ${visual.elapsedDays} jours calendaires",
+            "Jours actifs" to "${visual.activeDays} sur ${visual.elapsedDays}",
+            "Rythme moyen" to "$pace écoute${if (pace == "1,0") "" else "s"} / jour calendaire",
+            "Rang dans la bibliothèque" to "${visual.rank}${ordinalSuffix(visual.rank)} sur ${visual.boardSize}"
+        )
+        val selectedCert = CertLevel.entries.firstOrNull { it.dbName == row.level }
         return Story(
-            "⚡ ${level?.emoji ?: ""} ${level?.label ?: sub} en ${RecordCatalog.formatDurationAdaptive(ms)}",
-            "$name a décroché la certification ${level?.label ?: sub} en seulement ${RecordCatalog.formatDurationAdaptive(ms)} : première écoute ${on(Period.DAILY, Dates.toIso(firstPlay))}, certifié ${on(Period.DAILY, Dates.toIso(row.certifiedAt))} avec ${row.playCountAtCert} écoutes" +
-                (if (row.multiplier > 1) " (×${row.multiplier})" else "") + ". Personne n'a atteint ce palier plus vite dans ta bibliothèque.",
-            listOf("Première écoute" to on(Period.DAILY, Dates.toIso(firstPlay)), "Certifié" to on(Period.DAILY, Dates.toIso(row.certifiedAt)), "Écoutes à la certification" to "${row.playCountAtCert} ▶", "Rythme" to "${String.format(Locale.FRANCE, "%.1f", row.playCountAtCert / (ms / 86_400_000.0).coerceAtLeast(1.0))} écoutes / jour"),
-            itemsTitle = "Son parcours de certifications", items = items
+            "⚡ ${selectedCert?.emoji ?: ""} ${selectedCert?.label ?: sub} en ${RecordCatalog.formatFastDuration(ms)}",
+            "$name, ce $kind, a atteint ${selectedCert?.label ?: sub} le $onDate en ${RecordCatalog.formatFastDuration(ms)} après sa première écoute du ${on(Period.DAILY, Dates.toIso(firstPlay))}, avec ${row.playCountAtCert} écoutes" +
+                (if (row.multiplier > 1) " (×${row.multiplier})" else "") + ". $outcome",
+            facts,
+            speedVisual = visual
         )
     }
 
     private suspend fun fastestPantheon(sub: String?, id: Long, name: String): Story {
-        val history = db.pantheonDao().history(id)
+        val history = db.pantheonDao().speedHistory(id)
         val status = PantheonStatus.fromDb(sub)
-        val row = history.firstOrNull { it.status == sub && (it.timeToReachMs ?: 0L) > 0 }
-            ?: return Story("👑 Fastest Panthéon", "Aucun statut ${status?.label ?: sub} trouvé pour $name.")
+        val row = history.firstOrNull { it.status == sub && (it.timeToReachMs ?: 0L) > 0L }
+            ?: return Story(
+                "👑 Fastest Panthéon",
+                "Le parcours Fastest Panthéon précis de $name n'est pas encore disponible. Après une mise à jour, il se reconstruit sans toucher aux écoutes ni aux autres records; réouvre cette fiche après le recalcul."
+            )
         val ms = row.timeToReachMs!!
         val firstPlay = row.dateReached - ms
-        val items = history.sortedBy { it.dateReached }.map { h ->
-            val st = PantheonStatus.fromDb(h.status)
-            Item(EntityType.ARTIST, id, "${st?.emoji ?: "•"} ${st?.label ?: h.status}", "${on(Period.DAILY, Dates.toIso(h.dateReached))} · ${h.playCountAtStatus} ▶ · ${RecordCatalog.formatDurationAdaptive(h.timeToReachMs ?: 0L)} après la 1re écoute", null, h.id == row.id)
-        }
+        val route = PantheonRoute.fromDb(row.attainmentRoute)
+        val stages = history.asSequence()
+            .filter { (PantheonStatus.fromDb(it.status)?.ordinal ?: Int.MAX_VALUE) <= (status?.ordinal ?: -1) }
+            .filter { (it.timeToReachMs ?: 0L) > 0L }
+            .sortedBy { PantheonStatus.fromDb(it.status)?.ordinal ?: Int.MAX_VALUE }
+            .map { h ->
+                val st = PantheonStatus.fromDb(h.status)
+                SpeedStageSource(
+                    key = h.status,
+                    label = "${st?.emoji ?: "•"} ${st?.label ?: h.status}",
+                    at = h.dateReached,
+                    plays = h.playCountAtStatus,
+                    route = PantheonRoute.fromDb(h.attainmentRoute).label
+                )
+            }.toList()
+        val daily = db.dailyPlayDao().seriesCreditedToArtist(id)
+        val visual = speedVisual("FASTEST_PANTHEON", RecordCategory.ARTIST, sub, id, firstPlay, row.dateReached, ms, daily, stages)
+        val dateReached = on(Period.DAILY, Dates.toIso(row.dateReached))
+        val pace = String.format(Locale.FRANCE, "%.1f", row.playCountAtStatus / (ms / 86_400_000.0).coerceAtLeast(1.0))
+        val outcome = speedOutcome(name, visual)
+        val facts = listOf(
+            "Première écoute" to on(Period.DAILY, Dates.toIso(firstPlay)),
+            "Statut atteint" to dateReached,
+            "Voie la plus rapide" to route.label,
+            "Écoutes au statut" to "${row.playCountAtStatus} ▶",
+            "Temps écoulé" to "${RecordCatalog.formatFastDuration(ms)} · ${visual.elapsedDays} jours calendaires",
+            "Jours actifs" to "${visual.activeDays} sur ${visual.elapsedDays}",
+            "Rythme moyen" to "$pace écoute${if (pace == "1,0") "" else "s"} / jour calendaire",
+            "Rang dans le Panthéon" to "${visual.rank}${ordinalSuffix(visual.rank)} sur ${visual.boardSize}"
+        )
         return Story(
-            "👑 ${status?.emoji ?: ""} ${status?.label ?: sub} en ${RecordCatalog.formatDurationAdaptive(ms)}",
-            "$name est devenu ${status?.label ?: sub} du Panthéon en ${RecordCatalog.formatDurationAdaptive(ms)} seulement : première écoute ${on(Period.DAILY, Dates.toIso(firstPlay))}, statut atteint ${on(Period.DAILY, Dates.toIso(row.dateReached))} avec ${row.playCountAtStatus} écoutes. Aucun autre artiste n'a franchi ce palier aussi vite.",
-            listOf("Première écoute" to on(Period.DAILY, Dates.toIso(firstPlay)), "Statut atteint" to on(Period.DAILY, Dates.toIso(row.dateReached)), "Écoutes au statut" to "${row.playCountAtStatus} ▶", "Rythme" to "${String.format(Locale.FRANCE, "%.1f", row.playCountAtStatus / (ms / 86_400_000.0).coerceAtLeast(1.0))} écoutes / jour"),
-            itemsTitle = "Son ascension au Panthéon", items = items
+            "👑 ${status?.emoji ?: ""} ${status?.label ?: sub} en ${RecordCatalog.formatFastDuration(ms)}",
+            "$name est devenu ${status?.label ?: sub} le $dateReached en ${RecordCatalog.formatFastDuration(ms)} après sa première écoute du ${on(Period.DAILY, Dates.toIso(firstPlay))}, avec ${row.playCountAtStatus} écoutes. La voie la plus rapide était : ${route.label.lowercase(Locale.FRANCE)}. $outcome",
+            facts,
+            speedVisual = visual
         )
     }
+
+    private suspend fun speedVisual(
+        recordType: String,
+        category: RecordCategory,
+        sub: String?,
+        entityId: Long,
+        startAt: Long,
+        finishAt: Long,
+        durationMs: Long,
+        daily: List<DayCount>,
+        sourceStages: List<SpeedStageSource>
+    ): SpeedVisual {
+        val dao = db.recordDao()
+        val candidateTimes: Map<Long, Long> = if (recordType == "FASTEST_CERT") {
+            val entityType = category.dbName
+            db.certificationDao().allHistory()
+                .filter { it.entityType == entityType && it.level == sub && (it.timeToCertifyMs ?: 0L) > 0L }
+                .groupBy { it.entityId }
+                .mapValues { (_, rows) -> rows.minOf { it.timeToCertifyMs!! } }
+        } else {
+            db.pantheonDao().allSpeedHistory()
+                .filter { it.status == sub && (it.timeToReachMs ?: 0L) > 0L }
+                .associate { it.artistId to it.timeToReachMs!! }
+        }
+        val rank = candidateTimes.values.count { it < durationMs } + 1
+        val boardSize = candidateTimes.size.coerceAtLeast(rank)
+        val recordHolder = rank == 1
+        val tiedAtTop = if (recordHolder) candidateTimes.values.count { it == durationMs } else 0
+        val rows = dao.top10(recordType, null, category.dbName, sub, asc = true).first()
+        val rivalRow = if (recordHolder) {
+            rows.asSequence().filter { it.r.entityId != entityId && it.r.value == durationMs.toDouble() }
+                .firstOrNull() ?: rows.filter { it.r.entityId != entityId && it.r.value > durationMs.toDouble() }
+                .minByOrNull { it.r.value }
+        } else {
+            rows.filter { it.r.entityId != entityId && it.r.value < durationMs.toDouble() }
+                .maxByOrNull { it.r.value }
+                ?: rows.filter { it.r.entityId != entityId }.minByOrNull { it.r.value }
+        }
+        val rival = rivalRow?.let { other ->
+            val rivalMs = other.r.value.toLong().coerceAtLeast(0L)
+            val gap = kotlin.math.abs(rivalMs - durationMs)
+            val denominator = minOf(rivalMs, durationMs).coerceAtLeast(1L)
+            SpeedRival(
+                id = other.r.entityId,
+                type = other.r.category,
+                name = other.name ?: "Inconnu",
+                imageUrl = other.imageUrl,
+                durationMs = rivalMs,
+                gapMs = gap,
+                percentGap = gap * 100.0 / denominator,
+                tied = rivalMs == durationMs
+            )
+        }
+
+        val startDate = instantDate(startAt)
+        val finishDate = instantDate(finishAt)
+        val dailyCounts = daily.mapNotNull { row ->
+            runCatching { Dates.parse(row.date) }.getOrNull()?.let { it to row.playCount.coerceAtLeast(0) }
+        }.toMap()
+        val elapsedDaysLong = (ChronoUnit.DAYS.between(startDate, finishDate) + 1L).coerceAtLeast(1L)
+        val elapsedDays = elapsedDaysLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val activeDays = dailyCounts.count { (date, plays) -> !date.isBefore(startDate) && !date.isAfter(finishDate) && plays > 0 }
+        var previousAt = startAt
+        val stages = sourceStages.withIndex()
+            .filter { it.value.at >= startAt && it.value.at <= finishAt }
+            .sortedWith(compareBy<IndexedValue<SpeedStageSource>> { it.value.at }.thenBy { it.index })
+            .map { indexed ->
+                val source = indexed.value
+                val atDate = instantDate(source.at)
+                val cumulative = (source.at - startAt).coerceAtLeast(0L)
+                val activeToStage = dailyCounts.count { (date, plays) -> !date.isBefore(startDate) && !date.isAfter(atDate) && plays > 0 }
+                val split = (source.at - previousAt).coerceAtLeast(0L)
+                previousAt = maxOf(previousAt, source.at)
+                SpeedStage(
+                    key = source.key,
+                    label = source.label,
+                    date = on(Period.DAILY, Dates.toIso(source.at)),
+                    elapsedMs = cumulative,
+                    splitMs = split,
+                    playCount = source.plays,
+                    activeDays = activeToStage,
+                    route = source.route
+                )
+            }
+        val grain = when {
+            elapsedDaysLong <= 180L -> SpeedCalendarGrain.DAYS
+            elapsedDaysLong <= 1_095L -> SpeedCalendarGrain.WEEKS
+            else -> SpeedCalendarGrain.MONTHS
+        }
+        val calendar = speedCalendar(startDate, finishDate, dailyCounts, grain)
+        return SpeedVisual(
+            startDate = on(Period.DAILY, startDate.format(Dates.ISO)),
+            finishDate = on(Period.DAILY, finishDate.format(Dates.ISO)),
+            elapsedMs = durationMs,
+            elapsedDays = elapsedDays,
+            activeDays = activeDays,
+            rank = rank,
+            boardSize = boardSize,
+            recordHolder = recordHolder,
+            tiedAtTop = tiedAtTop,
+            rival = rival,
+            stages = stages,
+            calendarGrain = grain,
+            calendar = calendar
+        )
+    }
+
+    private fun speedOutcome(name: String, visual: SpeedVisual): String {
+        val rival = visual.rival ?: return if (visual.recordHolder) "Aucun autre élément de ce classement ne le devance." else "Le classement ne contient pas encore de rival exploitable."
+        val percent = String.format(Locale.FRANCE, "%.1f", rival.percentGap)
+        return when {
+            visual.recordHolder && rival.tied -> "$name partage la tête avec ${rival.name} à égalité parfaite."
+            visual.recordHolder -> "Record en tête : ${rival.name}, dauphin, est à ${RecordCatalog.formatFastDuration(rival.gapMs)} du chrono de $name, soit ${percent} % plus lent."
+            else -> "Le chrono juste devant $name appartient à ${rival.name}, avec ${RecordCatalog.formatFastDuration(rival.gapMs)} d'écart (${percent} % du temps plus rapide)."
+        }
+    }
+
+    private fun instantDate(ms: Long): LocalDate =
+        java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+
+    private fun speedCalendar(
+        start: LocalDate,
+        finish: LocalDate,
+        dailyCounts: Map<LocalDate, Int>,
+        grain: SpeedCalendarGrain
+    ): List<SpeedActivityBucket> {
+        if (finish.isBefore(start)) return emptyList()
+        val out = ArrayList<SpeedActivityBucket>()
+        when (grain) {
+            SpeedCalendarGrain.DAYS -> {
+                var day = start.minusDays((start.dayOfWeek.value - 1).toLong())
+                while (!day.isAfter(finish)) {
+                    val padding = day.isBefore(start)
+                    out += SpeedActivityBucket(day.toString(), day.dayOfMonth.toString(), if (padding) 0 else dailyCounts[day] ?: 0, if (!padding && (dailyCounts[day] ?: 0) > 0) 1 else 0, padding)
+                    day = day.plusDays(1)
+                }
+            }
+            SpeedCalendarGrain.WEEKS -> {
+                var week = start.minusDays((start.dayOfWeek.value - 1).toLong())
+                val fmt = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+                while (!week.isAfter(finish)) {
+                    val from = maxOf(start, week)
+                    val to = minOf(finish, week.plusDays(6))
+                    val active = dailyCounts.filter { (date, count) -> !date.isBefore(from) && !date.isAfter(to) && count > 0 }
+                    out += SpeedActivityBucket(week.toString(), from.format(fmt), active.values.sum(), active.size)
+                    week = week.plusWeeks(1)
+                }
+            }
+            SpeedCalendarGrain.MONTHS -> {
+                var month = YearMonth.from(start)
+                val endMonth = YearMonth.from(finish)
+                val fmt = DateTimeFormatter.ofPattern("MMM yy", Locale.FRANCE)
+                while (!month.isAfter(endMonth)) {
+                    val from = maxOf(start, month.atDay(1))
+                    val to = minOf(finish, month.atEndOfMonth())
+                    val active = dailyCounts.filter { (date, count) -> !date.isBefore(from) && !date.isAfter(to) && count > 0 }
+                    out += SpeedActivityBucket(month.atDay(1).toString(), month.format(fmt), active.values.sum(), active.size)
+                    month = month.plusMonths(1)
+                }
+            }
+        }
+        return out
+    }
+
+    private fun ordinalSuffix(rank: Int): String = if (rank == 1) "er" else "e"
 
     private suspend fun mostCertifications(cat: RecordCategory, sub: String?, id: Long, name: String): Story {
         val levelName = sub?.substringAfterLast('_') ?: sub

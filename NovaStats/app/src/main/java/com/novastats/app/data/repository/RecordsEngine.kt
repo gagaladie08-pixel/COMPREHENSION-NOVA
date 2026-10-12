@@ -5,6 +5,7 @@ import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.RecordCacheEntity
+import com.novastats.app.data.db.entity.CertificationHistoryEntity
 import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Period
@@ -27,6 +28,19 @@ class RecordsEngine(private val db: NovaDatabase) {
     private class Links(val trackArtists: Map<Long, Set<Long>>, val trackAlbum: Map<Long, Long>, val albumArtist: Map<Long, Long?>, val trackMainArtist: Map<Long, Long>) {
         /** Titre « solo » : un seul artiste (pas de featuring). */
         fun isSolo(trackId: Long) = (trackArtists[trackId]?.size ?: 1) <= 1
+    }
+
+    /** Recalcule uniquement Fastest Certification et Fastest Panthéon (réparation ciblée après migration). */
+    suspend fun rebuildSpeedRecords() {
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        val certificationHistory = db.certificationDao().allHistory()
+        fastestCertificationRecords(certificationHistory, out, now)
+        pantheonRecords(out, now)
+        db.withTransaction {
+            db.recordDao().clearFastestRecords()
+            out.chunked(500).forEach { db.recordDao().insertAll(it) }
+        }
     }
 
     suspend fun rebuildAll(onProgress: (String) -> Unit = {}) {
@@ -350,15 +364,7 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     private suspend fun certificationRecords(links: Links, out: MutableList<RecordCacheEntity>, now: Long) {
         val history = db.certificationDao().allHistory()
-        // 9. Fastest certification (par niveau, par type) — temps depuis la première écoute
-        for (type in listOf(EntityType.TRACK to RecordCategory.TRACK, EntityType.ALBUM to RecordCategory.ALBUM)) {
-            for (level in RecordCatalog.certLevels) {
-                val results = history.filter { it.entityType == type.first && it.level == level.dbName && it.timeToCertifyMs != null && it.timeToCertifyMs > 0 }
-                    .groupBy { it.entityId }
-                    .map { (id, rows) -> rows.minBy { it.timeToCertifyMs!! }.let { RecordResult(id, it.timeToCertifyMs!!.toDouble(), Dates.toIso(it.certifiedAt), if (it.multiplier > 1) "${it.multiplier}x" else null) } }
-                emit(out, "FASTEST_CERT", null, type.second, level.dbName, results, now, asc = true)
-            }
-        }
+        fastestCertificationRecords(history, out, now)
         // 12. Most certifications : niveau atteint (historique) par titre / album
         val trackLevels = history.filter { it.entityType == EntityType.TRACK }.groupBy { it.level }.mapValues { (_, rows) -> rows.map { it.entityId }.toSet() }
         val albumLevels = history.filter { it.entityType == EntityType.ALBUM }.groupBy { it.level }.mapValues { (_, rows) -> rows.map { it.entityId }.toSet() }
@@ -377,10 +383,22 @@ class RecordsEngine(private val db: NovaDatabase) {
         }
     }
 
+    /** Fastest Certification : historique séparé par catégorie et niveau, multipliers conservés en extra_data. */
+    private fun fastestCertificationRecords(history: List<CertificationHistoryEntity>, out: MutableList<RecordCacheEntity>, now: Long) {
+        for (type in listOf(EntityType.TRACK to RecordCategory.TRACK, EntityType.ALBUM to RecordCategory.ALBUM)) {
+            for (level in RecordCatalog.certLevels) {
+                val results = history.filter { it.entityType == type.first && it.level == level.dbName && it.timeToCertifyMs != null && it.timeToCertifyMs > 0 }
+                    .groupBy { it.entityId }
+                    .map { (id, rows) -> rows.minBy { it.timeToCertifyMs!! }.let { RecordResult(id, it.timeToCertifyMs!!.toDouble(), Dates.toIso(it.certifiedAt), if (it.multiplier > 1) "${it.multiplier}x" else null) } }
+                emit(out, "FASTEST_CERT", null, type.second, level.dbName, results, now, asc = true)
+            }
+        }
+    }
+
     /* ---------------- 9. Fastest Panthéon ---------------- */
 
     private suspend fun pantheonRecords(out: MutableList<RecordCacheEntity>, now: Long) {
-        val history = db.pantheonDao().allHistory()
+        val history = db.pantheonDao().allSpeedHistory()
         for (status in RecordCatalog.pantheonLevels) {
             val results = history.filter { it.status == status.dbName && it.timeToReachMs != null && it.timeToReachMs > 0 }
                 .map { RecordResult(it.artistId, it.timeToReachMs!!.toDouble(), Dates.toIso(it.dateReached), "${it.playCountAtStatus} écoutes") }

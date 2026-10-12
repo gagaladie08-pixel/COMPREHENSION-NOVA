@@ -81,6 +81,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.util.Locale
 import com.novastats.app.ui.theme.NovaColors
 
 /**
@@ -702,10 +703,11 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
         item {
-            // En-tête : image (appui → plein écran), nom, rang, valeur. Séries d'écoute : pochette floutée en fond + compteur animé.
+            // En-tête : pochette, nom et rang. Les deux records de vitesse reçoivent un chrono animé dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
+            val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -714,7 +716,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ref.rank?.let { r ->
-                            val medal = if (r <= 3) listOf("🥇", "🥈", "🥉")[r - 1] else "#$r"
+                            val medal = if (r in 1..3) listOf("🥇", "🥈", "🥉")[r - 1] else "#$r"
                             Text(medal + if (r > 3) " du classement" else "", color = if (r == 1) NovaColors.Gold else theme.textSecondary, fontWeight = FontWeight.Bold)
                         }
                         if (streakRecord) {
@@ -722,6 +724,13 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                             val counter = remember(row.r.value) { Animatable(0f) }
                             LaunchedEffect(row.r.value) { counter.animateTo(row.r.value.toFloat(), tween(1100)) }
                             Text("${counter.value.toInt()} jours", color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                        } else if (speedRecord) {
+                            val counter = remember(row.r.value) { Animatable(0f) }
+                            LaunchedEffect(row.r.value) { counter.animateTo(1f, tween(1250)) }
+                            Text(
+                                "⏱ ${RecordCatalog.formatFastDuration((row.r.value * counter.value).toLong())}",
+                                color = color, fontWeight = FontWeight.Black, fontSize = 24.sp
+                            )
                         } else {
                             Text(formatRecordValue(def, ref.period, row.r.value), color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
                         }
@@ -739,6 +748,11 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
+        }
+        story?.speedVisual?.let { visual ->
+            item { SpeedSpotlight(name, row.imageUrl, ref.category == RecordCategory.ARTIST, visual, color) }
+            item { SpeedStageLadder(def.id, visual, color) }
+            item { SpeedActivityCalendar(visual, color) }
         }
         val st = story
         if (st == null) {
@@ -874,6 +888,211 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
 @Composable
 private fun SectionTitle(text: String, color: Color) {
     Text(text, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+}
+
+/** 🏁 Carte chrono + duel, réservés à Fastest Certification et Fastest Panthéon. */
+@Composable
+private fun SpeedSpotlight(name: String, imageUrl: String?, isArtist: Boolean, visual: RecordExplainer.SpeedVisual, color: Color) {
+    val theme = Nova.theme
+    val transition = rememberInfiniteTransition(label = "speed-ceremony")
+    val glow by transition.animateFloat(
+        initialValue = 0.14f,
+        targetValue = 0.30f,
+        animationSpec = infiniteRepeatable(tween(950), RepeatMode.Reverse),
+        label = "speed-glow"
+    )
+    val panel = if (visual.recordHolder) {
+        Brush.horizontalGradient(listOf(NovaColors.Gold.copy(alpha = glow), color.copy(alpha = 0.12f), theme.surface))
+    } else {
+        Brush.horizontalGradient(listOf(color.copy(alpha = 0.16f), theme.surface, theme.surface))
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(if (visual.recordHolder) "🏆 Cérémonie du record de vitesse" else "⚡ Course contre le chrono", color)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(panel)
+                .border(1.dp, (if (visual.recordHolder) NovaColors.Gold else color).copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                .padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 54, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("CHRONO OFFICIEL", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(name, color = theme.text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(6.dp))
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("CLASSEMENT", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (visual.recordHolder && visual.tiedAtTop > 1) "🥇 #1 · ex æquo" else if (visual.recordHolder) "🥇 #1" else "#${visual.rank} / ${visual.boardSize}",
+                        color = if (visual.recordHolder) NovaColors.Gold else theme.text,
+                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                RecordCatalog.formatFastDuration(visual.elapsedMs),
+                color = if (visual.recordHolder) NovaColors.Gold else color,
+                fontWeight = FontWeight.Black,
+                fontSize = 25.sp,
+                maxLines = 2,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(7.dp))
+            Text("Départ · ${visual.startDate}", color = theme.text, style = MaterialTheme.typography.bodySmall)
+            Text("Palier atteint · ${visual.finishDate}", color = theme.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            visual.rival?.let { rival ->
+                Spacer(Modifier.height(11.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(color.copy(alpha = 0.25f)))
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CoverArt(rival.imageUrl, rival.name, size = 42, circle = rival.type == EntityType.ARTIST)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                rival.tied -> "🤝 Co-détenteur du chrono"
+                                visual.recordHolder -> "🥈 Dauphin le plus proche"
+                                else -> "🎯 Chrono juste devant"
+                            },
+                            color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium
+                        )
+                        Text(rival.name, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(if (rival.tied) "ÉGALITÉ" else RecordCatalog.formatFastDuration(rival.gapMs), color = if (rival.tied) NovaColors.Gold else theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                        if (!rival.tied) Text(
+                            "${String.format(Locale.FRANCE, "%.1f", rival.percentGap)} % ${if (visual.recordHolder) "plus lent" else "de plus"}",
+                            color = theme.textSecondary,
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.End
+                        )
+                    }
+                }
+                Text(
+                    when {
+                        rival.tied -> "Même durée, même sommet : le record est partagé."
+                        visual.recordHolder -> "${rival.name} suit derrière, à ${RecordCatalog.formatFastDuration(rival.gapMs)}."
+                        else -> "${rival.name} est juste devant avec un chrono plus rapide de ${RecordCatalog.formatFastDuration(rival.gapMs)}."
+                    },
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 6.dp)
+                )
+            } ?: Text("Seul chrono actuellement enregistré dans cette catégorie.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+            if (visual.recordHolder) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (visual.tiedAtTop > 1) "✨ ${visual.tiedAtTop} détenteurs partagent ce record." else "✨ Le meilleur temps de toute la bibliothèque — palier révélé !",
+                    color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(NovaColors.Gold.copy(alpha = glow * 0.45f)).padding(horizontal = 9.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 🪜 Étapes et temps intermédiaires de la certification ou de l'ascension Panthéon. */
+@Composable
+private fun SpeedStageLadder(recordId: String, visual: RecordExplainer.SpeedVisual, color: Color) {
+    val theme = Nova.theme
+    var revealed by remember(visual) { mutableStateOf(0) }
+    LaunchedEffect(visual) {
+        revealed = 0
+        for (i in 1..visual.stages.size) { revealed = i; delay(170) }
+    }
+    val title = if (recordId == "FASTEST_CERT") "🪜 Parcours des certifications" else "👑 Ascension au Panthéon"
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(title, color)
+        if (visual.stages.isEmpty()) {
+            Text("Aucun jalon détaillé disponible.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                visual.stages.forEachIndexed { index, stage ->
+                    val current = index == visual.stages.lastIndex
+                    val visible = index < revealed
+                    Column(
+                        Modifier.width(148.dp).clip(RoundedCornerShape(14.dp))
+                            .background(if (current) color.copy(alpha = if (visible) 0.19f else 0.07f) else theme.surface)
+                            .border(1.dp, if (current) color.copy(alpha = 0.8f) else theme.textSecondary.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text("${if (current) "🏁" else "✓"} ${index + 1} · ${stage.label}", color = if (current) color else theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(5.dp))
+                        Text(stage.date, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(7.dp))
+                        Text("+${RecordCatalog.formatFastDuration(stage.splitMs)}", color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                        Text("${RecordCatalog.formatFastDuration(stage.elapsedMs)} depuis la découverte", color = theme.text, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                        Text("${stage.playCount} écoutes · ${stage.activeDays} jours actifs", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                        stage.route?.let { route ->
+                            Spacer(Modifier.height(5.dp))
+                            Text("↳ $route", color = color, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+        Text("+ = temps depuis le jalon précédent · la durée sous chaque palier est cumulée depuis la première écoute.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+    }
+}
+
+/** 📆 Chaleur d'écoute sur toute la course, en jours / semaines / mois selon sa durée. */
+@Composable
+private fun SpeedActivityCalendar(visual: RecordExplainer.SpeedVisual, color: Color) {
+    val theme = Nova.theme
+    val maxPlays = visual.calendar.maxOfOrNull { it.plays }?.coerceAtLeast(1) ?: 1
+    val columns = when (visual.calendarGrain) {
+        RecordExplainer.SpeedCalendarGrain.DAYS -> 7
+        RecordExplainer.SpeedCalendarGrain.WEEKS -> 13
+        RecordExplainer.SpeedCalendarGrain.MONTHS -> 6
+    }
+    val unit = when (visual.calendarGrain) {
+        RecordExplainer.SpeedCalendarGrain.DAYS -> "jour par jour"
+        RecordExplainer.SpeedCalendarGrain.WEEKS -> "semaine par semaine"
+        RecordExplainer.SpeedCalendarGrain.MONTHS -> "mois par mois"
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle("📆 Calendrier de la course · $unit", color)
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface).padding(10.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("${visual.activeDays} jours actifs", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.weight(1f))
+                Text("sur ${visual.elapsedDays} jours écoulés", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            Spacer(Modifier.height(8.dp))
+            visual.calendar.chunked(columns).forEach { line ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    line.forEach { bucket ->
+                        if (bucket.padding) {
+                            Box(Modifier.weight(1f).aspectRatio(1f))
+                        } else {
+                            val intensity = if (bucket.plays <= 0) 0.07f else 0.18f + 0.82f * (bucket.plays.toFloat() / maxPlays).coerceIn(0f, 1f)
+                            Box(
+                                Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(4.dp))
+                                    .background(color.copy(alpha = intensity))
+                                    .border(1.dp, if (bucket.activeDays > 0) color.copy(alpha = 0.38f) else Color.Transparent, RoundedCornerShape(4.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (visual.calendarGrain != RecordExplainer.SpeedCalendarGrain.DAYS) {
+                                    Text(bucket.label, color = if (bucket.activeDays > 0) theme.text else theme.textSecondary, fontSize = 8.sp, maxLines = 1, textAlign = TextAlign.Center)
+                                }
+                            }
+                        }
+                    }
+                    repeat(columns - line.size) { Box(Modifier.weight(1f).aspectRatio(1f)) }
+                }
+                Spacer(Modifier.height(3.dp))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Aucune écoute", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Box(Modifier.padding(horizontal = 5.dp).size(9.dp).clip(RoundedCornerShape(2.dp)).background(color.copy(alpha = 0.12f)))
+                Text("→", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Box(Modifier.padding(horizontal = 5.dp).size(9.dp).clip(RoundedCornerShape(2.dp)).background(color))
+                Text("journée la plus intense", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
 }
 
 /** 🌐 Constellation Multi-Chart : positions simultanées sur la meilleure date de synchronisation. */
@@ -1219,7 +1438,7 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
         RecordUnit.PERIODS -> "$n ${RecordCatalog.unitLabel(period, n > 1)}"
         RecordUnit.PLAYS -> "$n écoute${if (n > 1) "s" else ""}"
         RecordUnit.POSITIONS -> (if (def.id == "BIGGEST_FALL") "−" else "+") + "$n place${if (n > 1) "s" else ""}"
-        RecordUnit.DURATION_MS -> RecordCatalog.formatDurationAdaptive(value.toLong())
+        RecordUnit.DURATION_MS -> if (def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON") RecordCatalog.formatFastDuration(value.toLong()) else RecordCatalog.formatDurationAdaptive(value.toLong())
         RecordUnit.TIMES -> "$n fois"
         RecordUnit.DAYS -> "$n jour${if (n > 1) "s" else ""}"
         RecordUnit.COUNT -> when (def.id) {

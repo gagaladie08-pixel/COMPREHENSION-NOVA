@@ -32,7 +32,7 @@ import com.novastats.app.data.db.dao.TrackLinkDao
 import com.novastats.app.data.db.entity.*
 
 /**
- * Base de données NovaStats — 35 tables (cf. docs/DATABASE.md).
+ * Base de données NovaStats — 36 tables (cf. docs/DATABASE.md).
  */
 @Database(
     entities = [
@@ -51,7 +51,7 @@ import com.novastats.app.data.db.entity.*
         // Module 6 — Hall of Fame
         HallOfFameEntity::class, HallOfFameBadgeEntity::class,
         // Module 7 — Panthéon
-        PantheonStatusEntity::class, PantheonHistoryEntity::class,
+        PantheonStatusEntity::class, PantheonHistoryEntity::class, PantheonSpeedHistoryEntity::class,
         // Module 8 — Records
         RecordCacheEntity::class,
         // Module 9 — Nova Awards
@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -190,15 +190,23 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v11 : historique exact du parcours Fastest Panthéon, isolé de l'historique public existant. */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS pantheon_speed_history (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, artist_id INTEGER NOT NULL, status TEXT NOT NULL, date_reached INTEGER NOT NULL, time_to_reach_ms INTEGER, play_count_at_status INTEGER NOT NULL, attainment_route TEXT NOT NULL DEFAULT 'LEGACY_ESTIMATE')")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_pantheon_speed_history_artist_id_status ON pantheon_speed_history(artist_id, status)")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 // Volontairement PAS de fallbackToDestructiveMigrationOnDowngrade() : il réinitialisait
                 // la base au moindre retour de version. Installer un build plus ancien que la base
                 // effaçait donc les écoutes en silence — plusieurs milliers, irrécupérables.
-                // Les 9 migrations couvrent v1 → v10 : la montée de version est toujours possible,
+                // Les 10 migrations couvrent v1 → v11 : la montée de version est toujours possible,
                 // et un downgrade échoue désormais à l'ouverture au lieu de tout détruire.
                 .build()
                 .also { instance = it }

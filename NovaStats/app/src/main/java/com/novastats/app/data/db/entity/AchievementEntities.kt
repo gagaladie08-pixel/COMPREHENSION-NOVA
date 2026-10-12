@@ -115,7 +115,20 @@ data class PantheonHistoryEntity(
     @ColumnInfo(name = "play_count_at_status") val playCountAtStatus: Int
 )
 
-/** Table 24 — records_cache : résultats pré-calculés des 30 records */
+/** Table 24 — historique précis réservé au record Fastest Panthéon (l'historique classique reste séparé). */
+@Entity(tableName = "pantheon_speed_history", indices = [Index(value = ["artist_id", "status"], unique = true)])
+data class PantheonSpeedHistoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "artist_id") val artistId: Long,
+    val status: String,
+    @ColumnInfo(name = "date_reached") val dateReached: Long,
+    @ColumnInfo(name = "time_to_reach_ms") val timeToReachMs: Long? = null,
+    @ColumnInfo(name = "play_count_at_status") val playCountAtStatus: Int,
+    /** PLAYS / CERTIFICATIONS / BOTH / LEGACY_ESTIMATE. */
+    @ColumnInfo(name = "attainment_route", defaultValue = "'LEGACY_ESTIMATE'") val attainmentRoute: String = "LEGACY_ESTIMATE"
+)
+
+/** Table 25 — records_cache : résultats pré-calculés des 30 records */
 @Entity(
     tableName = "records_cache",
     indices = [Index(value = ["record_type", "period_type", "category", "subcategory"])]
@@ -136,7 +149,7 @@ data class RecordCacheEntity(
     @ColumnInfo(name = "calculated_at") val calculatedAt: Long = System.currentTimeMillis()
 )
 
-/** Table 25 — nova_awards (année en cours = LIVE, recalculée en temps réel) */
+/** Table 26 — nova_awards (année en cours = LIVE, recalculée en temps réel) */
 @Entity(tableName = "nova_awards", indices = [Index(value = ["year", "category"], unique = true)])
 data class NovaAwardEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -151,7 +164,7 @@ data class NovaAwardEntity(
     @ColumnInfo(name = "calculated_at") val calculatedAt: Long = System.currentTimeMillis()
 )
 
-/** Table 26 — nova_awards_history (années finalisées le 31 décembre) */
+/** Table 27 — nova_awards_history (années finalisées le 31 décembre) */
 @Entity(tableName = "nova_awards_history", indices = [Index(value = ["year", "category"], unique = true)])
 data class NovaAwardHistoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

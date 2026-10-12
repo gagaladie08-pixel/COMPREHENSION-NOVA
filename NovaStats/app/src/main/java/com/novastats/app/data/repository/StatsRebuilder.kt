@@ -8,6 +8,7 @@ import com.novastats.app.data.db.entity.DailyStreakEntity
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.PantheonStatusEntity
+import com.novastats.app.data.db.entity.PantheonSpeedHistoryEntity
 import com.novastats.app.data.db.entity.SessionEntity
 import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.util.runCatchingCancellable
@@ -17,6 +18,8 @@ import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonRules
+import com.novastats.app.domain.PantheonCertificationEvent
+import com.novastats.app.domain.PantheonProgression
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.domain.StreakCalculator
@@ -39,6 +42,12 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
     companion object {
         /** Une seule reconstruction globale à la fois, même si plusieurs composants créent leur propre Rebuilder. */
         private val rebuildMutex = Mutex()
+    }
+
+    /** Réparation ciblée de Fastest Panthéon et des deux caches Fastest, sans reconstruire les autres records. */
+    suspend fun rebuildFastestRecordsOnly() = rebuildMutex.withLock {
+        rebuildPantheonSpeedHistory()
+        RecordsEngine(db).rebuildSpeedRecords()
     }
 
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
@@ -378,6 +387,97 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
                 )
                 db.artistDao().setPantheonStatus(a.artistId, status.dbName, statusDate)
             }
+        }
+        // Historique distinct et précis pour Fastest Panthéon : le flux Panthéon classique reste inchangé.
+        rebuildPantheonSpeedHistory()
+    }
+
+    /**
+     * Enregistre, pour Fastest Panthéon uniquement, le premier instant où chaque statut a été obtenu :
+     * seuil d'écoutes OU portefeuille de certifications complet, en retenant le chemin le plus rapide.
+     */
+    private suspend fun rebuildPantheonSpeedHistory() {
+        val artists = db.artistDao().allByPlays().first()
+        val currentTrackCerts = db.certificationDao().byType(EntityType.TRACK).first()
+        val currentAlbumCerts = db.certificationDao().byType(EntityType.ALBUM).first()
+        val certificationHistory = db.certificationDao().allHistory()
+
+        val artistIdsByTrack = HashMap<Long, MutableSet<Long>>()
+        db.trackLinkDao().allTrackArtists().forEach { link ->
+            artistIdsByTrack.getOrPut(link.trackId) { LinkedHashSet() }.add(link.artistId)
+        }
+        // Même repli que TrackLinkDao.artistIdsForTrack : la fiche principale compte même si un ancien import n'a pas encore son lien.
+        db.trackDao().allPlayed().forEach { track ->
+            artistIdsByTrack.getOrPut(track.trackId) { LinkedHashSet() }.add(track.artistId)
+        }
+        val albumOwner = db.albumDao().all().associate { it.albumId to it.artistId }
+        val artistById = artists.associateBy { it.artistId }
+
+        val tracksByArtist = HashMap<Long, MutableList<Certification>>()
+        for (cert in currentTrackCerts) {
+            val domain = cert.toDomain()
+            artistIdsByTrack[cert.entityId].orEmpty().forEach { artistId ->
+                tracksByArtist.getOrPut(artistId) { mutableListOf() } += domain
+            }
+        }
+        val albumsByArtist = HashMap<Long, MutableList<Certification>>()
+        for (cert in currentAlbumCerts) {
+            val domain = cert.toDomain()
+            albumOwner[cert.entityId]?.let { artistId ->
+                albumsByArtist.getOrPut(artistId) { mutableListOf() } += domain
+            }
+        }
+
+        val eventsByArtist = HashMap<Long, MutableList<PantheonCertificationEvent>>()
+        for (event in certificationHistory) {
+            val level = com.novastats.app.domain.CertLevel.entries.firstOrNull { it.dbName == event.level } ?: continue
+            if (event.certifiedAt <= 0L) continue
+            val creditedArtists = when (event.entityType) {
+                EntityType.TRACK -> artistIdsByTrack[event.entityId].orEmpty()
+                EntityType.ALBUM -> albumOwner[event.entityId]?.let { listOf(it) }.orEmpty()
+                else -> emptyList()
+            }
+            for (artistId in creditedArtists) {
+                // Un timestamp de repli « maintenant » postérieur à la dernière écoute n'est pas une date d'obtention fiable.
+                val lastPlay = artistById[artistId]?.lastPlayedAt
+                if (lastPlay != null && event.certifiedAt > lastPlay) continue
+                eventsByArtist.getOrPut(artistId) { mutableListOf() } += PantheonCertificationEvent(
+                    entityType = event.entityType,
+                    entityId = event.entityId,
+                    certification = Certification(level, event.multiplier),
+                    reachedAt = event.certifiedAt
+                )
+            }
+        }
+
+        val speedHistory = ArrayList<PantheonSpeedHistoryEntity>()
+        for (artist in artists) {
+            val certs = ArtistCertSummary(
+                tracksByArtist[artist.artistId].orEmpty(),
+                albumsByArtist[artist.artistId].orEmpty()
+            )
+            val currentStatus = PantheonRules.evaluate(artist.playCount, certs).status ?: continue
+            val certificationDates = PantheonProgression.certificationDates(eventsByArtist[artist.artistId].orEmpty())
+            for (status in PantheonStatus.entries) {
+                if (status.ordinal > currentStatus.ordinal) break
+                val playsAt = db.scrobbleDao().nthPlayOfArtist(artist.artistId, status.playsThreshold)
+                val path = PantheonProgression.earliest(playsAt, certificationDates[status]) ?: continue
+                val elapsed = artist.firstPlayedAt?.let { first -> (path.dateReached - first).takeIf { it >= 0L } }
+                val playCount = db.scrobbleDao().artistPlayCountAt(artist.artistId, path.dateReached)
+                speedHistory += PantheonSpeedHistoryEntity(
+                    artistId = artist.artistId,
+                    status = status.dbName,
+                    dateReached = path.dateReached,
+                    timeToReachMs = elapsed,
+                    playCountAtStatus = playCount,
+                    attainmentRoute = path.route.dbName
+                )
+            }
+        }
+
+        db.withTransaction {
+            db.pantheonDao().clearSpeedHistory()
+            speedHistory.chunked(500).forEach { db.pantheonDao().insertSpeedHistoryAll(it) }
         }
     }
 

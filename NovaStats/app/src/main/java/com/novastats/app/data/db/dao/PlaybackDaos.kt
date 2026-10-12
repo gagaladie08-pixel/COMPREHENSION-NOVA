@@ -265,6 +265,10 @@ interface ScrobbleDao {
     )
     suspend fun nthPlayOfArtist(artistId: Long, n: Int): Long?
 
+    /** Compte exact des écoutes créditées à l'artiste jusqu'à l'instant inclus (Fastest Panthéon). */
+    @Query("SELECT COUNT(*) FROM scrobbles s JOIN track_artists ta ON ta.track_id = s.track_id WHERE ta.artist_id = :artistId AND s.status = 'CONFIRMED' AND s.started_at <= :at")
+    suspend fun artistPlayCountAt(artistId: Long, at: Long): Int
+
     @Query("SELECT MIN(started_at) FROM scrobbles WHERE status = 'CONFIRMED'")
     suspend fun firstPlayTime(): Long?
 
@@ -407,6 +411,9 @@ interface DailyPlayDao {
     suspend fun runnerUpInRange(root: Long, from: String, to: String): Int
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE album_id = :id GROUP BY date ORDER BY date") suspend fun seriesForAlbum(id: Long): List<DayCount>
     @Query("SELECT date, SUM(play_count) AS play_count FROM daily_plays WHERE artist_id = :id GROUP BY date ORDER BY date") suspend fun seriesForArtist(id: Long): List<DayCount>
+    /** Écoutes quotidiennes réellement créditées à l'artiste, principaux ET invités (règle du Panthéon). */
+    @Query("SELECT d.date AS date, SUM(d.play_count) AS play_count FROM daily_plays d JOIN track_artists ta ON ta.track_id = d.track_id WHERE ta.artist_id = :id GROUP BY d.date ORDER BY d.date")
+    suspend fun seriesCreditedToArtist(id: Long): List<DayCount>
     @Query("SELECT DISTINCT date FROM daily_plays WHERE date BETWEEN :from AND :to ORDER BY date") suspend fun activeDatesBetween(from: String, to: String): List<String>
     @Query("SELECT artist_id AS id, SUM(play_count) AS plays, SUM(total_duration_ms) AS duration_ms FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY artist_id") suspend fun artistPlaysBetween(from: String, to: String): List<IdCount>
     @Query("SELECT track_id AS id, SUM(play_count) AS plays, SUM(total_duration_ms) AS duration_ms FROM daily_plays WHERE date BETWEEN :from AND :to GROUP BY track_id") suspend fun trackPlaysBetween(from: String, to: String): List<IdCount>

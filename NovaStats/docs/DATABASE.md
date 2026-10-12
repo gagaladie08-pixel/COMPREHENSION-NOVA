@@ -1,4 +1,4 @@
-# 🗄️ Base de données NovaStats — 35 tables
+# 🗄️ Base de données NovaStats — 36 tables
 
 Conventions Room :
 
@@ -36,18 +36,19 @@ Fichier source : `app/src/main/java/com/novastats/app/data/db/entity/*.kt`
 | 21 | `hall_of_fame_badges` | Hall of Fame | AchievementEntities.kt |
 | 22 | `pantheon_status` | Panthéon | AchievementEntities.kt |
 | 23 | `pantheon_history` | Panthéon | AchievementEntities.kt |
-| 24 | `records_cache` | Records | AchievementEntities.kt |
-| 25 | `nova_awards` | Nova Awards | AchievementEntities.kt |
-| 26 | `nova_awards_history` | Nova Awards | AchievementEntities.kt |
-| 27 | `now_playing` | Accueil | SystemEntities.kt |
-| 28 | `daily_stats` | Accueil | SystemEntities.kt |
-| 29 | `notifications_feed` | Accueil | SystemEntities.kt |
-| 30 | `api_cache` | APIs | SystemEntities.kt |
-| 31 | `api_reliability` | APIs | SystemEntities.kt |
-| 32 | `edit_history` | Éditeur | SystemEntities.kt |
-| 33 | `user_corrections` | Éditeur | SystemEntities.kt |
-| 34 | `migration_log` | Import/Export | SystemEntities.kt |
-| 35 | `artist_exceptions` | Référentiel | CoreEntities.kt |
+| 24 | `pantheon_speed_history` | Fastest Panthéon | AchievementEntities.kt |
+| 25 | `records_cache` | Records | AchievementEntities.kt |
+| 26 | `nova_awards` | Nova Awards | AchievementEntities.kt |
+| 27 | `nova_awards_history` | Nova Awards | AchievementEntities.kt |
+| 28 | `now_playing` | Accueil | SystemEntities.kt |
+| 29 | `daily_stats` | Accueil | SystemEntities.kt |
+| 30 | `notifications_feed` | Accueil | SystemEntities.kt |
+| 31 | `api_cache` | APIs | SystemEntities.kt |
+| 32 | `api_reliability` | APIs | SystemEntities.kt |
+| 33 | `edit_history` | Éditeur | SystemEntities.kt |
+| 34 | `user_corrections` | Éditeur | SystemEntities.kt |
+| 35 | `migration_log` | Import/Export | SystemEntities.kt |
+| 36 | `artist_exceptions` | Référentiel | CoreEntities.kt |
 
 ## Migrations et index
 
@@ -58,7 +59,9 @@ Fichier source : `app/src/main/java/com/novastats/app/data/db/entity/*.kt`
 - **Schéma v9 (`MIGRATION_8_9`)** : remplace les index simples `daily_plays.artist_id`, `album_id` et `root_id` par
   les index composites `(artist_id, date)`, `(album_id, date)` et `(root_id, date)`. Les filtres d'entité et de période
   s'appuient ainsi sur une même recherche, et les séries quotidiennes sont déjà ordonnées par date.
-- Ces migrations ne touchent qu'aux index : aucune écoute, entrée du fil ou statistique n'est supprimée/recalculée.
+- **Schéma v10 (`MIGRATION_9_10`)** : ajoute les index `tracks(original_track_id)` et `tracks(first_played_at)` pour les repliements de versions et rangs de découverte.
+- **Schéma v11 (`MIGRATION_10_11`)** : crée `pantheon_speed_history`, un historique non destructif réservé à Fastest Panthéon. Il conserve la date exacte, le nombre d'écoutes et la voie la plus rapide (écoutes, certifications ou égalité), sans modifier l'historique utilisé par l'écran Panthéon classique. Au premier lancement, une réparation ciblée reconstruit ce cache et les deux records Fastest uniquement.
+- Les migrations v7→v10 ne touchent qu'aux index. La v11 ajoute une table dédiée sans modifier les écoutes ni l'historique Panthéon classique; la réparation de démarrage ne recalcule que les deux caches Fastest.
 - Les index simples `created_at` et `is_read` restent dédiés au tri récent et au filtrage de lecture.
 
 ## Flux de données
@@ -73,6 +76,7 @@ Service / Import ──► scrobbles (CONFIRMED)
         daily_streaks, sessions
         certifications (+ history, dates rétroactives = date de la N-ième écoute)
         pantheon_status (+ history)
+        pantheon_speed_history (parcours exact réservé à Fastest Panthéon)
                         │
                         ▼  BillboardEngine.rebuildAll() (import) / refreshCurrent() (à chaque écoute)
         snapshots (+ snapshot_tracks / artists / albums) → hall_of_fame (+ badges, notifications_feed)

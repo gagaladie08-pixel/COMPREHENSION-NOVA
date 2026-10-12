@@ -6,12 +6,12 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /*
- * MODULE 10 — Accueil            (tables 27-29)
- * MODULE 11 — Cache API & Éditeur (tables 30-33)
- * Import/Export                   (table 34)
+ * MODULE 10 — Accueil            (tables 28-30)
+ * MODULE 11 — Cache API & Éditeur (tables 31-34)
+ * Import/Export                   (table 35)
  */
 
-/** Table 27 — now_playing : une seule ligne (id = 1), mise à jour par le service */
+/** Table 28 — now_playing : une seule ligne (id = 1), mise à jour par le service */
 @Entity(tableName = "now_playing")
 data class NowPlayingEntity(
     @PrimaryKey val id: Long = 1,
@@ -33,7 +33,7 @@ data class NowPlayingEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: Long = System.currentTimeMillis()
 )
 
-/** Table 28 — daily_stats : résumé "Aujourd'hui" (section 2 de l'Accueil) */
+/** Table 29 — daily_stats : résumé "Aujourd'hui" (section 2 de l'Accueil) */
 @Entity(tableName = "daily_stats", indices = [Index(value = ["date"], unique = true)])
 data class DailyStatsEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -45,7 +45,7 @@ data class DailyStatsEntity(
     @ColumnInfo(name = "distinct_tracks") val distinctTracks: Int = 0
 )
 
-/** Table 29 — notifications_feed : "Dernières actualités" (section 4 de l'Accueil) */
+/** Table 30 — notifications_feed : "Dernières actualités" (section 4 de l'Accueil) */
 @Entity(
     tableName = "notifications_feed",
     indices = [Index("created_at"), Index("is_read"), Index(value = ["type", "entity_id", "created_at"])]
@@ -61,7 +61,7 @@ data class NotificationFeedEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
-/** Table 30 — api_cache : score ≥ 90 → 6 mois, 70-89 → 1 mois, < 70 → pas mis en cache */
+/** Table 31 — api_cache : score ≥ 90 → 6 mois, 70-89 → 1 mois, < 70 → pas mis en cache */
 @Entity(
     tableName = "api_cache",
     indices = [Index(value = ["entity_type", "entity_id", "data_type"]), Index("expires_at")]
@@ -82,7 +82,7 @@ data class ApiCacheEntity(
     @ColumnInfo(name = "is_blacklisted") val isBlacklisted: Boolean = false
 )
 
-/** Table 31 — api_reliability : fiabilité dynamique → priorité de cascade ajustée */
+/** Table 32 — api_reliability : fiabilité dynamique → priorité de cascade ajustée */
 @Entity(tableName = "api_reliability", indices = [Index(value = ["api_name"], unique = true)])
 data class ApiReliabilityEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -94,7 +94,7 @@ data class ApiReliabilityEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: Long = System.currentTimeMillis()
 )
 
-/** Table 32 — edit_history (max 50 entrées côté éditeur, undo = dernière action) */
+/** Table 33 — edit_history (max 50 entrées côté éditeur, undo = dernière action) */
 @Entity(tableName = "edit_history", indices = [Index("created_at")])
 data class EditHistoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -108,7 +108,7 @@ data class EditHistoryEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
-/** Table 33 — user_corrections : apprentissage éditeur (corrections mémorisées et réutilisées) */
+/** Table 34 — user_corrections : apprentissage éditeur (corrections mémorisées et réutilisées) */
 @Entity(
     tableName = "user_corrections",
     indices = [Index(value = ["original_value", "correction_type"], unique = true)]
@@ -123,7 +123,7 @@ data class UserCorrectionEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
-/** Table 34 — migration_log */
+/** Table 35 — migration_log */
 @Entity(tableName = "migration_log")
 data class MigrationLogEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
