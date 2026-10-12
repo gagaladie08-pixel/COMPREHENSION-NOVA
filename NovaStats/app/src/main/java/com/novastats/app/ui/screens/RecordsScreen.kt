@@ -242,6 +242,38 @@ fun RecordsScreen() {
         }
     }
 
+    // 🎯 « Le chart est à moi » : chaque nouveau record de simultanéité se célèbre une fois (amorçage silencieux au premier lancement)
+    var simQueue by remember { mutableStateOf<List<SimCelebration>>(emptyList()) }
+    LaunchedEffect(count) {
+        runCatching {
+            val rows = db.recordDao().rowsForTypes(listOf("MOST_SIMULTANEOUS"))
+            val numberOnes = rows.groupBy { listOf(it.r.periodType ?: "-", it.r.category, it.r.subcategory ?: "-") }
+                .mapNotNull { g -> g.value.maxByOrNull { it.r.value }?.takeIf { it.r.value >= 2 } }
+            fun keyOf(row: com.novastats.app.data.db.dao.RecordRow) =
+                "SIM:${row.r.category}:${row.r.subcategory}:${row.r.periodType}:${row.r.entityId}:${row.r.value.toLong()}"
+            val announced = app.settings.simultaneousAnnounced.first()
+            if (announced.isEmpty()) {
+                val keys = numberOnes.map { keyOf(it) }.toSet()
+                if (keys.isNotEmpty()) app.settings.markSimultaneousAnnounced(keys)
+            } else {
+                val fresh = numberOnes.filter { keyOf(it) !in announced }
+                if (fresh.isNotEmpty()) {
+                    app.settings.markSimultaneousAnnounced(fresh.map { keyOf(it) }.toSet())
+                    simQueue = fresh.map { row ->
+                        val zoneKey = row.r.subcategory?.substringAfterLast('_')
+                        SimCelebration(
+                            keyOf(row), row.name ?: "Inconnu", row.imageUrl, row.r.value.toInt(),
+                            RecordCatalog.zoneLimit(zoneKey), RecordCatalog.zoneLabel(zoneKey), row.r.periodType, row.r.category
+                        )
+                    }.sortedByDescending { it.count }
+                }
+            }
+        }
+    }
+    simQueue.firstOrNull()?.let { c ->
+        SimultaneousPopup(c) { simQueue = simQueue.drop(1) }
+    }
+
     DetailPopupHost(detail) { detail = null }
 }
 
@@ -543,6 +575,19 @@ private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Pe
                         }
                     }
                 }
+                // 🎯 Most Simultaneous : palier de prise d'otage (Présence / Duo de choc / Mainmise / Razzia)
+                if (def.id == "MOST_SIMULTANEOUS") {
+                    val cnt = row.r.value.toInt()
+                    val zl = RecordCatalog.zoneLimit(row.r.subcategory?.substringAfterLast('_'))
+                    RecordCatalog.simultTier(cnt, zl)?.let { t ->
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "${t.emoji} ${t.label}", color = Color(t.colorArgb), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(t.colorArgb).copy(alpha = 0.12f))
+                                .border(1.dp, Color(t.colorArgb).copy(alpha = 0.45f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(formatRecordValue(def, period, row.r.value), color = if (first) NovaColors.Gold else color, fontWeight = FontWeight.Bold, fontSize = if (first) 17.sp else 14.sp)
@@ -653,10 +698,18 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
+            st.seats?.let { seats ->
+                item {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        SectionTitle("🪑 ${seats.occupied.size} siège(s) sur ${seats.total} dans la zone", color)
+                        SeatsRow(seats, color)
+                    }
+                }
+            }
             if (st.timeline.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
-                    if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color)
+                    if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
                 }
             }
             if (st.held.isNotEmpty()) {
@@ -736,7 +789,7 @@ private fun SectionTitle(text: String, color: Color) {
 
 /** Frise horizontale : une colonne par période (date, position, écoutes), les périodes clés en surbrillance. */
 @Composable
-private fun Timeline(points: List<RecordExplainer.Point>, color: Color) {
+private fun Timeline(points: List<RecordExplainer.Point>, color: Color, suffix: String = "▶") {
     val theme = Nova.theme
     val maxPlays = points.maxOfOrNull { it.plays ?: 0 } ?: 0
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -751,7 +804,7 @@ private fun Timeline(points: List<RecordExplainer.Point>, color: Color) {
                 Text(pt.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 pt.position?.let { Text("#$it", color = if (it == 1) NovaColors.Gold else if (pt.highlight) color else theme.text, fontWeight = FontWeight.Black, fontSize = 18.sp) }
                 pt.plays?.let { pl ->
-                    Text("$pl ▶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text("$pl $suffix", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                     // Mini-barre d'écoutes
                     Box(Modifier.padding(top = 3.dp).width(48.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(theme.textSecondary.copy(alpha = 0.15f))) {
                         Box(Modifier.fillMaxWidth(if (maxPlays > 0) (pl.toFloat() / maxPlays).coerceIn(0.03f, 1f) else 0f).height(3.dp).background(color))
@@ -795,6 +848,29 @@ private fun HeatGrid(points: List<RecordExplainer.Point>, color: Color) {
     }
 }
 
+/** 🪑 Les sièges de la zone : dorés (avec leur numéro) quand le propriétaire les occupe, grisés sinon. */
+@Composable
+private fun SeatsRow(seats: RecordExplainer.Seats, color: Color) {
+    val theme = Nova.theme
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        (1..seats.total).toList().chunked(if (seats.total <= 10) 10 else 25).forEach { line ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                line.forEach { seat ->
+                    val mine = seat in seats.occupied
+                    Box(
+                        Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(8.dp))
+                            .background(if (mine) Brush.horizontalGradient(listOf(NovaColors.Gold, color)) else Brush.horizontalGradient(listOf(theme.surface, theme.surface)))
+                            .border(1.dp, if (mine) NovaColors.Gold else theme.textSecondary.copy(alpha = 0.25f), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("$seat", color = if (mine) theme.background else theme.textSecondary, fontWeight = if (mine) FontWeight.Black else FontWeight.Normal, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** 🔥 Cérémonie de palier d'une série d'écoute : carte glow, pochette floutée, flamme géante, compteur qui monte jour par jour. */
 @Composable
 private fun StreakTierPopup(c: TierCelebration, onDismiss: () -> Unit) {
@@ -831,6 +907,49 @@ private fun StreakTierPopup(c: TierCelebration, onDismiss: () -> Unit) {
 }
 
 private data class TierCelebration(val key: String, val name: String, val imageUrl: String?, val days: Int, val tier: RecordCatalog.StreakTier)
+
+private data class SimCelebration(
+    val key: String, val name: String, val imageUrl: String?, val count: Int,
+    val zoneLimit: Int, val zoneLabel: String, val periodType: String?, val category: String
+)
+
+/** 🎯 « Le chart est à moi » : nouveau record de simultanéité — les sièges se remplissent un par un jusqu'au record. */
+@Composable
+private fun SimultaneousPopup(c: SimCelebration, onDismiss: () -> Unit) {
+    val theme = Nova.theme
+    val tier = RecordCatalog.simultTier(c.count, c.zoneLimit)
+    val tierColor = tier?.let { Color(it.colorArgb) } ?: NovaColors.Gold
+    var filled by remember(c.key) { mutableStateOf(0) }
+    LaunchedEffect(c.key) {
+        for (i in 1..c.count) { filled = i; delay(260) }
+    }
+    val seatsShown = if (c.zoneLimit <= 20) c.zoneLimit else 10
+    val pLabel = Period.entries.firstOrNull { it.dbName == c.periodType }?.frLabel
+    NovaPopupCard(borderColor = tierColor, onDismiss = onDismiss, glowDp = 24, backdropUrl = c.imageUrl, banner = {}) {
+        Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("🎯 LE CHART EST À MOI", color = tierColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(10.dp))
+            Text(c.name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, textAlign = TextAlign.Center)
+            Text(
+                listOfNotNull(pLabel, runCatching { sectionLabel(RecordCategory.valueOf(c.category)) }.getOrNull(), c.zoneLabel.removePrefix("le ")).joinToString(" · "),
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(12.dp))
+            SeatsRow(RecordExplainer.Seats(seatsShown, (1..filled).toList()), tierColor)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "$filled ${if (filled > 1) "sièges" else "siège"} dans ${c.zoneLabel}",
+                color = tierColor, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Center
+            )
+            tier?.let { Text("${it.emoji} ${it.label}", color = Color(it.colorArgb), fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Nouveau record de simultanéité : jamais autant de places n'avaient été occupées à la fois dans ${c.zoneLabel} du chart ${pLabel ?: ""}.".replace("  ", " "),
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+            )
+        }
+    }
+}
 
 /** Valeur formatée selon l'unité du record (jours/semaines/mois adaptés à la période, écoutes, places, durée adaptative…). */
 fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {

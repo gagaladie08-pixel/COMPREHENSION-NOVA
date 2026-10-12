@@ -172,9 +172,9 @@ class RecordsEngine(private val db: NovaDatabase) {
             val debut1 = HashMap<Long, MutableSet<Long>>(); val debut10 = HashMap<Long, MutableSet<Long>>()
             val lastDate = HashMap<Long, String>()
             // Simultanés : période → owner → nb d'items par zone
-            val simultaneous = HashMap<String, HashMap<Long, IntArray>>() // zones : 5,10,20,50,all
-            val zoneLimits = intArrayOf(5, 10, 20, 50, Int.MAX_VALUE)
-            val zoneNames = listOf("TOP5", "TOP10", "TOP20", "TOP50", "ALL")
+            val simultaneous = HashMap<String, HashMap<Long, IntArray>>() // zones : 2,5,10,20,50,all
+            val zoneLimits = intArrayOf(2, 5, 10, 20, 50, Int.MAX_VALUE)
+            val zoneNames = listOf("TOP2", "TOP5", "TOP10", "TOP20", "TOP50", "ALL")
             for ((itemId, s) in v.series) {
                 val owners = v.owners(itemId)
                 if (owners.isEmpty()) continue
@@ -187,7 +187,7 @@ class RecordsEngine(private val db: NovaDatabase) {
                     if (entry.position <= 10) debut10.getOrPut(o) { HashSet() }.add(itemId)
                     lastDate[o] = maxOf(lastDate[o] ?: "", s.last().date)
                     for (a in s) {
-                        val counts = simultaneous.getOrPut(a.date) { HashMap() }.getOrPut(o) { IntArray(5) }
+                        val counts = simultaneous.getOrPut(a.date) { HashMap() }.getOrPut(o) { IntArray(zoneLimits.size) }
                         for (z in zoneLimits.indices) if (a.position <= zoneLimits[z]) counts[z]++
                     }
                 }

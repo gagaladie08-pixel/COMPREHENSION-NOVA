@@ -91,7 +91,7 @@ object RecordCatalog {
     private val artistSongsAlbums = mapOf(RecordCategory.ARTIST to songsAlbums)
     val certLevels = CertLevel.entries.map { RecordSub(it.dbName, "${it.emoji} ${it.label}") }
     val pantheonLevels = PantheonStatus.entries.map { RecordSub(it.dbName, "${it.emoji} ${it.label}") }
-    val zones = listOf(RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("ALL", "🌍 Top Global"))
+    val zones = listOf(RecordSub("TOP2", "🥈 Top 2"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("ALL", "🌍 Top Global"))
     val consistencySubs = listOf(RecordSub("TOP5", "🏆 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("CHART", "📊 Total Chart"))
     val multiChartLevels = listOf(RecordSub("DWMY", "🌍 D+W+M+Y"), RecordSub("DWM", "🔥 D+W+M"), RecordSub("DW", "⚡ D+W"), RecordSub("WM", "⚡ W+M"), RecordSub("MY", "⚡ M+Y"))
     /** Zones des records de longévité / retours (25-27) : Top 10, Top 20, Top 50, chart complet. */
@@ -114,6 +114,15 @@ object RecordCatalog {
     fun tierFor(days: Int): StreakTier? = streakTiers.lastOrNull { days >= it.min }
     /** Prochain palier à atteindre après [days] jours (null au-delà d'Inferno). */
     fun nextTier(days: Int): StreakTier? = streakTiers.firstOrNull { days < it.min }
+    /** ✊ Paliers de prise d'otage (23 — Most Simultaneous) : la forme de l'exploit selon le nombre de sièges occupés. */
+    data class SimTier(val emoji: String, val label: String, val colorArgb: Long)
+    fun simultTier(count: Int, zoneLimit: Int): SimTier? = when {
+        zoneLimit != Int.MAX_VALUE && count >= zoneLimit && count >= 2 -> SimTier("🧹", "Razzia", 0xFFFFD600)
+        count >= 5 -> SimTier("✊", "Mainmise", 0xFFE53935)
+        count >= 3 -> SimTier("🤝", "Duo de choc", 0xFFFF7043)
+        count >= 2 -> SimTier("🎯", "Présence", 0xFF90CAF9)
+        else -> null
+    }
     /** Podium Sweep (29) : zone × mode (Solo = uniquement des titres sans featuring ; Standard = feat. compris). */
     val sweepZones = listOf("TOP3" to "Top 3", "TOP5" to "Top 5", "TOP10" to "Top 10")
     val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }

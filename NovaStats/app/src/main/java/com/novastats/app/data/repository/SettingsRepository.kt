@@ -44,6 +44,7 @@ class SettingsRepository(private val context: Context) {
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
         val STREAK_TIERS_ANNOUNCED = stringSetPreferencesKey("streak_tiers_announced")
+        val SIMULTANEOUS_ANNOUNCED = stringSetPreferencesKey("simultaneous_records_announced")
         val AWARDS_UNLOCK_NOTIFIED = booleanPreferencesKey("awards_unlock_notified")
         val FIRST_SCROBBLE_NOTIFIED = booleanPreferencesKey("first_scrobble_notified")
         val AGENT_SYNC = booleanPreferencesKey("agent_sync")
@@ -126,6 +127,9 @@ class SettingsRepository(private val context: Context) {
     /** 🔥 Paliers de séries d'écoute déjà annoncés (clé « CAT:id:palier ») — chaque palier ne se célèbre qu'une fois. */
     val streakTiersAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.STREAK_TIERS_ANNOUNCED] ?: emptySet() }
     suspend fun markStreakTierAnnounced(key: String) = context.dataStore.edit { it[Keys.STREAK_TIERS_ANNOUNCED] = (it[Keys.STREAK_TIERS_ANNOUNCED] ?: emptySet()) + key }
+    /** 🎯 Records de simultanéité déjà annoncés (cérémonie « le chart est à moi ») — chaque #1 ne se célèbre qu'une fois. */
+    val simultaneousAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.SIMULTANEOUS_ANNOUNCED] ?: emptySet() }
+    suspend fun markSimultaneousAnnounced(keys: Set<String>) = context.dataStore.edit { it[Keys.SIMULTANEOUS_ANNOUNCED] = (it[Keys.SIMULTANEOUS_ANNOUNCED] ?: emptySet()) + keys }
     val awardsUnlockNotified: Flow<Boolean> = context.dataStore.data.map { it[Keys.AWARDS_UNLOCK_NOTIFIED] ?: false }
     suspend fun markAwardsUnlockNotified() = context.dataStore.edit { it[Keys.AWARDS_UNLOCK_NOTIFIED] = true }
 

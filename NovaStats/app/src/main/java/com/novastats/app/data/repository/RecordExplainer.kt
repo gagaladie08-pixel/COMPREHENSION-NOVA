@@ -41,8 +41,15 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** Paragraphes de contexte propres à CET élément (place dans le classement, profil, autres records) : titre → texte. */
         val context: List<Pair<String, String>> = emptyList(),
         /** Séries d'écoute : afficher la frise en calendrier de chaleur (un carré par jour, intensité = écoutes). */
-        val heat: Boolean = false
+        val heat: Boolean = false,
+        /** Simultanéité : les sièges de la zone occupés la période record (visual « le chart ce jour-là »). */
+        val seats: Seats? = null,
+        /** Suffixe des valeurs de la frise (défaut « ▶ ») — ex. « siège(s) » pour la skyline de domination. */
+        val timelineValueSuffix: String? = null
     )
+
+    /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
+    data class Seats(val total: Int, val occupied: List<Int>)
 
     private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
     private val shortFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
@@ -666,19 +673,72 @@ class RecordExplainer(private val db: NovaDatabase) {
             }
             "MOST_SIMULTANEOUS" -> {
                 val zoneName = sub?.substringAfterLast('_') ?: "ALL"
-                val limit = when (zoneName) { "TOP5" -> 5; "TOP10" -> 10; "TOP20" -> 20; "TOP50" -> 50; else -> Int.MAX_VALUE }
-                val zone = when (zoneName) { "TOP5" -> "le Top 5"; "TOP10" -> "le Top 10"; "TOP20" -> "le Top 20"; "TOP50" -> "le Top 50"; else -> "le chart" }
+                val limit = when (zoneName) { "TOP2" -> 2; "TOP5" -> 5; "TOP10" -> 10; "TOP20" -> 20; "TOP50" -> 50; else -> Int.MAX_VALUE }
+                val zone = when (zoneName) { "TOP2" -> "le Top 2"; "TOP5" -> "le Top 5"; "TOP10" -> "le Top 10"; "TOP20" -> "le Top 20"; "TOP50" -> "le Top 50"; else -> "le chart" }
                 val byDate = HashMap<String, MutableList<Pair<Long, RecordAppearance>>>()
                 mine.forEach { (iid, s) -> s.forEach { a -> if (a.position <= limit) byDate.getOrPut(a.date) { ArrayList() }.add(iid to a) } }
                 val best = byDate.entries.maxWithOrNull(compareBy<Map.Entry<String, List<Pair<Long, RecordAppearance>>>> { it.value.size }.thenBy { it.key })
                     ?: return Story(def.title, "Aucune période trouvée où $name avait plusieurs ${plural(2, what)} dans $zone.")
+                val n = best.value.size
                 val items = best.value.sortedBy { it.second.position }.map { (iid, a) -> item(iid, "${pos(a.position)} · ${a.plays} ▶", true) }
+                // ✊ Palier de prise d'otage + saturation de la zone
+                val tier = com.novastats.app.domain.RecordCatalog.simultTier(n, limit)
+                val saturation = if (limit != Int.MAX_VALUE) n * 100 / limit else null
+                // 🆚 Dauphin du jour : le meilleur autre propriétaire dans la zone, cette période-là
+                var rivalFact: Pair<String, String>? = null
+                var rivalLine = ""
+                val rivalEntries = all.filter { (iid, _) -> iid !in ids }
+                    .mapNotNull { (iid, s) -> s.firstOrNull { it.date == best.key && it.position <= limit }?.let { iid to it.position } }
+                if (rivalEntries.isNotEmpty()) {
+                    val ownerOf: Map<Long, Long> = if (itemCat == RecordCategory.ALBUM) {
+                        db.albumDao().byIds(rivalEntries.map { it.first }).associate { it.albumId to (it.artistId ?: -1L) }
+                    } else {
+                        db.trackDao().byIds(rivalEntries.map { it.first }).associate { it.trackId to (if (cat == RecordCategory.ALBUM) (it.albumId ?: -1L) else it.artistId) }
+                    }
+                    val grouped = rivalEntries.mapNotNull { (iid, p2) -> ownerOf[iid]?.takeIf { it >= 0 }?.let { it to p2 } }.groupBy({ it.first }, { it.second })
+                    val top = grouped.maxByOrNull { it.value.size }
+                    if (top != null) {
+                        val rivalN = top.value.size
+                        val rType = if (itemCat == RecordCategory.ALBUM || cat != RecordCategory.ALBUM) "ARTIST" else "ALBUM"
+                        val (rName, _) = nameOf(rType, top.key)
+                        rivalFact = "Dauphin du jour" to "$rName — $rivalN ${plural(rivalN, what)}"
+                        rivalLine = when {
+                            n > rivalN -> " Ce jour-là, $name pesait plus lourd dans $zone que n'importe qui d'autre : le dauphin ($rName) n'avait que $rivalN ${plural(rivalN, what)}."
+                            n == rivalN -> " Ce jour-là, $rName faisait jeu égal avec $rivalN ${plural(rivalN, what)}."
+                            else -> ""
+                        }
+                    }
+                }
+                // 📈 Séries de domination : plus longue suite de périodes avec au moins [thr] sièges
+                val thr = if (limit >= 3) 3 else 2
+                val periodOf = HashMap<String, Int>()
+                mine.forEach { (_, s) -> s.forEach { periodOf[it.date] = it.periodIndex } }
+                var bestRun = 0; var curRun = 0; var prevIdx = Int.MIN_VALUE
+                byDate.entries.filter { it.value.size >= thr }.sortedBy { periodOf[it.key] ?: Int.MIN_VALUE }.forEach { (dt, _) ->
+                    val idx = periodOf[dt] ?: return@forEach
+                    curRun = if (idx == prevIdx + 1) curRun + 1 else 1
+                    prevIdx = idx
+                    if (curRun > bestRun) bestRun = curRun
+                }
+                val facts = buildList {
+                    add("Période record" to on(p, best.key))
+                    tier?.let { add("Palier" to "${it.emoji} ${it.label}") }
+                    saturation?.let { add("Saturation de la zone" to "$it % à lui seul") }
+                    add("Périodes avec ≥ 2 ${plural(2, what)} dans $zone" to "${byDate.values.count { it.size >= 2 }}")
+                    if (bestRun >= 2) add("Plus longue série avec ≥ $thr" to "$bestRun ${plural(bestRun, "période")} de suite")
+                    rivalFact?.let { add(it) }
+                }
+                val skyline = byDate.entries.sortedBy { periodOf[it.key] ?: 0 }.map { (dt, l) -> Point(dt, short(p, dt), null, l.size, dt == best.key) }
                 Story(
-                    "🎯 ${items.size} ${plural(items.size, what)} en même temps dans $zone",
-                    "${on(p, best.key).replaceFirstChar { it.uppercase() }}, $name occupait $zone du $chart avec ${items.size} ${plural(items.size, what)} à la fois : " +
-                        items.joinToString(", ") { "${it.name} (${it.detail.substringBefore(" ·")})" } + ".",
-                    listOf("Période record" to on(p, best.key), "Périodes avec ≥ 2 ${plural(2, what)} dans $zone" to "${byDate.values.count { it.size >= 2 }}"),
-                    itemsTitle = "Le chart ce jour-là", items = items
+                    "🎯 $n ${plural(n, what)} en même temps dans $zone" + (tier?.let { " · ${it.emoji} ${it.label}" } ?: ""),
+                    "${on(p, best.key).replaceFirstChar { it.uppercase() }}, $name occupait $zone du $chart avec $n ${plural(n, what)} à la fois : " +
+                        items.joinToString(", ") { "${it.name} (${it.detail.substringBefore(" ·")})" } + "." +
+                        (saturation?.let { " Soit $it % de $zone à lui seul." } ?: "") + rivalLine,
+                    facts,
+                    "La skyline de domination (barres = sièges occupés)", skyline,
+                    "Le chart ce jour-là", items,
+                    seats = if (limit <= 50) Seats(limit, best.value.map { it.second.position }.sorted()) else null,
+                    timelineValueSuffix = "sièges"
                 )
             }
             "MOST_SUCCESSIVE_1" -> {
