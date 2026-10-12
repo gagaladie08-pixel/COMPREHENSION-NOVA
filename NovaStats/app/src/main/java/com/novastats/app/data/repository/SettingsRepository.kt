@@ -46,6 +46,8 @@ class SettingsRepository(private val context: Context) {
         val STREAK_TIERS_ANNOUNCED = stringSetPreferencesKey("streak_tiers_announced")
         val SIMULTANEOUS_ANNOUNCED = stringSetPreferencesKey("simultaneous_records_announced")
         val SWEEP_ANNOUNCED = stringSetPreferencesKey("podium_sweep_announced")
+        val MULTI_CHART_ANNOUNCED = stringSetPreferencesKey("multi_chart_milestones_announced")
+        val MULTI_CHART_BOOTSTRAP_DATE = stringPreferencesKey("multi_chart_bootstrap_date")
         val AWARDS_UNLOCK_NOTIFIED = booleanPreferencesKey("awards_unlock_notified")
         val FIRST_SCROBBLE_NOTIFIED = booleanPreferencesKey("first_scrobble_notified")
         val AGENT_SYNC = booleanPreferencesKey("agent_sync")
@@ -134,6 +136,11 @@ class SettingsRepository(private val context: Context) {
     /** 🧹 Records de balayage déjà annoncés (cérémonie « Balayage ! ») — chaque #1 ne se célèbre qu'une fois. */
     val sweepAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.SWEEP_ANNOUNCED] ?: emptySet() }
     suspend fun markSweepAnnounced(keys: Set<String>) = context.dataStore.edit { it[Keys.SWEEP_ANNOUNCED] = (it[Keys.SWEEP_ANNOUNCED] ?: emptySet()) + keys }
+    /** 🌐 Paliers Multi-Chart déjà célébrés — amorçage silencieux pour éviter les annonces rétroactives. */
+    val multiChartAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.MULTI_CHART_ANNOUNCED] ?: emptySet() }
+    suspend fun markMultiChartAnnounced(keys: Set<String>) = context.dataStore.edit { it[Keys.MULTI_CHART_ANNOUNCED] = (it[Keys.MULTI_CHART_ANNOUNCED] ?: emptySet()) + keys }
+    val multiChartBootstrapDate: Flow<String?> = context.dataStore.data.map { it[Keys.MULTI_CHART_BOOTSTRAP_DATE] }
+    suspend fun setMultiChartBootstrapDate(iso: String) = context.dataStore.edit { it[Keys.MULTI_CHART_BOOTSTRAP_DATE] = iso }
     val awardsUnlockNotified: Flow<Boolean> = context.dataStore.data.map { it[Keys.AWARDS_UNLOCK_NOTIFIED] ?: false }
     suspend fun markAwardsUnlockNotified() = context.dataStore.edit { it[Keys.AWARDS_UNLOCK_NOTIFIED] = true }
 

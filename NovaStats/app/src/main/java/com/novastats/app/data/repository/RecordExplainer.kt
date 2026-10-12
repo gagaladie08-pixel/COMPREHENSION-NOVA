@@ -12,6 +12,7 @@ import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
 import com.novastats.app.domain.RecordDef
+import com.novastats.app.domain.RecordMath
 import kotlinx.coroutines.flow.first
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -26,6 +27,9 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     data class Point(val date: String, val label: String, val position: Int?, val plays: Int?, val highlight: Boolean = false, val note: String? = null)
     data class Item(val type: String, val id: Long, val name: String, val detail: String, val imageUrl: String?, val highlight: Boolean = false)
+    /** Une case de la constellation Multi-Chart, au meilleur jour commun observé. */
+    data class ChartRank(val code: String, val label: String, val position: Int?)
+    data class MultiChartVisual(val stages: List<ChartRank>, val top2: Boolean, val bestDate: String?)
     /** Un classement de record détenu (#1, ex æquo compris) — fiche Most Records. */
     data class Held(val def: RecordDef, val period: Period?, val category: RecordCategory, val sub: String?, val row: com.novastats.app.data.db.entity.RecordCacheEntity, val tied: Int)
     data class Story(
@@ -45,7 +49,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** Simultanéité : les sièges de la zone occupés la période record (visual « le chart ce jour-là »). */
         val seats: Seats? = null,
         /** Suffixe des valeurs de la frise (défaut « ▶ ») — ex. « siège(s) » pour la skyline de domination. */
-        val timelineValueSuffix: String? = null
+        val timelineValueSuffix: String? = null,
+        /** 🌐 Carte premium « constellation » du meilleur jour multi-chart. */
+        val multiChartVisual: MultiChartVisual? = null
     )
 
     /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
@@ -1007,31 +1013,160 @@ class RecordExplainer(private val db: NovaDatabase) {
     }
 
     private suspend fun multiChart(cat: RecordCategory, sub: String?, id: Long, name: String): Story {
+        val base = RecordCatalog.multiChartBase(sub)
+        val required = RecordCatalog.multiChartChartKeys(sub)
+        if (base == null || required.isEmpty()) return Story("🌐 Multi-Chart Domination", "Combinaison de charts inconnue.")
+        val top2 = RecordCatalog.multiChartIsTop2(sub)
         fun idx(s: List<RecordAppearance>) = s.associate { it.date to it.position }
-        val d = idx(series(cat, Period.DAILY, id)); val w = idx(series(cat, Period.WEEKLY, id)); val m = idx(series(cat, Period.MONTHLY, id)); val y = idx(series(cat, Period.YEARLY, id))
-        val days = db.billboardDao().snapshotDates(Period.DAILY.dbName)
-        val pts = ArrayList<Point>()
-        for (iso in days) {
+        val charts = mapOf(
+            "D" to idx(series(cat, Period.DAILY, id)),
+            "W" to idx(series(cat, Period.WEEKLY, id)),
+            "M" to idx(series(cat, Period.MONTHLY, id)),
+            "Y" to idx(series(cat, Period.YEARLY, id))
+        )
+        val dailySnapshots = db.billboardDao().snapshotDates(Period.DAILY.dbName).distinct().sorted()
+        val snapshotDates = mapOf(
+            "D" to dailySnapshots.toSet(),
+            "W" to db.billboardDao().snapshotDates(Period.WEEKLY.dbName).toSet(),
+            "M" to db.billboardDao().snapshotDates(Period.MONTHLY.dbName).toSet(),
+            "Y" to db.billboardDao().snapshotDates(Period.YEARLY.dbName).toSet()
+        )
+        fun chartDateKey(code: String, iso: String): String {
             val date = Dates.parse(iso)
-            val pd = d[iso]; val pw = w[Dates.weekOf(date).fromIso]; val pm = m[Dates.monthOf(date).fromIso]; val py = y[Dates.yearOf(date).fromIso]
-            val ok = when (sub) {
-                "DWMY" -> pd != null && pw != null && pm != null && py != null
-                "DWM" -> pd != null && pw != null && pm != null
-                "DW" -> pd != null && pw != null
-                "WM" -> pw != null && pm != null
-                "MY" -> pm != null && py != null
-                else -> false
+            return when (code) {
+                "D" -> iso
+                "W" -> Dates.weekOf(date).fromIso
+                "M" -> Dates.monthOf(date).fromIso
+                else -> Dates.yearOf(date).fromIso
             }
-            if (ok) pts += Point(iso, short(Period.DAILY, iso), pd ?: pw ?: pm, null, (pd ?: pw ?: pm ?: 99) <= 3, listOfNotNull(pd?.let { "D#$it" }, pw?.let { "W#$it" }, pm?.let { "M#$it" }, py?.let { "Y#$it" }).joinToString(" · "))
         }
-        val combo = when (sub) { "DWMY" -> "quotidien + hebdo + mensuel + annuel"; "DWM" -> "quotidien + hebdo + mensuel"; "DW" -> "quotidien + hebdo"; "WM" -> "hebdo + mensuel"; "MY" -> "mensuel + annuel"; else -> sub ?: "" }
-        val bestDay = pts.minByOrNull { it.position ?: 99 }
+        fun ranksOn(iso: String): Map<String, Int?> = charts.mapValues { (code, positions) -> positions[chartDateKey(code, iso)] }
+        data class Observation(val date: String, val ranks: Map<String, Int?>)
+        val observations = dailySnapshots.map { Observation(it, ranksOn(it)) }
+        val qualifying = observations.filter { RecordMath.multiChartQualifies(sub ?: "", it.ranks) }
+        val points = qualifying.map { observation ->
+            val details = listOf("D", "W", "M", "Y").mapNotNull { code -> observation.ranks[code]?.let { "$code#$it" } }.joinToString(" · ")
+            Point(
+                observation.date, short(Period.DAILY, observation.date), null, null,
+                top2 || required.any { (observation.ranks[it] ?: Int.MAX_VALUE) <= 3 }, details
+            )
+        }
+        val eligibleDays = dailySnapshots.count { day ->
+            required.all { code -> snapshotDates[code]?.contains(chartDateKey(code, day)) == true }
+        }
+        val coverage = if (eligibleDays > 0) (100 * points.size / eligibleDays) else 0
+        val combo = when (base) {
+            "DWMY" -> "quotidien + hebdomadaire + mensuel + annuel"
+            "DWM" -> "quotidien + hebdomadaire + mensuel"
+            "DW" -> "quotidien + hebdomadaire"
+            "WM" -> "hebdomadaire + mensuel"
+            "MY" -> "mensuel + annuel"
+            else -> base
+        }
+        val chartLabels = mapOf("D" to "Quotidien", "W" to "Hebdomadaire", "M" to "Mensuel", "Y" to "Annuel")
+        val chartPeriods = mapOf("D" to Period.DAILY, "W" to Period.WEEKLY, "M" to Period.MONTHLY, "Y" to Period.YEARLY)
+        val firstByChart = required.mapNotNull { code -> charts[code]?.keys?.minOrNull()?.let { code to it } }
+        val route = firstByChart.joinToString(" → ") { (code, date) -> "$code ${on(chartPeriods[code], date)}" }
+        val transitions = listOf("D" to "W", "W" to "M", "M" to "Y")
+        val conversionFacts = transitions.map { (from, to) ->
+            var eligible = 0
+            var converted = 0
+            for (day in dailySnapshots) {
+                val fromKey = chartDateKey(from, day); val toKey = chartDateKey(to, day)
+                if (snapshotDates[from]?.contains(fromKey) != true || snapshotDates[to]?.contains(toKey) != true) continue
+                val fromRank = charts[from]?.get(fromKey) ?: continue
+                if (top2 && fromRank > 2) continue
+                eligible++
+                val toRank = charts[to]?.get(toKey)
+                if (toRank != null && (!top2 || toRank <= 2)) converted++
+            }
+            val pct = if (eligible > 0) 100 * converted / eligible else 0
+            Triple("${chartLabels[from]} → ${chartLabels[to]}", converted, eligible).let { (label, n, total) ->
+                label to if (total == 0) "— (aucune fenêtre comparable)" else "$n / $total jours · $pct %"
+            }
+        }
+        val qualifiedEpochs = qualifying.map { Dates.parse(it.date).toEpochDay().toInt() }.sorted()
+        val streak = RecordMath.longestDayStreak(qualifiedEpochs)
+        val streakStart = streak?.let { java.time.LocalDate.ofEpochDay(it.second.toLong()).toString() }
+        val streakEnd = streak?.let { java.time.LocalDate.ofEpochDay(it.third.toLong()).toString() }
+        data class WindowResult(val count: Int, val start: String, val end: String)
+        fun bestWindow(size: Int): WindowResult? {
+            if (dailySnapshots.isEmpty() || qualifiedEpochs.isEmpty()) return null
+            var left = 0; var right = 0; var bestCount = 0; var bestStart: java.time.LocalDate? = null
+            for (iso in dailySnapshots) {
+                val start = Dates.parse(iso)
+                val firstEpoch = start.toEpochDay().toInt(); val lastEpoch = firstEpoch + size - 1
+                while (left < qualifiedEpochs.size && qualifiedEpochs[left] < firstEpoch) left++
+                if (right < left) right = left
+                while (right < qualifiedEpochs.size && qualifiedEpochs[right] <= lastEpoch) right++
+                val count = right - left
+                if (count > bestCount) { bestCount = count; bestStart = start }
+            }
+            val start = bestStart ?: return null
+            return WindowResult(bestCount, start.toString(), start.plusDays((size - 1).toLong()).toString())
+        }
+        val bestWeek = bestWindow(7)
+        val bestMonth = bestWindow(30)
+        val bestDay = qualifying.minByOrNull { observation -> required.sumOf { observation.ranks[it] ?: Int.MAX_VALUE } }
+        val stages = required.map { code ->
+            ChartRank(code, chartLabels[code] ?: code, bestDay?.ranks?.get(code))
+        }
+        val milestones = listOf("DW", "DWM", "DWMY", "DWMY_TOP2").associateWith { level ->
+            observations.count { RecordMath.multiChartQualifies(level, it.ranks) }
+        }
+        val topRows = db.recordDao().top10("MULTI_CHART", null, cat.dbName, sub, false).first()
+        val rivalRow = topRows.filter { it.r.entityId != id }
+            .minByOrNull { kotlin.math.abs(it.r.value - points.size.toDouble()) }
+        val rival = rivalRow?.let { other ->
+            val gap = kotlin.math.abs(other.r.value.toInt() - points.size)
+            val detail = when {
+                gap == 0 -> "À égalité : ${other.r.value.toInt()} jours synchronisés"
+                other.r.value > points.size.toDouble() -> "Devant de $gap ${plural(gap, "jour")} sur cette variante"
+                else -> "Derrière de $gap ${plural(gap, "jour")} sur cette variante"
+            }
+            Item(cat.dbName, other.r.entityId, other.name ?: "Inconnu", detail, other.imageUrl)
+        }
+        val firstDate = points.firstOrNull()?.date
+        val lastDate = points.lastOrNull()?.date
+        val runText = if ((streak?.first ?: 0) > 1) {
+            "Plus longue chaîne : ${streak!!.first} jours consécutifs, du ${short(Period.DAILY, streakStart!!)} au ${short(Period.DAILY, streakEnd!!)}. "
+        } else if (streak != null) "Sa meilleure série est d'un jour. " else ""
+        val bestDayText = bestDay?.let { "Meilleure synchronisation : ${on(Period.DAILY, it.date)} (${it.ranks.filterKeys { k -> k in required }.map { (k, v) -> "$k#$v" }.joinToString(" · ")}). " } ?: ""
+        val coverageText = if (eligibleDays > 0) "$coverage % des $eligibleDays jours où tous les charts concernés avaient un snapshot" else "aucune fenêtre où tous les charts concernés étaient disponibles"
+        val rivalText = rival?.let { "Rival le plus proche : ${it.name} — ${it.detail.lowercase()}. " } ?: ""
+        val narrative = "$name a été classé simultanément dans $combo" +
+            (if (top2) ", toujours au #1 ou au #2 dans chacun de ces charts" else ", quelle que soit sa position dans ces charts") +
+            ", pendant ${points.size} ${plural(points.size, "jour")}. " +
+            (if (route.isNotBlank()) "Son parcours entre les échelles : $route. " else "") +
+            "Cela représente $coverageText. " + bestDayText + runText + rivalText +
+            "La frise montre les positions de chaque échelle aux dates de synchronisation."
+        val facts = buildList {
+            add("Combinaison" to combo)
+            add("Règle de rang" to if (top2) "#1 ou #2 dans chaque chart" else "Présence, quelle que soit la place")
+            add("Jours synchronisés" to "${points.size} jours")
+            add("Couverture des occasions" to if (eligibleDays > 0) "$coverage % · ${points.size} / $eligibleDays jours" else "Aucune fenêtre comparable")
+            firstDate?.let { add("Première synchronisation" to on(Period.DAILY, it)) }
+            lastDate?.let { add("Dernière synchronisation" to on(Period.DAILY, it)) }
+            firstByChart.forEach { (code, date) -> add("Première entrée · ${chartLabels[code]}" to on(chartPeriods[code], date)) }
+            if ((streak?.first ?: 0) > 0) add("Plus longue chaîne" to "${streak!!.first} ${plural(streak.first, "jour")} · ${short(Period.DAILY, streakStart!!)} → ${short(Period.DAILY, streakEnd!!)}")
+            bestWeek?.let { add("Meilleure fenêtre · 7 jours" to "${it.count} synchronisations · ${short(Period.DAILY, it.start)} → ${short(Period.DAILY, it.end)}") }
+            bestMonth?.let { add("Meilleure fenêtre · 30 jours" to "${it.count} synchronisations · ${short(Period.DAILY, it.start)} → ${short(Period.DAILY, it.end)}") }
+            conversionFacts.forEach { add("Conversion · ${it.first}" to it.second) }
+            add("Palier · D+W" to "${milestones["DW"]} jours")
+            add("Palier · D+W+M" to "${milestones["DWM"]} jours")
+            add("Palier · D+W+M+Y" to "${milestones["DWMY"]} jours")
+            add("Grand Chelem Top 2" to "${milestones["DWMY_TOP2"]} jours")
+            bestDay?.let { add("Meilleure synchronisation" to "${on(Period.DAILY, it.date)} · ${it.ranks.filterKeys { k -> k in required }.map { (k, v) -> "$k#$v" }.joinToString(" · ")}") }
+            rival?.let { add("Rival le plus proche" to "${it.name} · ${it.detail}") }
+        }
         return Story(
-            "🌐 ${pts.size} ${plural(pts.size, "jour")} dans $combo à la fois",
-            "Pendant ${pts.size} ${plural(pts.size, "jour")}, $name était classé simultanément dans les charts $combo" + (if (pts.isNotEmpty()) " — de ${short(Period.DAILY, pts.first().date)} à ${short(Period.DAILY, pts.last().date)}" else "") + ". " +
-                (bestDay?.let { "Sa meilleure journée combinée : ${on(Period.DAILY, it.date)} (${it.note})." } ?: ""),
-            listOf("Jours" to "${pts.size}", "Première fois" to (pts.firstOrNull()?.let { on(Period.DAILY, it.date) } ?: "—"), "Dernière fois" to (pts.lastOrNull()?.let { on(Period.DAILY, it.date) } ?: "—")),
-            "Les jours concernés (positions D / W / M / Y)", pts
+            "🌐 ${points.size} ${plural(points.size, "jour")} · $combo" + if (top2) " · 🥈 Top 2 partout" else "",
+            narrative,
+            facts,
+            "Dates synchronisées · positions D / W / M / Y", points,
+            itemsTitle = rival?.let { "Le rival le plus proche" }, items = listOfNotNull(rival),
+            multiChartVisual = MultiChartVisual(stages, top2, bestDay?.let { short(Period.DAILY, it.date) })
         )
     }
+
 }

@@ -305,6 +305,40 @@ fun RecordsScreen() {
         SweepCeremonyPopup(c) { sweepQueue = sweepQueue.drop(1) }
     }
 
+    // 🌐 Cérémonies Multi-Chart : premières conquêtes D+W, D+W+M, D+W+M+Y et Grand Chelem Top 2.
+    var multiChartQueue by remember { mutableStateOf<List<MultiChartCelebration>>(emptyList()) }
+    LaunchedEffect(count, lastCalc) {
+        runCatching {
+            val milestones = setOf("DW", "DWM", "DWMY", "DWMY_TOP2")
+            val rows = db.recordDao().rowsForTypes(listOf("MULTI_CHART"))
+                .filter { row -> row.r.subcategory?.let { it in milestones } == true && row.r.value >= 1.0 }
+            fun keyOf(row: com.novastats.app.data.db.dao.RecordRow) = "MC:${row.r.category}:${row.r.entityId}:${row.r.subcategory}"
+            val announced = app.settings.multiChartAnnounced.first()
+            val bootstrap = "__MULTI_CHART_BOOTSTRAP__"
+            val baselineDate = app.settings.multiChartBootstrapDate.first()
+            val keys = rows.map { keyOf(it) }.toSet()
+            if (bootstrap !in announced || baselineDate == null) {
+                app.settings.markMultiChartAnnounced(keys + bootstrap)
+                app.settings.setMultiChartBootstrapDate(Dates.today().toString())
+            } else {
+                val fresh = rows.filter { keyOf(it) !in announced }
+                if (fresh.isNotEmpty()) {
+                    // La première reconstruction après installation peut révéler des exploits historiques : on les marque
+                    // silencieusement. Seuls les paliers datés depuis l'amorçage déclenchent une vraie cérémonie.
+                    app.settings.markMultiChartAnnounced(fresh.map { keyOf(it) }.toSet())
+                    val current = fresh.filter { it.r.valueDate?.let { date -> date >= baselineDate } == true }
+                    fun order(sub: String?) = when (sub) { "DW" -> 1; "DWM" -> 2; "DWMY" -> 3; "DWMY_TOP2" -> 4; else -> 0 }
+                    multiChartQueue = current.map { row ->
+                        MultiChartCelebration(keyOf(row), row.name ?: "Inconnu", row.imageUrl, row.r.value.toInt(), row.r.subcategory ?: "DW", row.r.category)
+                    }.sortedWith(compareBy<MultiChartCelebration> { order(it.sub) }.thenByDescending { it.count })
+                }
+            }
+        }
+    }
+    if (tierQueue.isEmpty() && simQueue.isEmpty() && sweepQueue.isEmpty()) {
+        multiChartQueue.firstOrNull()?.let { c -> MultiChartCeremonyPopup(c) { multiChartQueue = multiChartQueue.drop(1) } }
+    }
+
     DetailPopupHost(detail) { detail = null }
 }
 
@@ -729,6 +763,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
+            st.multiChartVisual?.let { visual ->
+                item { MultiChartConstellation(visual, color) }
+            }
             if (st.facts.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("📋 Les faits", color)
@@ -837,6 +874,46 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
 @Composable
 private fun SectionTitle(text: String, color: Color) {
     Text(text, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+}
+
+/** 🌐 Constellation Multi-Chart : positions simultanées sur la meilleure date de synchronisation. */
+@Composable
+private fun MultiChartConstellation(visual: RecordExplainer.MultiChartVisual, color: Color) {
+    val theme = Nova.theme
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(if (visual.top2) "🥈 Grand Chelem Top 2" else "🌐 Constellation des charts", color)
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface).border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                visual.stages.forEach { stage ->
+                    val tint = when (stage.position) {
+                        1 -> NovaColors.Gold
+                        2 -> NovaColors.Silver
+                        null -> theme.textSecondary
+                        else -> color
+                    }
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(tint.copy(alpha = if (stage.position == null) 0.08f else 0.16f))
+                            .border(1.dp, tint.copy(alpha = 0.55f), RoundedCornerShape(10.dp)).padding(vertical = 8.dp, horizontal = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(stage.code, color = tint, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                        Text(stage.position?.let { "#$it" } ?: "—", color = if (stage.position == 1) NovaColors.Gold else theme.text, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        Text(stage.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                        if (visual.top2) Text(if ((stage.position ?: Int.MAX_VALUE) <= 2) "✓ TOP 2" else "HORS TOP 2", color = tint, fontWeight = FontWeight.Bold, fontSize = 8.sp, maxLines = 1)
+                    }
+                }
+            }
+            visual.bestDate?.let {
+                Spacer(Modifier.height(7.dp))
+                Text("Meilleure synchronisation · $it", color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            }
+            Text(
+                if (visual.top2) "Le même élément est #1 ou #2 dans chaque échelle affichée."
+                else "Même élément, même date de référence — les rangs de chaque échelle sont réunis ici.",
+                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            )
+        }
+    }
 }
 
 /** Frise horizontale : une colonne par période (date, position, écoutes), les périodes clés en surbrillance. */
@@ -1004,6 +1081,61 @@ private data class SweepCelebration(
     val key: String, val name: String, val imageUrl: String?, val count: Int,
     val zone: Int, val solo: Boolean, val periodType: String?, val category: String
 )
+
+private data class MultiChartCelebration(
+    val key: String, val name: String, val imageUrl: String?, val count: Int, val sub: String, val category: String
+)
+
+/** 🌐 Cérémonie des paliers Multi-Chart — les échelles se révèlent l'une après l'autre. */
+@Composable
+private fun MultiChartCeremonyPopup(c: MultiChartCelebration, onDismiss: () -> Unit) {
+    val theme = Nova.theme
+    val top2 = RecordCatalog.multiChartIsTop2(c.sub)
+    val base = RecordCatalog.multiChartBase(c.sub)
+    val stages = RecordCatalog.multiChartChartKeys(c.sub)
+    var revealed by remember(c.key) { mutableStateOf(0) }
+    LaunchedEffect(c.key) {
+        for (i in 1..stages.size) { revealed = i; delay(320) }
+    }
+    val title = when {
+        top2 -> "🏆 GRAND CHELEM · TOP 2"
+        base == "DW" -> "⚡ DOUBLE ÉCHELLE !"
+        base == "DWM" -> "🔥 TRIPLE ÉCHELLE !"
+        else -> "🌍 GRAND CHELEM !"
+    }
+    val highlight = if (top2) NovaColors.Gold else NovaColors.Silver
+    NovaPopupCard(borderColor = highlight, onDismiss = onDismiss, glowDp = 24, backdropUrl = c.imageUrl, banner = {}) {
+        Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, color = highlight, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(10.dp))
+            Text(c.name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 21.sp, textAlign = TextAlign.Center)
+            Text(sectionLabel(RecordCategory.valueOf(c.category)), color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                stages.forEachIndexed { index, code ->
+                    val on = index < revealed
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                            .background(if (on) highlight.copy(alpha = 0.18f) else theme.surface)
+                            .border(1.dp, if (on) highlight else theme.textSecondary.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                            .padding(vertical = 9.dp, horizontal = 2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(code, color = if (on) highlight else theme.textSecondary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                        Text(if (on) "VALIDÉ" else "…", color = if (on) highlight else theme.textSecondary, fontWeight = FontWeight.Bold, fontSize = 8.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("${c.count} ${if (c.count > 1) "jours" else "jour"} synchronisés", color = highlight, fontWeight = FontWeight.Black, fontSize = 23.sp, textAlign = TextAlign.Center)
+            Text(
+                if (top2) "#1 ou #2 dans chaque chart : le Grand Chelem d'élite est accompli."
+                else "Les échelles de temps s'alignent — la domination dépasse un seul chart.",
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+            )
+        }
+    }
+}
 
 /** 🧹 Cérémonie du balayage : les sièges de la zone se retournent un par un vers l'or — le geste signature, rejoué. */
 @Composable

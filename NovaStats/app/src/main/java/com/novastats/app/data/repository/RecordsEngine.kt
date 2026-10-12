@@ -298,7 +298,7 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     private fun multiChart(seriesByPeriod: Map<Period, Map<RecordCategory, Map<Long, List<RecordAppearance>>>>, out: MutableList<RecordCacheEntity>, now: Long) {
         for (cat in RecordCategory.entries) {
-            // date → entité → position, pour chaque période
+            // date → entité → position, pour chaque échelle de temps
             fun index(p: Period): Map<String, Map<Long, Int>> {
                 val m = HashMap<String, HashMap<Long, Int>>()
                 seriesByPeriod[p]?.get(cat)?.forEach { (id, s) -> s.forEach { a -> m.getOrPut(a.date) { HashMap() }[id] = a.position } }
@@ -306,33 +306,43 @@ class RecordsEngine(private val db: NovaDatabase) {
             }
             val d = index(Period.DAILY); val w = index(Period.WEEKLY); val mo = index(Period.MONTHLY); val y = index(Period.YEARLY)
             val counts = HashMap<String, HashMap<Long, RecordResult>>()
-            for ((dateIso, daily) in d) {
+            val bestScores = HashMap<String, HashMap<Long, Int>>()
+            fun bump(sub: String, id: Long, date: String, ranks: Map<String, Int?>) {
+                val keys = RecordCatalog.multiChartChartKeys(sub)
+                val score = keys.sumOf { ranks[it] ?: Int.MAX_VALUE }
+                val summary = listOf("D", "W", "M", "Y").mapNotNull { k -> ranks[k]?.let { "$k#$it" } }.joinToString(" · ")
+                val byEntity = counts.getOrPut(sub) { HashMap() }
+                val current = byEntity[id]
+                val previousBest = bestScores.getOrPut(sub) { HashMap() }[id]
+                val bestSummary = if (previousBest == null || score < previousBest) {
+                    bestScores.getValue(sub)[id] = score
+                    summary
+                } else current?.extra
+                byEntity[id] = RecordResult(id, (current?.value ?: 0.0) + 1, date, bestSummary)
+            }
+            for ((dateIso, daily) in d.toSortedMap()) {
                 val date = Dates.parse(dateIso)
-                val week = w[Dates.weekOf(date).fromIso].orEmpty()
-                val month = mo[Dates.monthOf(date).fromIso].orEmpty()
-                val year = y[Dates.yearOf(date).fromIso].orEmpty()
-                for ((id, pd) in daily) {
-                    val pw = week[id]; val pm = month[id]; val py = year[id]
-                    fun bump(level: String, combo: String) {
-                        val m = counts.getOrPut(level) { HashMap() }
-                        val cur = m[id]
-                        m[id] = RecordResult(id, (cur?.value ?: 0.0) + 1, dateIso, if (cur == null || combo < (cur.extra ?: "~")) combo else cur.extra)
+                val positions = mapOf(
+                    "D" to daily,
+                    "W" to w[Dates.weekOf(date).fromIso].orEmpty(),
+                    "M" to mo[Dates.monthOf(date).fromIso].orEmpty(),
+                    "Y" to y[Dates.yearOf(date).fromIso].orEmpty()
+                )
+                for (sub in RecordCatalog.multiChartLevels.map { it.dbName }) {
+                    val keys = RecordCatalog.multiChartChartKeys(sub)
+                    val sets = keys.map { positions[it].orEmpty().keys }
+                    if (sets.isEmpty()) continue
+                    val candidates = sets.drop(1).fold(sets.first().toSet()) { common, ids -> common intersect ids }
+                    for (id in candidates) {
+                        val ranks = positions.mapValues { (_, chart) -> chart[id] }
+                        if (RecordMath.multiChartQualifies(sub, ranks)) bump(sub, id, dateIso, ranks)
                     }
-                    if (pw != null && pm != null && py != null) bump("DWMY", "D#$pd · W#$pw · M#$pm · Y#$py")
-                    if (pw != null && pm != null) bump("DWM", "D#$pd · W#$pw · M#$pm")
-                    if (pw != null) bump("DW", "D#$pd · W#$pw")
-                }
-                // W+M et M+Y se mesurent sur les entités des charts hebdo / mensuels
-                for ((id, pw) in week) { val pm = month[id] ?: continue
-                    val m = counts.getOrPut("WM") { HashMap() }; val cur = m[id]
-                    m[id] = RecordResult(id, (cur?.value ?: 0.0) + 1, dateIso, "W#$pw · M#$pm")
-                }
-                for ((id, pm) in month) { val py = year[id] ?: continue
-                    val m = counts.getOrPut("MY") { HashMap() }; val cur = m[id]
-                    m[id] = RecordResult(id, (cur?.value ?: 0.0) + 1, dateIso, "M#$pm · Y#$py")
                 }
             }
-            for (level in listOf("DWMY", "DWM", "DW", "WM", "MY")) emit(out, "MULTI_CHART", null, cat, level, counts[level]?.values?.toList().orEmpty(), now)
+            for (level in RecordCatalog.multiChartLevels) {
+                val sub = level.dbName
+                emit(out, "MULTI_CHART", null, cat, sub, counts[sub]?.values?.toList().orEmpty(), now)
+            }
         }
     }
 

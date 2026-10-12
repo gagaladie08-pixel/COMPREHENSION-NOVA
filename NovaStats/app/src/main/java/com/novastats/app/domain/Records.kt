@@ -93,7 +93,19 @@ object RecordCatalog {
     val pantheonLevels = PantheonStatus.entries.map { RecordSub(it.dbName, "${it.emoji} ${it.label}") }
     val zones = listOf(RecordSub("TOP2", "🥈 Top 2"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("ALL", "🌍 Top Global"))
     val consistencySubs = listOf(RecordSub("TOP5", "🏆 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("CHART", "📊 Total Chart"))
-    val multiChartLevels = listOf(RecordSub("DWMY", "🌍 D+W+M+Y"), RecordSub("DWM", "🔥 D+W+M"), RecordSub("DW", "⚡ D+W"), RecordSub("WM", "⚡ W+M"), RecordSub("MY", "⚡ M+Y"))
+    val multiChartBaseLevels = listOf(RecordSub("DWMY", "🌍 D+W+M+Y"), RecordSub("DWM", "🔥 D+W+M"), RecordSub("DW", "⚡ D+W"), RecordSub("WM", "⚡ W+M"), RecordSub("MY", "⚡ M+Y"))
+    /** Chaque combinaison existe en présence libre et en variante élite : #1 ou #2 dans TOUS les charts choisis. */
+    val multiChartLevels = multiChartBaseLevels + multiChartBaseLevels.map { RecordSub("${it.dbName}_TOP2", "🥈 ${it.label.substringAfter(' ')} · Top 2") }
+    fun multiChartBase(sub: String?): String? = sub?.removeSuffix("_TOP2")
+    fun multiChartIsTop2(sub: String?): Boolean = sub?.endsWith("_TOP2") == true
+    fun multiChartChartKeys(sub: String?): List<String> = when (multiChartBase(sub)) {
+        "DWMY" -> listOf("D", "W", "M", "Y")
+        "DWM" -> listOf("D", "W", "M")
+        "DW" -> listOf("D", "W")
+        "WM" -> listOf("W", "M")
+        "MY" -> listOf("M", "Y")
+        else -> emptyList()
+    }
     /** Zones des records de longévité / retours (25-27) : Top 10, Top 20, Top 50, chart complet. */
     val lifespanZones = listOf(RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"), RecordSub("TOP50", "📈 Top 50"), RecordSub("CHART", "🌍 Chart"))
     fun zoneLimit(sub: String?): Int = when (sub) { "TOP1" -> 1; "TOP2" -> 2; "TOP3" -> 3; "TOP5" -> 5; "TOP10" -> 10; "TOP15" -> 15; "TOP20" -> 20; "TOP50" -> 50; else -> Int.MAX_VALUE }
@@ -169,8 +181,8 @@ object RecordCatalog {
         RecordDef(20, "SLEEPER_HIT", "😴", "Sleeper Hit", "Entré très bas puis monté très haut après plusieurs périodes", chartPeriods, all3, unit = RecordUnit.POSITIONS, screen = "CLIMB"),
         RecordDef(20, "LONGEST_ROAD", "🛣️", "Longest Road to #1", "Le plus de périodes avant d'atteindre le #1", chartPeriods, all3, screen = "CLIMB"),
         RecordDef(20, "BIGGEST_CLIMBER", "🧗", "Biggest Climber", "Plus grand écart entre position d'entrée et peak", chartPeriods, all3, unit = RecordUnit.POSITIONS, screen = "CLIMB"),
-        RecordDef(21, "MULTI_CHART", "🌐", "Multi-Chart Domination", "Présent simultanément dans plusieurs charts", emptyList(), all3,
-            mapOf(RecordCategory.TRACK to multiChartLevels, RecordCategory.ARTIST to multiChartLevels, RecordCategory.ALBUM to multiChartLevels), RecordUnit.TIMES),
+        RecordDef(21, "MULTI_CHART", "🌐", "Multi-Chart Domination", "Présence simultanée dans plusieurs charts, avec variantes Top 2 dans chaque échelle", emptyList(), all3,
+            mapOf(RecordCategory.TRACK to multiChartLevels, RecordCategory.ARTIST to multiChartLevels, RecordCategory.ALBUM to multiChartLevels), RecordUnit.DAYS),
         RecordDef(22, "MOST_BLOCKED_TOP5", "🚧", "Most Weeks Blocked", "Le plus de périodes dans le Top 2 / 5 / 10 / 15 / 20 sans jamais atteindre le #1", chartPeriods, all3,
             mapOf(RecordCategory.TRACK to blockedZones, RecordCategory.ARTIST to blockedZones, RecordCategory.ALBUM to blockedZones)),
         RecordDef(23, "MOST_SIMULTANEOUS", "🎯", "Most Simultaneous Songs", "Le plus de titres en même temps dans une zone du chart", chartPeriods, artistAlbum,
@@ -231,6 +243,14 @@ data class RecordResult(val entityId: Long, val value: Double, val date: String?
 object RecordMath {
 
     fun cumulative(series: List<RecordAppearance>, maxPosition: Int = Int.MAX_VALUE): Int = series.count { it.position <= maxPosition }
+
+    /** Présence multi-chart : chaque clé D/W/M/Y choisie doit être classée; variante TOP2 exige #1 ou #2 partout. */
+    fun multiChartQualifies(sub: String, ranks: Map<String, Int?>): Boolean {
+        val keys = RecordCatalog.multiChartChartKeys(sub)
+        if (keys.isEmpty()) return false
+        val top2 = RecordCatalog.multiChartIsTop2(sub)
+        return keys.all { key -> ranks[key]?.let { !top2 || it <= 2 } == true }
+    }
 
     fun timesAt1(series: List<RecordAppearance>): Int = series.count { it.position == 1 }
 

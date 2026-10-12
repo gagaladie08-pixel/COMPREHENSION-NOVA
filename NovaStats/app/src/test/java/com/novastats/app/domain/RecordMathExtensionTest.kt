@@ -1,7 +1,9 @@
 package com.novastats.app.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Règles des records 25-30 + Fastest Rise (exemples du cahier des charges). */
@@ -79,11 +81,24 @@ class RecordMathExtensionTest {
     }
 
     @Test
+    fun `multi chart exige les echelles choisies et top2 dans chacune`() {
+        val ranks = mapOf("D" to 2, "W" to 1, "M" to 3, "Y" to 2)
+        assertTrue(RecordMath.multiChartQualifies("DWMY", ranks))
+        assertTrue(RecordMath.multiChartQualifies("DW_TOP2", ranks))
+        assertFalse(RecordMath.multiChartQualifies("DWMY_TOP2", ranks)) // #3 mensuel bloque le Grand Chelem Top 2
+        assertFalse(RecordMath.multiChartQualifies("DWMY", ranks - "Y")) // l'annuel est obligatoire
+        assertTrue(RecordMath.multiChartQualifies("DWMY_TOP2", mapOf("D" to 1, "W" to 2, "M" to 2, "Y" to 1)))
+        assertEquals("DWMY", RecordCatalog.multiChartBase("DWMY_TOP2"))
+        assertTrue(RecordCatalog.multiChartIsTop2("DWMY_TOP2"))
+    }
+
+    @Test
     fun `catalogue 30 records et groupes`() {
         assertEquals(30, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertEquals(RecordGroup.PALMARES, RecordCatalog.groupOf["MOST_RECORDS"])
         assertEquals(RecordGroup.PALMARES, RecordGroup.entries.first())
         assertEquals(5, RecordCatalog.byId("FASTEST_RISE")!!.subs[RecordCategory.TRACK]!!.size)
         assertEquals(8, RecordCatalog.byId("PODIUM_SWEEP")!!.subs[RecordCategory.ARTIST]!!.size)
+        assertEquals(10, RecordCatalog.byId("MULTI_CHART")!!.subs[RecordCategory.TRACK]!!.size)
     }
 }
