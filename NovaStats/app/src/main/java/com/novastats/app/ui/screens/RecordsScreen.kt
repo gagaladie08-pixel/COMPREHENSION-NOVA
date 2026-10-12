@@ -1029,7 +1029,7 @@ private fun SweepCeremonyPopup(c: SweepCelebration, onDismiss: () -> Unit) {
             SeatsRow(RecordExplainer.Seats(c.zone, (1..filled).toList()), tierColor)
             Spacer(Modifier.height(10.dp))
             Text(
-                "$c.count ${if (c.count > 1) "balayages" else "balayage"} du Top ${c.zone}",
+                "${c.count} ${if (c.count > 1) "balayages" else "balayage"} du Top ${c.zone}",
                 color = tierColor, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Center
             )
             tier?.let { Text("${it.emoji} ${it.label}", color = Color(it.colorArgb), fontWeight = FontWeight.Bold) }
