@@ -838,19 +838,58 @@ class RecordExplainer(private val db: NovaDatabase) {
         db.trackLinkDao().allTrackArtists().forEach { artistsOf.getOrPut(it.trackId) { HashSet() }.add(it.artistId) }
         fun isSolo(t: Long) = (artistsOf[t]?.size ?: 1) <= 1
         val byDate = HashMap<String, HashMap<Int, Long>>()
-        for ((tid, s) in all) for (a in s) if (a.position <= z) byDate.getOrPut(a.date) { HashMap() }[a.position] = tid
+        val periodOf = HashMap<String, Int>()
+        for ((tid, s) in all) for (a in s) {
+            // Étendu à z+1 : pour retrouver le premier exclu (la victime du balayage)
+            if (a.position <= z + 1) byDate.getOrPut(a.date) { HashMap() }[a.position] = tid
+            periodOf[a.date] = a.periodIndex
+        }
         val sweeps = byDate.entries.filter { (_, posMap) -> (1..z).all { pos -> posMap[pos]?.let { it in owned && (!solo || isSolo(it)) } == true } }.sortedBy { it.key }
         if (sweeps.isEmpty()) return Story("🧹 Podium Sweep", "$name n'occupe plus l'intégralité du Top $z du $chart (les records seront recalculés à la prochaine écoute).")
         val last = sweeps.last()
         val items = (1..z).mapNotNull { place -> last.value[place]?.let { tid -> val (nm, img) = nameOf(EntityType.TRACK, tid); Item(EntityType.TRACK, tid, nm, "${pos(place)} ${on(p, last.key)}" + (if (isSolo(tid)) " · solo" else " · feat."), img, place == 1) } }
         val mode = if (solo) "uniquement avec des titres solo (sans featuring)" else "feat. compris"
+        // 👑 Plus long règne : balayages consécutifs
+        var bestRun = 0; var curRun = 0; var prevIdx = Int.MIN_VALUE; var runStart = ""; var runEnd = ""; var bs = ""
+        sweeps.forEach { e ->
+            val idx = periodOf[e.key] ?: return@forEach
+            if (idx == prevIdx + 1) curRun++ else { curRun = 1; bs = e.key }
+            prevIdx = idx; runEnd = e.key
+            if (curRun > bestRun) { bestRun = curRun; runStart = bs }
+        }
+        // 🧹 Palier du balayeur
+        val tier = RecordCatalog.sweepTier(sweeps.size)
+        // 🆚 Victime du dernier balayage : premier titre exclu de la zone
+        val victim = last.value[z + 1]?.let { tid -> nameOf(EntityType.TRACK, tid).first }
+        // 🎼 Face-à-face Standard vs Solo (même zone, même période, mode opposé)
+        val zoneKey = sub?.substringBefore("_")
+        val otherSub = if (zoneKey != null) (if (solo) "${zoneKey}_STD" else "${zoneKey}_SOLO") else null
+        val otherRow = if (otherSub != null) db.recordDao().rowsForEntity(cat.dbName, id)
+            .firstOrNull { it.recordType == "PODIUM_SWEEP" && it.periodType == p.dbName && it.subcategory == otherSub } else null
+        val facts = buildList {
+            add("Zone" to "Top $z · ${if (solo) "Solo" else "Standard"}")
+            tier?.let { add("Palier" to "${it.emoji} ${it.label}") }
+            add("Premier balayage" to on(p, sweeps.first().key))
+            add("Dernier balayage" to on(p, last.key))
+            if (bestRun >= 2) add("Règne le plus long" to "$bestRun ${plural(bestRun, "période")} de suite (${short(p, runStart)} → ${short(p, runEnd)})")
+            victim?.let { add("Victime du dernier balayage" to "« $it » poussé à ${pos(z + 1)}") }
+            if (otherRow != null) add(if (solo) "En Standard (feat. compris)" to "${otherRow.value.toLong()} balayages" else "En Solo (sans featuring)" to "${otherRow.value.toLong()} balayages")
+            add("Titres différents utilisés" to "${sweeps.flatMap { it.value.values }.toSet().size}")
+        }
+        val stdVsSoloLine = if (otherRow != null && solo && otherRow.value.toLong() > sweeps.size) {
+            " En Standard, le compteur monte à ${otherRow.value.toLong()} balayages : ${otherRow.value.toLong() - sweeps.size} ne tenaient que grâce aux featurings."
+        } else ""
         return Story(
-            "🧹 Top $z complet ${sweeps.size} fois",
+            "🧹 Top $z complet ${sweeps.size} fois" + (tier?.let { " · ${it.emoji} ${it.label}" } ?: ""),
             "$name a occupé les $z premières places du $chart en même temps, $mode, pendant ${sweeps.size} ${unit(p, sweeps.size)} : " + sweeps.joinToString(", ") { short(p, it.key) } + ". " +
+                (if (bestRun >= 2) "Plus long règne : $bestRun ${plural(bestRun, "balayage")} consécutifs, de ${short(p, runStart)} à ${short(p, runEnd)}. " else "") +
+                (victim?.let { "Le dernier balayage a poussé « $it » à la place ${z + 1} — il ne lui a manqué qu'un siège. " } ?: "") +
+                stdVsSoloLine +
                 "Un balayage ne compte que si TOUTES les places de la zone lui appartiennent la même période — c'est voulu rare.",
-            listOf("Zone" to "Top $z · ${if (solo) "Solo" else "Standard"}", "Premier balayage" to on(p, sweeps.first().key), "Dernier balayage" to on(p, last.key), "Titres différents utilisés" to "${sweeps.flatMap { it.value.values }.toSet().size}"),
+            facts,
             "Les périodes de balayage", sweeps.map { Point(it.key, short(p, it.key), 1, null, true, "Top $z complet") },
-            "Le dernier Top $z complet", items
+            "Le dernier Top $z complet", items,
+            seats = Seats(z, (1..z).toList())
         )
     }
 

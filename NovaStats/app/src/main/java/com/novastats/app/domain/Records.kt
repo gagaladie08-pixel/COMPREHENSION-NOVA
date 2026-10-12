@@ -123,8 +123,17 @@ object RecordCatalog {
         count >= 2 -> SimTier("🎯", "Présence", 0xFF90CAF9)
         else -> null
     }
+    /** 🧹 Paliers du balayeur (29 — Podium Sweep) : l'habitude du balai selon le nombre de sweeps. */
+    data class SweepTier(val min: Int, val emoji: String, val label: String, val colorArgb: Long)
+    val sweepTiers = listOf(
+        SweepTier(10, "🏰", "Monopole", 0xFFFFD600),
+        SweepTier(5, "🧹", "Balayeur en série", 0xFFE53935),
+        SweepTier(2, "🔁", "Récidiviste", 0xFFFF7043),
+        SweepTier(1, "🧽", "Coup de balai", 0xFF90CAF9)
+    )
+    fun sweepTier(n: Int): SweepTier? = sweepTiers.firstOrNull { n >= it.min }
     /** Podium Sweep (29) : zone × mode (Solo = uniquement des titres sans featuring ; Standard = feat. compris). */
-    val sweepZones = listOf("TOP3" to "Top 3", "TOP5" to "Top 5", "TOP10" to "Top 10")
+    val sweepZones = listOf("TOP2" to "Top 2", "TOP3" to "Top 3", "TOP5" to "Top 5", "TOP10" to "Top 10")
     val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }
     fun sweepZoneOf(sub: String?): Int = zoneLimit(sub?.substringBefore("_"))
     fun sweepSolo(sub: String?): Boolean = sub?.endsWith("_SOLO") == true

@@ -84,6 +84,6 @@ class RecordMathExtensionTest {
         assertEquals(RecordGroup.PALMARES, RecordCatalog.groupOf["MOST_RECORDS"])
         assertEquals(RecordGroup.PALMARES, RecordGroup.entries.first())
         assertEquals(5, RecordCatalog.byId("FASTEST_RISE")!!.subs[RecordCategory.TRACK]!!.size)
-        assertEquals(6, RecordCatalog.byId("PODIUM_SWEEP")!!.subs[RecordCategory.ARTIST]!!.size)
+        assertEquals(8, RecordCatalog.byId("PODIUM_SWEEP")!!.subs[RecordCategory.ARTIST]!!.size)
     }
 }

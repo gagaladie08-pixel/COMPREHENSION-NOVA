@@ -274,6 +274,37 @@ fun RecordsScreen() {
         SimultaneousPopup(c) { simQueue = simQueue.drop(1) }
     }
 
+    // 🧹 Cérémonie du balayage : chaque nouveau record de Podium Sweep se célèbre une fois (amorçage silencieux au premier lancement)
+    var sweepQueue by remember { mutableStateOf<List<SweepCelebration>>(emptyList()) }
+    LaunchedEffect(count) {
+        runCatching {
+            val rows = db.recordDao().rowsForTypes(listOf("PODIUM_SWEEP"))
+            val numberOnes = rows.groupBy { listOf(it.r.periodType ?: "-", it.r.category, it.r.subcategory ?: "-") }
+                .mapNotNull { g -> g.value.maxByOrNull { it.r.value } }
+            fun keyOf(row: com.novastats.app.data.db.dao.RecordRow) =
+                "SWEEP:${row.r.category}:${row.r.subcategory}:${row.r.periodType}:${row.r.entityId}:${row.r.value.toLong()}"
+            val announced = app.settings.sweepAnnounced.first()
+            if (announced.isEmpty()) {
+                val keys = numberOnes.map { keyOf(it) }.toSet()
+                if (keys.isNotEmpty()) app.settings.markSweepAnnounced(keys)
+            } else {
+                val fresh = numberOnes.filter { keyOf(it) !in announced }
+                if (fresh.isNotEmpty()) {
+                    app.settings.markSweepAnnounced(fresh.map { keyOf(it) }.toSet())
+                    sweepQueue = fresh.map { row ->
+                        SweepCelebration(
+                            keyOf(row), row.name ?: "Inconnu", row.imageUrl, row.r.value.toInt(),
+                            RecordCatalog.sweepZoneOf(row.r.subcategory), RecordCatalog.sweepSolo(row.r.subcategory), row.r.periodType, row.r.category
+                        )
+                    }.sortedByDescending { it.count }
+                }
+            }
+        }
+    }
+    sweepQueue.firstOrNull()?.let { c ->
+        SweepCeremonyPopup(c) { sweepQueue = sweepQueue.drop(1) }
+    }
+
     DetailPopupHost(detail) { detail = null }
 }
 
@@ -588,6 +619,17 @@ private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Pe
                         )
                     }
                 }
+                // 🧹 Podium Sweep : palier du balayeur (Coup de balai / Récidiviste / Balayeur en série / Monopole)
+                if (def.id == "PODIUM_SWEEP") {
+                    RecordCatalog.sweepTier(row.r.value.toInt())?.let { t ->
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            "${t.emoji} ${t.label}", color = Color(t.colorArgb), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(t.colorArgb).copy(alpha = 0.12f))
+                                .border(1.dp, Color(t.colorArgb).copy(alpha = 0.45f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(formatRecordValue(def, period, row.r.value), color = if (first) NovaColors.Gold else color, fontWeight = FontWeight.Bold, fontSize = if (first) 17.sp else 14.sp)
@@ -700,9 +742,19 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             }
             st.seats?.let { seats ->
                 item {
+                    // 🧹 Podium Sweep : le balayage se rejoue — les sièges se retournent un par un, puis le podium apparaît
+                    val sweep = def.id == "PODIUM_SWEEP"
+                    var shown by remember(st) { mutableStateOf(if (sweep) 0 else seats.occupied.size) }
+                    LaunchedEffect(st) {
+                        if (sweep) for (i in 1..seats.occupied.size) { shown = i; delay(240) }
+                    }
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                        SectionTitle("🪑 ${seats.occupied.size} siège(s) sur ${seats.total} dans la zone", color)
-                        SeatsRow(seats, color)
+                        SectionTitle(if (sweep) "🧹 Le balayage" else "🪑 ${seats.occupied.size} siège(s) sur ${seats.total} dans la zone", color)
+                        SeatsRow(RecordExplainer.Seats(seats.total, if (sweep) (1..shown).toList() else seats.occupied), color)
+                        if (sweep && shown >= seats.occupied.size && st.items.size >= 2) {
+                            Spacer(Modifier.height(10.dp))
+                            PodiumRow(st.items.take(3), color)
+                        }
                     }
                 }
             }
@@ -871,6 +923,41 @@ private fun SeatsRow(seats: RecordExplainer.Seats, color: Color) {
     }
 }
 
+/** 🥇 Podium du dernier balayage : argent à gauche, or au centre (plus haut), bronze à droite. */
+@Composable
+private fun PodiumRow(items: List<RecordExplainer.Item>, color: Color) {
+    val theme = Nova.theme
+    val ranked = items.mapNotNull { ent ->
+        val rank = ent.detail.substringBefore(" ").removePrefix("#").toIntOrNull() ?: return@mapNotNull null
+        rank to ent
+    }.sortedBy { it.first }
+    if (ranked.isEmpty()) return
+    val order = when (ranked.size) {
+        1 -> ranked
+        2 -> listOf(ranked[1], ranked[0])
+        else -> listOf(ranked[1], ranked[0], ranked[2])
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        order.forEach { (rank, ent) ->
+            val medal = when (rank) { 1 -> "🥇"; 2 -> "🥈"; else -> "🥉" }
+            val tint = when (rank) { 1 -> NovaColors.Gold; 2 -> NovaColors.Silver; else -> Color(0xFFCD7F32) }
+            val h = when (rank) { 1 -> 84; 2 -> 62; else -> 46 }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                CoverArt(ent.imageUrl, ent.name, size = if (rank == 1) 62 else 46)
+                Spacer(Modifier.height(4.dp))
+                Text(medal, fontSize = 16.sp)
+                Text(ent.name, color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(h.dp).clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                        .background(Brush.verticalGradient(listOf(tint, tint.copy(alpha = 0.55f)))),
+                    contentAlignment = Alignment.Center
+                ) { Text("$rank", color = theme.background, fontWeight = FontWeight.Black, fontSize = 20.sp) }
+            }
+        }
+    }
+}
+
 /** 🔥 Cérémonie de palier d'une série d'écoute : carte glow, pochette floutée, flamme géante, compteur qui monte jour par jour. */
 @Composable
 private fun StreakTierPopup(c: TierCelebration, onDismiss: () -> Unit) {
@@ -912,6 +999,48 @@ private data class SimCelebration(
     val key: String, val name: String, val imageUrl: String?, val count: Int,
     val zoneLimit: Int, val zoneLabel: String, val periodType: String?, val category: String
 )
+
+private data class SweepCelebration(
+    val key: String, val name: String, val imageUrl: String?, val count: Int,
+    val zone: Int, val solo: Boolean, val periodType: String?, val category: String
+)
+
+/** 🧹 Cérémonie du balayage : les sièges de la zone se retournent un par un vers l'or — le geste signature, rejoué. */
+@Composable
+private fun SweepCeremonyPopup(c: SweepCelebration, onDismiss: () -> Unit) {
+    val theme = Nova.theme
+    val tier = RecordCatalog.sweepTier(c.count)
+    val tierColor = tier?.let { Color(it.colorArgb) } ?: NovaColors.Gold
+    var filled by remember(c.key) { mutableStateOf(0) }
+    LaunchedEffect(c.key) {
+        for (i in 1..c.zone) { filled = i; delay(300) }
+    }
+    val pLabel = Period.entries.firstOrNull { it.dbName == c.periodType }?.frLabel
+    NovaPopupCard(borderColor = tierColor, onDismiss = onDismiss, glowDp = 24, backdropUrl = c.imageUrl, banner = {}) {
+        Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("🧹 BALAYAGE !", color = tierColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(10.dp))
+            Text(c.name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, textAlign = TextAlign.Center)
+            Text(
+                listOfNotNull(pLabel, runCatching { sectionLabel(RecordCategory.valueOf(c.category)) }.getOrNull(), "Top ${c.zone} · ${if (c.solo) "Solo" else "Standard"}").joinToString(" · "),
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(12.dp))
+            SeatsRow(RecordExplainer.Seats(c.zone, (1..filled).toList()), tierColor)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "$c.count ${if (c.count > 1) "balayages" else "balayage"} du Top ${c.zone}",
+                color = tierColor, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Center
+            )
+            tier?.let { Text("${it.emoji} ${it.label}", color = Color(it.colorArgb), fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Toutes les places de la zone, en même temps — et personne d'autre.",
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+            )
+        }
+    }
+}
 
 /** 🎯 « Le chart est à moi » : nouveau record de simultanéité — les sièges se remplissent un par un jusqu'au record. */
 @Composable
