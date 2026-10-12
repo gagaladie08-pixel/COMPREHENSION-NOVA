@@ -70,7 +70,17 @@ import com.novastats.app.ui.theme.prideFlagFor
 import com.novastats.app.ui.theme.prideChip
 import com.novastats.app.ui.theme.isPride
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.aspectRatio
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import com.novastats.app.ui.theme.NovaColors
 
 /**
@@ -207,6 +217,29 @@ fun RecordsScreen() {
         }
         }
 
+    }
+
+    // 🔥 Cérémonie des paliers : une série d'écoute en cours qui franchit 7 / 30 / 100 / 365 jours se célèbre une seule fois
+    val scope = rememberCoroutineScope()
+    var tierQueue by remember { mutableStateOf<List<TierCelebration>>(emptyList()) }
+    LaunchedEffect(count) {
+        runCatching {
+            val announced = app.settings.streakTiersAnnounced.first()
+            tierQueue = db.recordDao().rowsForTypes(listOf("LONGEST_LISTENING_STREAK"))
+                .filter { it.r.extraData?.contains("en cours") == true }
+                .mapNotNull { row ->
+                    val tier = RecordCatalog.tierFor(row.r.value.toInt()) ?: return@mapNotNull null
+                    val key = "${row.r.category}:${row.r.entityId}:${tier.min}"
+                    if (key in announced) null else TierCelebration(key, row.name ?: "Inconnu", row.imageUrl, row.r.value.toInt(), tier)
+                }
+                .sortedBy { it.tier.min }
+        }
+    }
+    tierQueue.firstOrNull()?.let { c ->
+        StreakTierPopup(c) {
+            scope.launch { app.settings.markStreakTierAnnounced(c.key) }
+            tierQueue = tierQueue.drop(1)
+        }
     }
 
     DetailPopupHost(detail) { detail = null }
@@ -484,6 +517,32 @@ private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Pe
                 Text(row.name ?: "Inconnu", color = if (first) NovaColors.Gold else theme.text, fontWeight = if (first) FontWeight.Black else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val subText = listOfNotNull(row.subtitle, row.r.extraData).joinToString(" · ")
                 if (subText.isNotBlank()) Text(subText, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // 🔥 Séries d'écoute : puce « EN COURS » pulsante + palier de flamme atteint
+                if (def.id == "LONGEST_LISTENING_STREAK") {
+                    val streakDays = row.r.value.toInt()
+                    val tier = RecordCatalog.tierFor(streakDays)
+                    val ongoing = row.r.extraData?.contains("en cours") == true
+                    if (ongoing || tier != null) {
+                        Spacer(Modifier.height(3.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (ongoing) {
+                                val pulse = rememberInfiniteTransition(label = "streak")
+                                val a by pulse.animateFloat(0.45f, 1f, infiniteRepeatable(tween(850), RepeatMode.Reverse), label = "pulse")
+                                Text(
+                                    "🔥 EN COURS · jour $streakDays", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFFF6D00).copy(alpha = a)).padding(horizontal = 6.dp, vertical = 1.dp)
+                                )
+                            }
+                            tier?.let { t ->
+                                Text(
+                                    "${t.emoji} ${t.label}", color = Color(t.colorArgb), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(t.colorArgb).copy(alpha = 0.12f))
+                                        .border(1.dp, Color(t.colorArgb).copy(alpha = 0.45f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(formatRecordValue(def, period, row.r.value), color = if (first) NovaColors.Gold else color, fontWeight = FontWeight.Bold, fontSize = if (first) 17.sp else 14.sp)
@@ -522,21 +581,32 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
         item {
-            // En-tête : image (appui → plein écran), nom, rang, valeur
-            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
-                Spacer(Modifier.height(10.dp))
-                Text(name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 22.sp, textAlign = TextAlign.Center)
-                row.subtitle?.let { Text(it, color = theme.textSecondary, textAlign = TextAlign.Center) }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ref.rank?.let { r ->
-                        val medal = if (r <= 3) listOf("🥇", "🥈", "🥉")[r - 1] else "#$r"
-                        Text(medal + if (r > 3) " du classement" else "", color = if (r == 1) NovaColors.Gold else theme.textSecondary, fontWeight = FontWeight.Bold)
+            // En-tête : image (appui → plein écran), nom, rang, valeur. Séries d'écoute : pochette floutée en fond + compteur animé.
+            val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
+            Box(Modifier.fillMaxWidth()) {
+                if (streakRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
+                    Spacer(Modifier.height(10.dp))
+                    Text(name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 22.sp, textAlign = TextAlign.Center)
+                    row.subtitle?.let { Text(it, color = theme.textSecondary, textAlign = TextAlign.Center) }
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ref.rank?.let { r ->
+                            val medal = if (r <= 3) listOf("🥇", "🥈", "🥉")[r - 1] else "#$r"
+                            Text(medal + if (r > 3) " du classement" else "", color = if (r == 1) NovaColors.Gold else theme.textSecondary, fontWeight = FontWeight.Bold)
+                        }
+                        if (streakRecord) {
+                            // Compteur qui monte jour par jour jusqu'à la valeur du record
+                            val counter = remember(row.r.value) { Animatable(0f) }
+                            LaunchedEffect(row.r.value) { counter.animateTo(row.r.value.toFloat(), tween(1100)) }
+                            Text("${counter.value.toInt()} jours", color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                        } else {
+                            Text(formatRecordValue(def, ref.period, row.r.value), color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                        }
                     }
-                    Text(formatRecordValue(def, ref.period, row.r.value), color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                    row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
                 }
-                row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
             }
         }
         ref.event?.let { ev ->
@@ -585,8 +655,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             }
             if (st.timeline.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    SectionTitle("📈 " + (st.timelineTitle ?: "Frise"), color)
-                    Timeline(st.timeline, color)
+                    SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
+                    if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color)
                 }
             }
             if (st.held.isNotEmpty()) {
@@ -692,6 +762,75 @@ private fun Timeline(points: List<RecordExplainer.Point>, color: Color) {
         }
     }
 }
+
+/** 🔥 Calendrier de chaleur des séries d'écoute : un carré par jour, intensité = écoutes du jour, la journée la plus dangereuse cerclée d'orange. */
+@Composable
+private fun HeatGrid(points: List<RecordExplainer.Point>, color: Color) {
+    val theme = Nova.theme
+    val maxPlays = points.maxOfOrNull { it.plays ?: 0 } ?: 0
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        points.chunked(21).forEach { line ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                line.forEach { pt ->
+                    val pl = pt.plays ?: 0
+                    val intensity = if (maxPlays > 0) 0.15f + 0.85f * (pl.toFloat() / maxPlays) else 0.2f
+                    Box(
+                        Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(3.dp))
+                            .background(color.copy(alpha = intensity))
+                            .then(if (pt.highlight) Modifier.border(1.dp, Color(0xFFFF6D00), RoundedCornerShape(3.dp)) else Modifier)
+                    )
+                }
+                repeat(21 - line.size) { Box(Modifier.weight(1f).aspectRatio(1f)) }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("calme", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Box(Modifier.padding(horizontal = 5.dp).width(14.dp).height(8.dp).clip(RoundedCornerShape(2.dp)).background(color.copy(alpha = 0.2f)))
+            Text("→", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Box(Modifier.padding(horizontal = 5.dp).width(14.dp).height(8.dp).clip(RoundedCornerShape(2.dp)).background(color))
+            Text("intense", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.weight(1f))
+            Text("🟧 la plus dangereuse", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+/** 🔥 Cérémonie de palier d'une série d'écoute : carte glow, pochette floutée, flamme géante, compteur qui monte jour par jour. */
+@Composable
+private fun StreakTierPopup(c: TierCelebration, onDismiss: () -> Unit) {
+    val theme = Nova.theme
+    val tierColor = Color(c.tier.colorArgb)
+    val counter = remember(c.key) { Animatable(0f) }
+    LaunchedEffect(c.key) {
+        val steps = c.days.coerceIn(10, 40)
+        var i = 0
+        while (i < c.days) {
+            i = minOf(c.days, i + maxOf(1, c.days / steps))
+            counter.snapTo(i.toFloat())
+            delay(900L / steps)
+        }
+    }
+    NovaPopupCard(borderColor = tierColor, onDismiss = onDismiss, glowDp = 24, backdropUrl = c.imageUrl, banner = {}) {
+        Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("🎉 PALIER ATTEINT", color = tierColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(10.dp))
+            Text(c.tier.emoji, fontSize = 56.sp)
+            Text(c.name, color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(4.dp))
+            Text("${counter.value.toInt()} jours d'écoute d'affilée", color = tierColor, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Center)
+            Text("${c.tier.emoji} ${c.tier.label} — la série continue", color = theme.text, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Un titre écouté chaque jour et la flamme tient. " +
+                    (RecordCatalog.nextTier(c.days)?.let { "Prochain palier : ${it.emoji} ${it.label} à ${it.min} jours — encore ${it.min - c.days}." }
+                        ?: "Tu es au sommet : plus aucun palier au-dessus de l'Inferno."),
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+private data class TierCelebration(val key: String, val name: String, val imageUrl: String?, val days: Int, val tier: RecordCatalog.StreakTier)
 
 /** Valeur formatée selon l'unité du record (jours/semaines/mois adaptés à la période, écoutes, places, durée adaptative…). */
 fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {

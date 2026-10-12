@@ -39,7 +39,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** Most Records : tous les classements détenus, groupés par famille dans la fiche. */
         val held: List<Held> = emptyList(),
         /** Paragraphes de contexte propres à CET élément (place dans le classement, profil, autres records) : titre → texte. */
-        val context: List<Pair<String, String>> = emptyList()
+        val context: List<Pair<String, String>> = emptyList(),
+        /** Séries d'écoute : afficher la frise en calendrier de chaleur (un carré par jour, intensité = écoutes). */
+        val heat: Boolean = false
     )
 
     private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
@@ -808,13 +810,50 @@ class RecordExplainer(private val db: NovaDatabase) {
         val ongoing = end >= today - 1
         val startIso = java.time.LocalDate.ofEpochDay(start.toLong()); val endIso = java.time.LocalDate.ofEpochDay(end.toLong())
         val totalDays = days.size
+        // 🔥 Palier symbolique atteint + prochain cap
+        val tier = com.novastats.app.domain.RecordCatalog.tierFor(len)
+        val next = com.novastats.app.domain.RecordCatalog.nextTier(len)
+        // ⚠️ Journée la plus dangereuse : celle avec le moins d'écoutes — la série a failli mourir là
+        val danger = if (streakDays.size > 1) streakDays.minByOrNull { it.playCount } else null
+        // Série en cours (peut différer du record historique) et record personnel précédent
+        var current = 0
+        var d = if (epoch.containsKey(today)) today else if (epoch.containsKey(today - 1)) today - 1 else Int.MIN_VALUE
+        while (d != Int.MIN_VALUE && epoch.containsKey(d)) { current++; d-- }
+        val previousBest = com.novastats.app.domain.RecordMath.longestDayStreak(epoch.keys.filter { it < start || it > end })?.first ?: 0
+        val narrative = "$name a été écouté chaque jour, sans exception, du ${startIso.format(dayFmt)} au ${endIso.format(dayFmt)} : $len jours consécutifs, $plays écoutes sur la série (${if (len > 0) plays / len else 0} par jour en moyenne). " +
+            (if (ongoing) {
+                "La série est toujours en cours — jour $len, une journée sans écoute la rompra. " +
+                    (if (previousBest in 1 until len) "Ton record précédent ($previousBest jours) est déjà battu : chaque jour qui passe l'améliore. "
+                    else if (previousBest >= len) "Encore ${previousBest - len + 1} jour(s) pour battre ton record personnel de $previousBest jours. " else "")
+            } else {
+                "Elle s'est éteinte le ${endIso.plusDays(1).format(dayFmt)}, première journée sans écoute. " +
+                    (if (current > 0) "Une nouvelle série est en route : jour $current — encore ${len - current} jour(s) pour égaler ce record. "
+                    else "Le compteur est à zéro aujourd'hui : la prochaine écoute relancera une série. ")
+            }) +
+            (when {
+                danger == null -> ""
+                danger.playCount <= 1 -> "Le ${Dates.parse(danger.date).format(dayFmt)}, une seule écoute a sauvé la série — il s'en est fallu d'un titre. "
+                else -> "Journée la plus dangereuse : le ${Dates.parse(danger.date).format(dayFmt)}, avec seulement ${danger.playCount} ▶. "
+            }) +
+            "Au total, $name a été écouté $totalDays jours différents."
+        val facts = buildList {
+            add("Début de la série" to startIso.format(dayFmt))
+            add(if (ongoing) "Toujours en cours" to "jour $len" else "Fin de la série" to endIso.format(dayFmt))
+            tier?.let { add("Palier" to "${it.emoji} ${it.label} (${it.min} j et +)") }
+            next?.let { add("Prochain palier" to "${it.emoji} ${it.label} — encore ${it.min - len} jour(s)") }
+            danger?.let { add("Jour le plus dangereux" to "${Dates.parse(it.date).format(dayFmt)} · ${it.playCount} ▶") }
+            if (previousBest > 0) add("Record précédent" to "$previousBest jours")
+            add("Écoutes pendant la série" to "$plays")
+            add("Meilleure journée de la série" to (streakDays.maxByOrNull { it.playCount }?.let { "${Dates.parse(it.date).format(dayFmt)} · ${it.playCount} ▶" } ?: "—"))
+            add("Jours d'écoute au total" to "$totalDays")
+        }
         return Story(
-            "🎧 $len jours d'affilée" + (if (ongoing) " (en cours)" else ""),
-            "$name a été écouté chaque jour, sans exception, du ${startIso.format(dayFmt)} au ${endIso.format(dayFmt)} : $len jours consécutifs, $plays écoutes sur la série (${if (len > 0) plays / len else 0} par jour en moyenne). " +
-                (if (ongoing) "La série est toujours en cours — une journée sans écoute la rompra." else "Elle s'est arrêtée le lendemain, ${endIso.plusDays(1).format(dayFmt)}, première journée sans écoute.") +
-                " Au total, $name a été écouté $totalDays jours différents.",
-            listOf("Début de la série" to startIso.format(dayFmt), "Fin de la série" to endIso.format(dayFmt), "Écoutes pendant la série" to "$plays", "Meilleure journée de la série" to (streakDays.maxByOrNull { it.playCount }?.let { "${Dates.parse(it.date).format(dayFmt)} · ${it.playCount} ▶" } ?: "—"), "Jours d'écoute au total" to "$totalDays"),
-            "Les jours de la série (écoutes par jour)", streakDays.map { Point(it.date, Dates.parse(it.date).format(shortFmt), null, it.playCount, true) }
+            "🎧 $len jours d'affilée" + (if (ongoing) " (en cours)" else "") + (tier?.let { " · ${it.emoji} ${it.label}" } ?: ""),
+            narrative,
+            facts,
+            "Le calendrier de chaleur de la série",
+            streakDays.map { Point(it.date, Dates.parse(it.date).format(shortFmt), null, it.playCount, it.playCount == danger?.playCount) },
+            heat = true
         )
     }
 

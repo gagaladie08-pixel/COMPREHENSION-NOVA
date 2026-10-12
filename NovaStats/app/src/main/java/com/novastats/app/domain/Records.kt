@@ -102,6 +102,18 @@ object RecordCatalog {
     val riseZones = listOf(RecordSub("TOP1", "👑 Top 1"), RecordSub("TOP3", "🥉 Top 3"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP20", "📊 Top 20"))
     /** Sections de Most Weeks Blocked (22) : la zone où l'entité a stagné sans jamais atteindre le #1. */
     val blockedZones = listOf(RecordSub("TOP2", "🥈 Top 2"), RecordSub("TOP5", "🔝 Top 5"), RecordSub("TOP10", "🔥 Top 10"), RecordSub("TOP15", "📊 Top 15"), RecordSub("TOP20", "📈 Top 20"))
+    /** 🔥 Paliers de flamme (28 — Longest Listening Streak) : caps symboliques des séries d'écoute, façon certifications. */
+    data class StreakTier(val min: Int, val emoji: String, val label: String, val colorArgb: Long)
+    val streakTiers = listOf(
+        StreakTier(7, "✨", "Étincelle", 0xFFFFB74D),
+        StreakTier(30, "🔥", "Flamme", 0xFFFF7043),
+        StreakTier(100, "🌋", "Brasier", 0xFFE53935),
+        StreakTier(365, "☄️", "Inferno", 0xFFFFD600)
+    )
+    /** Palier le plus élevé atteint par une série de [days] jours (null sous 7 jours). */
+    fun tierFor(days: Int): StreakTier? = streakTiers.lastOrNull { days >= it.min }
+    /** Prochain palier à atteindre après [days] jours (null au-delà d'Inferno). */
+    fun nextTier(days: Int): StreakTier? = streakTiers.firstOrNull { days < it.min }
     /** Podium Sweep (29) : zone × mode (Solo = uniquement des titres sans featuring ; Standard = feat. compris). */
     val sweepZones = listOf("TOP3" to "Top 3", "TOP5" to "Top 5", "TOP10" to "Top 10")
     val sweepSubs = sweepZones.flatMap { (z, l) -> listOf(RecordSub("${z}_SOLO", "🎯 $l · Solo"), RecordSub("${z}_STD", "🎼 $l · Standard")) }
