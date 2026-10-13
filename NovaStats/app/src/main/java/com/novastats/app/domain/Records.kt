@@ -1,7 +1,7 @@
 package com.novastats.app.domain
 
 /*
- * 🏅 Les 31 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
+ * 🏅 Les 32 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
  * Kotlin pur : définitions + moteur de calcul sur des séries de positions, testable en JVM.
  */
 
@@ -60,7 +60,7 @@ object RecordCatalog {
         "MOST_DEBUT_1" to RecordGroup.DEBUT, "MOST_DEBUT_TOP10" to RecordGroup.DEBUT, "BIGGEST_DEBUT" to RecordGroup.DEBUT,
         "FASTEST_CERT" to RecordGroup.SPEED, "FASTEST_PANTHEON" to RecordGroup.SPEED,
         "BIGGEST_PERIOD" to RecordGroup.TOTALS, "MOST_CERTIFICATIONS" to RecordGroup.TOTALS, "MOST_HOF" to RecordGroup.TOTALS, "MOST_GLOBAL" to RecordGroup.TOTALS, "MULTI_CHART" to RecordGroup.TOTALS,
-        "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
+        "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_TOP5" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
         "MOST_SIMULTANEOUS" to RecordGroup.DOMINATION, "MOST_SUCCESSIVE_1" to RecordGroup.DOMINATION,
         // 25-30 (extension)
         "LONGEST_LIFESPAN" to RecordGroup.DURATION,
@@ -189,7 +189,7 @@ object RecordCatalog {
         RecordDef(23, "MOST_SIMULTANEOUS", "🎯", "Most Simultaneous Songs", "Le plus de titres en même temps dans une zone du chart", chartPeriods, artistAlbum,
             mapOf(RecordCategory.ARTIST to songsAlbums.flatMap { s -> zones.map { z -> RecordSub("${s.dbName}_${z.dbName}", "${s.label} · ${z.label}") } }, RecordCategory.ALBUM to zones), RecordUnit.COUNT),
         RecordDef(24, "MOST_SUCCESSIVE_1", "🔁", "Most Successive #1", "Le plus grand nombre de titres ou albums distincts au #1 dans une même série ininterrompue (minimum 2)", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
-        // ---- Extension 25-31 ----
+        // ---- Extension 25-32 ----
         RecordDef(25, "LONGEST_LIFESPAN", "⏱️", "Longest Lifespan", "Plus longue durée entre la première et la dernière apparition dans une zone du chart, absences comprises", chartPeriods, all3,
             mapOf(RecordCategory.TRACK to lifespanZones, RecordCategory.ARTIST to lifespanZones, RecordCategory.ALBUM to lifespanZones)),
         RecordDef(26, "MOST_REENTRIES", "↩️", "Most Re-Entries", "Le plus de retours dans une zone du chart après au moins une période d'absence", chartPeriods, all3,
@@ -200,7 +200,8 @@ object RecordCatalog {
         RecordDef(29, "PODIUM_SWEEP", "🧹", "Podium Sweep", "Un même artiste / album occupe TOUTES les places du Top 3 / 5 / 10 des titres en même temps — nombre de périodes", chartPeriods, artistAlbum,
             mapOf(RecordCategory.ARTIST to sweepSubs, RecordCategory.ALBUM to sweepSubs)),
         RecordDef(30, "MOST_RECORDS", "🏆", "Most Records", "Le plus de #1 détenus dans l'ensemble des classements de records (record × période × zone) — ex æquo compris", emptyList(), all3, unit = RecordUnit.COUNT),
-        RecordDef(31, "MOST_CUMULATIVE_TOP5", "🏅", "Most Cumulative in Top 5", "Total de périodes passées aux places 1 à 5, consécutives ou non", chartPeriods, all3)
+        RecordDef(31, "MOST_CUMULATIVE_TOP5", "🏅", "Most Cumulative in Top 5", "Total de périodes passées aux places 1 à 5, consécutives ou non", chartPeriods, all3),
+        RecordDef(32, "MOST_SONGS_TOP5", "💜", "Most Songs in Top 5", "Le plus de titres distincts ayant atteint le Top 5", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT)
     )
 
     fun byId(id: String): RecordDef? = ALL.firstOrNull { it.id == id }
@@ -266,6 +267,17 @@ data class RecordResult(val entityId: Long, val value: Double, val date: String?
 object RecordMath {
 
     fun cumulative(series: List<RecordAppearance>, maxPosition: Int = Int.MAX_VALUE): Int = series.count { it.position <= maxPosition }
+
+    /** Éléments distincts ayant atteint une zone au moins une fois; les périodes répétées ne gonflent pas le compte. */
+    fun distinctItemsInZone(seriesByItem: Map<Long, List<RecordAppearance>>, maxPosition: Int): Set<Long> =
+        seriesByItem.asSequence()
+            .filter { (_, series) -> series.any { it.position <= maxPosition } }
+            .map { (itemId, _) -> itemId }
+            .toSet()
+
+    /** Part d'un palier aval parmi les éléments du palier précédent (null si le dénominateur est vide). */
+    fun conversionPercent(numerator: Int, denominator: Int): Int? =
+        if (denominator <= 0) null else (numerator.coerceAtLeast(0) * 100L / denominator).toInt()
 
     /** Présence multi-chart : chaque clé D/W/M/Y choisie doit être classée; variante TOP2 exige #1 ou #2 partout. */
     fun multiChartQualifies(sub: String, ranks: Map<String, Int?>): Boolean {

@@ -24,6 +24,7 @@ import coil.request.ImageRequest
 import com.novastats.app.R
 import com.novastats.app.data.repository.RewindData
 import com.novastats.app.data.repository.RewindSpec
+import com.novastats.app.data.repository.RecordExplainer
 import com.novastats.app.ui.screens.formatCount
 import com.novastats.app.ui.screens.formatDuration
 import com.novastats.app.ui.screens.EntityHistory
@@ -182,6 +183,149 @@ object ShareCards {
         }
 
         writePng(ctx, bmp, "nova_rewind_${data.spec.key}.png")
+    }
+
+    /** 🎼 Carte verticale partageable dédiée aux records de titres distincts (Chart → Top 10 → Top 5 → #1). */
+    suspend fun renderSongReachCard(
+        ctx: Context,
+        entityId: Long,
+        name: String,
+        subtitle: String?,
+        imageUrl: String?,
+        isArtist: Boolean,
+        visual: RecordExplainer.SongReachVisual,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val gold = NovaColors.Gold.toArgb()
+        val colors = listOf(theme.primary.toArgb(), 0xFF5DADE2.toInt(), 0xFFBA68C8.toInt(), gold)
+        val bg = Paint().apply {
+            shader = LinearGradient(
+                0f, 0f, 0f, H.toFloat(),
+                intArrayOf(theme.background.toArgb(), blend(theme.background.toArgb(), colors[3], 0.20f), AColor.BLACK),
+                floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP
+            )
+        }
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bg)
+        halo(c, 180f, 320f, 560f, if (visual.rank == 1) gold else theme.primary.toArgb(), 0.36f)
+        halo(c, 990f, 1240f, 500f, theme.secondary.toArgb(), 0.22f)
+
+        val eyebrow = textPaint(bold, 30f, withAlpha(theme.accent.toArgb(), 0.96f)).apply { letterSpacing = 0.2f }
+        c.drawText("NOVA RECORDS · DOMINATION", 72f, 122f, eyebrow)
+        c.drawText(ellipsize(visual.contextLabel.uppercase(java.util.Locale.FRANCE), textPaint(inter, 24f, theme.textSecondary.toArgb()), W - 144f), 72f, 172f, textPaint(inter, 24f, theme.textSecondary.toArgb()))
+        var titleBottom = drawWrapped(c, name, 72f, 270f, W - 144f, textPaint(bold, 68f, theme.text.toArgb()), maxLines = 2, lineH = 78f)
+        subtitle?.takeIf { it.isNotBlank() }?.let {
+            titleBottom = drawWrapped(c, it, 72f, titleBottom + 4f, W - 144f, textPaint(inter, 30f, theme.textSecondary.toArgb()), maxLines = 1, lineH = 38f)
+        }
+
+        val coverTop = maxOf(350f, titleBottom + 24f)
+        val coverRect = RectF(72f, coverTop, 402f, coverTop + 330f)
+        val cover = imageUrl?.let { loadBitmap(ctx, it, 520) }
+        if (cover != null) {
+            if (isArtist) {
+                c.drawCircle(coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.5f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.primary.toArgb(), 0.18f) })
+                drawCircleCover(c, cover, coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.47f)
+            } else drawCover(c, cover, coverRect, 34f)
+        } else {
+            val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(coverRect.left, coverRect.top, coverRect.right, coverRect.bottom, theme.primary.toArgb(), theme.secondary.toArgb(), Shader.TileMode.CLAMP)
+            }
+            if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.47f, placeholder)
+            else c.drawRoundRect(coverRect, 34f, 34f, placeholder)
+            val initial = textPaint(bold, 150f, withAlpha(theme.text.toArgb(), 0.9f)).apply { textAlign = Paint.Align.CENTER }
+            c.drawText(name.take(1).uppercase(), coverRect.centerX(), coverRect.centerY() + 48f, initial)
+        }
+        val coverBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 4f; color = withAlpha(theme.text.toArgb(), 0.25f)
+        }
+        if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.47f, coverBorder)
+        else c.drawRoundRect(coverRect, 34f, 34f, coverBorder)
+
+        val rightX = 444f
+        val rightW = W - rightX - 72f
+        c.drawText("RECORD", rightX, coverTop + 38f, textPaint(bold, 26f, withAlpha(theme.accent.toArgb(), 0.95f)).apply { letterSpacing = 0.18f })
+        val recordBottom = drawWrapped(c, visual.recordTitle, rightX, coverTop + 88f, rightW, textPaint(bold, 38f, theme.text.toArgb()), maxLines = 2, lineH = 44f)
+        c.drawText("SCORE · ${visual.itemLabel.uppercase(java.util.Locale.FRANCE)}S DISTINCTS", rightX, recordBottom + 32f, textPaint(bold, 20f, theme.textSecondary.toArgb()))
+        c.drawText(visual.score.toString(), rightX, recordBottom + 102f, textPaint(bold, 82f, if (visual.rank == 1) gold else theme.primary.toArgb()))
+        c.drawText(
+            if (visual.rank == 1 && visual.tiedAtTop > 1) "🥇 #1 · ${visual.tiedAtTop} ex æquo" else if (visual.rank == 1) "🥇 DÉTENTEUR #1" else "#${visual.rank} DU RECORD",
+            rightX, recordBottom + 148f, textPaint(bold, 21f, if (visual.rank == 1) gold else theme.textSecondary.toArgb())
+        )
+
+        /* Les quatre paliers en regard : chaque barre reste un compte d'éléments distincts. */
+        val metricTop = coverRect.bottom + 48f
+        c.drawText("LA MONTÉE EN PUISSANCE", 72f, metricTop, textPaint(bold, 27f, theme.textSecondary.toArgb()).apply { letterSpacing = 0.12f })
+        val chartBase = visual.chartCount.coerceAtLeast(1)
+        val ratios = listOf("base", visual.top10ConversionPercent?.let { "$it% du chart" } ?: "—", visual.top5ConversionPercent?.let { "$it% du Top 10" } ?: "—", visual.numberOneConversionPercent?.let { "$it% du Top 5" } ?: "—")
+        val counts = listOf(visual.chartCount, visual.top10Count, visual.top5Count, visual.numberOneCount)
+        val labels = listOf("CHART", "TOP 10", "TOP 5", "#1")
+        val cardGap = 16f
+        val cardW = (W - 144f - cardGap * 3f) / 4f
+        val cardTop = metricTop + 28f
+        val cardBottom = cardTop + 166f
+        for (i in labels.indices) {
+            val left = 72f + i * (cardW + cardGap)
+            val rect = RectF(left, cardTop, left + cardW, cardBottom)
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.80f) })
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(colors[i], 0.55f) })
+            c.drawText(labels[i], rect.left + 18f, rect.top + 38f, textPaint(bold, 23f, colors[i]))
+            c.drawText(counts[i].toString(), rect.left + 18f, rect.top + 101f, textPaint(bold, 48f, theme.text.toArgb()))
+            val bar = RectF(rect.left + 18f, rect.top + 119f, rect.right - 18f, rect.top + 127f)
+            c.drawRoundRect(bar, 4f, 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.textSecondary.toArgb(), 0.16f) })
+            val fraction = (counts[i].toFloat() / chartBase).coerceIn(0f, 1f)
+            if (fraction > 0f) c.drawRoundRect(RectF(bar.left, bar.top, bar.left + bar.width() * fraction, bar.bottom), 4f, 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = colors[i] })
+            c.drawText(ellipsize(ratios[i], textPaint(inter, 18f, theme.textSecondary.toArgb()), cardW - 28f), rect.left + 14f, rect.bottom - 17f, textPaint(inter, 18f, theme.textSecondary.toArgb()))
+        }
+
+        var nextY = cardBottom + 30f
+        visual.rival?.let { rival ->
+            c.drawText("⚔ FACE-À-FACE · TOP 2", 72f, nextY, textPaint(bold, 25f, gold))
+            val left = if (visual.rank < rival.rank) name else rival.name
+            val right = if (visual.rank < rival.rank) rival.name else name
+            val leftScore = if (visual.rank < rival.rank) visual.score else rival.score
+            val rightScore = if (visual.rank < rival.rank) rival.score else visual.score
+            val summary = if (rival.tied) "égalité parfaite" else "$leftScore — $rightScore"
+            c.drawText(ellipsize("$left  vs  $right", textPaint(bold, 27f, theme.text.toArgb()), W - 144f), 72f, nextY + 45f, textPaint(bold, 27f, theme.text.toArgb()))
+            c.drawText(summary, 72f, nextY + 82f, textPaint(inter, 23f, theme.textSecondary.toArgb()))
+            c.drawText(
+                "Chart ${visual.chartCount}/${rival.chartCount} · Top 10 ${visual.top10Count}/${rival.top10Count} · Top 5 ${visual.top5Count}/${rival.top5Count} · #1 ${visual.numberOneCount}/${rival.numberOneCount}",
+                72f, nextY + 118f, textPaint(inter, 20f, theme.textSecondary.toArgb())
+            )
+            nextY += 150f
+        }
+
+        val signatureHeading = if (visual.itemLabel == "album") "ALBUMS SIGNATURES" else "TITRES SIGNATURES"
+        c.drawText("$signatureHeading · PREMIÈRE ATTEINTE DE CHAQUE PALIER", 72f, nextY + 24f, textPaint(bold, 24f, theme.textSecondary.toArgb()))
+        var rowY = nextY + 54f
+        visual.featuredTracks.take(3).forEachIndexed { index, track ->
+            val rect = RectF(72f, rowY, W - 72f, rowY + 164f)
+            c.drawRoundRect(rect, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.72f) })
+            val trackCoverRect = RectF(rect.left + 16f, rect.top + 22f, rect.left + 124f, rect.top + 130f)
+            val trackCover = track.imageUrl?.let { loadBitmap(ctx, it, 220) }
+            if (trackCover != null) drawCover(c, trackCover, trackCoverRect, 16f) else {
+                c.drawRoundRect(trackCoverRect, 16f, 16f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    shader = LinearGradient(trackCoverRect.left, trackCoverRect.top, trackCoverRect.right, trackCoverRect.bottom, colors[index % colors.size], theme.secondary.toArgb(), Shader.TileMode.CLAMP)
+                })
+            }
+            val tx = rect.left + 148f
+            val maxW = rect.right - tx - 18f
+            c.drawText("${index + 1}. " + ellipsize(track.name, textPaint(bold, 27f, theme.text.toArgb()), maxW - 55f), tx, rect.top + 40f, textPaint(bold, 27f, theme.text.toArgb()))
+            c.drawText("Meilleur rang #${track.peakPosition} · ${track.peakDate} · ${track.chartPeriods} apparitions", tx, rect.top + 76f, textPaint(inter, 21f, theme.textSecondary.toArgb()))
+            val path = "Chart ${track.firstChartDate} → Top 10 ${track.firstTop10Date ?: "—"} → Top 5 ${track.firstTop5Date ?: "—"} → #1 ${track.firstNumberOneDate ?: "—"}"
+            drawWrapped(c, path, tx, rect.top + 118f, maxW, textPaint(inter, 18f, theme.accent.toArgb()), maxLines = 2, lineH = 22f)
+            rowY += 178f
+        }
+        if (visual.featuredTracks.isEmpty()) {
+            c.drawText("Aucun titre signature disponible.", 72f, rowY + 35f, textPaint(inter, 24f, theme.textSecondary.toArgb()))
+        }
+        c.drawText("NOVASTATS", W - 72f, H - 74f, textPaint(bold, 30f, withAlpha(theme.primary.toArgb(), 0.96f)).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.28f })
+        c.drawRect(0f, H - 9f, W.toFloat(), H.toFloat(), Paint().apply {
+            shader = LinearGradient(0f, 0f, W.toFloat(), 0f, theme.primary.toArgb(), theme.secondary.toArgb(), Shader.TileMode.CLAMP)
+        })
+        writePng(ctx, bmp, "nova_records_songs_${visual.recordTitle.hashCode()}_$entityId.png")
     }
 
     /** 📤 Carte du parcours d'une entité dans son chart (+ face-à-face éventuel), 1080×1920, aux couleurs du thème. */

@@ -12,8 +12,8 @@ class RecordMathTest {
     private fun s(vararg p: Pair<Int, Int>) = p.map { (idx, pos) -> RecordAppearance(idx, "2026-01-%02d".format(idx + 1), pos, 10) }
 
     @Test
-    fun `catalogue expose les 31 records`() {
-        assertEquals(31, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue expose les 32 records`() {
+        assertEquals(32, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertTrue(RecordCatalog.ALL.all { it.categories.isNotEmpty() })
         // sous-sections uniquement pour des catégories proposées
         RecordCatalog.ALL.forEach { d -> d.subs.keys.forEach { c -> assertTrue("${d.id}/$c", c in d.categories) } }
@@ -29,6 +29,35 @@ class RecordMathTest {
 
         // Le cumul Top 5 inclut les #1 et compte les périodes non consécutives.
         assertEquals(2, RecordMath.cumulative(s(0 to 5, 1 to 6, 3 to 4), 5))
+    }
+
+    @Test
+    fun `Most Songs in Top 5 est un record distinct par element et non cumulatif`() {
+        val record = RecordCatalog.byId("MOST_SONGS_TOP5")!!
+        assertEquals(32, record.number)
+        assertEquals(RecordUnit.COUNT, record.unit)
+        assertEquals(setOf(RecordCategory.ARTIST, RecordCategory.ALBUM), record.categories)
+        assertTrue(record.periods.isNotEmpty())
+    }
+
+    @Test
+    fun `zone Top 5 compte chaque titre distinct une seule fois`() {
+        val series = mapOf(
+            10L to s(0 to 15, 1 to 8, 2 to 4, 3 to 1), // un même titre franchit plusieurs paliers
+            20L to s(0 to 10, 1 to 6, 2 to 5),
+            30L to s(0 to 6, 1 to 7),
+            40L to s(0 to 5)
+        )
+        assertEquals(setOf(10L, 20L, 40L), RecordMath.distinctItemsInZone(series, 5))
+        assertEquals(setOf(10L, 20L, 30L, 40L), RecordMath.distinctItemsInZone(series, 10))
+        assertEquals(setOf(10L), RecordMath.distinctItemsInZone(series, 1))
+    }
+
+    @Test
+    fun `conversion de palier et denominateur vide`() {
+        assertEquals(40, RecordMath.conversionPercent(2, 5))
+        assertEquals(0, RecordMath.conversionPercent(0, 5))
+        assertNull(RecordMath.conversionPercent(0, 0))
     }
 
     @Test

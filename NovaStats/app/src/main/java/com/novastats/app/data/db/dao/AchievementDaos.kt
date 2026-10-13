@@ -318,6 +318,10 @@ interface RecordDao {
     @Query("SELECT * FROM records_cache WHERE category = :category AND entity_id = :entityId ORDER BY record_type, period_type, subcategory")
     suspend fun rowsForEntity(category: String, entityId: Long): List<RecordCacheEntity>
 
+    /** Sources existantes pour recalculer uniquement Most Records après l'amorçage ciblé d'un nouveau record. */
+    @Query("SELECT * FROM records_cache WHERE record_type != 'MOST_RECORDS'")
+    suspend fun rowsForMostRecords(): List<RecordCacheEntity>
+
     /** Nombre d'entités strictement meilleures dans un classement (rang = n + 1). */
     @Query(
         """

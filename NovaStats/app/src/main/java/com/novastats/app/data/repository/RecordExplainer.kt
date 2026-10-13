@@ -188,6 +188,52 @@ class RecordExplainer(private val db: NovaDatabase) {
         val crownCeremony: Boolean,
         val cells: List<PresenceCell>
     )
+    /** Jalons du meilleur classement d'un titre/album signature pour les records de présence par éléments distincts. */
+    data class SongReachTrack(
+        val id: Long,
+        val name: String,
+        val imageUrl: String?,
+        val peakPosition: Int,
+        val peakDate: String,
+        val firstChartDate: String,
+        val firstTop10Date: String?,
+        val firstTop5Date: String?,
+        val firstNumberOneDate: String?,
+        val chartPeriods: Int,
+        val top10Periods: Int,
+        val top5Periods: Int,
+        val numberOnePeriods: Int
+    )
+    data class SongReachRival(
+        val id: Long,
+        val name: String,
+        val imageUrl: String?,
+        val rank: Int,
+        val score: Int,
+        val chartCount: Int,
+        val top10Count: Int,
+        val top5Count: Int,
+        val numberOneCount: Int,
+        val tied: Boolean
+    )
+    /** Échelle cumulative par éléments uniques, face-à-face et trajectoires des titres signatures. */
+    data class SongReachVisual(
+        val contextLabel: String,
+        val recordTitle: String,
+        val itemLabel: String,
+        val score: Int,
+        val chartCount: Int,
+        val top10Count: Int,
+        val top5Count: Int,
+        val numberOneCount: Int,
+        val top10ConversionPercent: Int?,
+        val top5ConversionPercent: Int?,
+        val numberOneConversionPercent: Int?,
+        val rank: Int,
+        val tiedAtTop: Int,
+        val rival: SongReachRival?,
+        val featuredTracks: List<SongReachTrack>
+    )
     private data class SpeedStageSource(
         val key: String,
         val label: String,
@@ -222,7 +268,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** 🔁 Carte, frise compressée, statut et cause de rupture propres à Most Successive #1. */
         val successiveVisual: SuccessiveVisual? = null,
         /** 👑 Funnel, comparaison, statut, jalons et frise des rangs pour les quatre records de présence. */
-        val presenceVisual: PresenceVisual? = null
+        val presenceVisual: PresenceVisual? = null,
+        /** 🎼 Échelle chart → Top 10 → Top 5 → #1 pour les records de titres/albums distincts. */
+        val songReachVisual: SongReachVisual? = null
     )
 
     /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
@@ -615,7 +663,7 @@ class RecordExplainer(private val db: NovaDatabase) {
             "PODIUM_SWEEP" -> podiumSweep(period ?: Period.WEEKLY, cat, sub, id, name)
             "LONGEST_LISTENING_STREAK" -> listeningStreak(cat, id, name)
             "MOST_RECORDS" -> mostRecords(cat, id, name)
-            "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_AT_1", "MOST_DEBUT_1", "MOST_DEBUT_TOP10", "MOST_SIMULTANEOUS", "MOST_SUCCESSIVE_1" ->
+            "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1", "MOST_DEBUT_1", "MOST_DEBUT_TOP10", "MOST_SIMULTANEOUS", "MOST_SUCCESSIVE_1" ->
                 ownerStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
             "FASTEST_CERT" -> fastestCert(cat, sub, id, name)
             "FASTEST_PANTHEON" -> fastestPantheon(sub, id, name)
@@ -1011,6 +1059,95 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     /* ---------------- records « propriétaire » : titres / albums d'un artiste, titres d'un album ---------------- */
 
+    private suspend fun songReachVisual(
+        def: RecordDef,
+        p: Period,
+        cat: RecordCategory,
+        sub: String?,
+        id: Long,
+        value: Double,
+        itemCat: RecordCategory,
+        mine: Map<Long, List<RecordAppearance>>,
+        all: Map<Long, List<RecordAppearance>>,
+        hits: Map<Long, List<RecordAppearance>>
+    ): SongReachVisual {
+        fun counts(series: Map<Long, List<RecordAppearance>>) = listOf(
+            series.size,
+            series.count { (_, appearances) -> appearances.any { it.position <= 10 } },
+            series.count { (_, appearances) -> appearances.any { it.position <= 5 } },
+            series.count { (_, appearances) -> appearances.any { it.position == 1 } }
+        )
+        val currentCounts = counts(mine)
+        val rank = db.recordDao().betterCount(def.id, p.dbName, cat.dbName, sub, value, asc = false) + 1
+        val tiedAtTop = db.recordDao().tiedAt(def.id, p.dbName, cat.dbName, sub, value)
+        val rows = db.recordDao().top10(def.id, p.dbName, cat.dbName, sub, asc = false).first()
+        val rivalRow = when (rank) {
+            1 -> rows.firstOrNull { it.r.entityId != id }
+            2 -> rows.firstOrNull { it.r.entityId != id }
+            else -> null
+        }
+        val rival = rivalRow?.let { row ->
+            val (rivalItemCat, rivalIds) = ownedIds(cat, sub, row.r.entityId)
+            val rivalAll = if (rivalItemCat == itemCat) all else allSeries(rivalItemCat, p)
+            val rivalCounts = counts(rivalAll.filterKeys { it in rivalIds })
+            SongReachRival(
+                id = row.r.entityId,
+                name = row.name ?: "Inconnu",
+                imageUrl = row.imageUrl,
+                rank = rows.indexOfFirst { it.r.entityId == row.r.entityId } + 1,
+                score = row.r.value.toInt(),
+                chartCount = rivalCounts[0],
+                top10Count = rivalCounts[1],
+                top5Count = rivalCounts[2],
+                numberOneCount = rivalCounts[3],
+                tied = row.r.value == value
+            )
+        }
+        val featured = hits.entries.sortedWith(
+            compareBy<Map.Entry<Long, List<RecordAppearance>>> { entry -> entry.value.minOfOrNull { it.position } ?: Int.MAX_VALUE }
+                .thenByDescending { entry -> entry.value.count { it.position == 1 } }
+                .thenByDescending { entry -> entry.value.size }
+        ).take(3).map { (itemId, appearances) ->
+            val peak = appearances.minBy { it.position }
+            val (itemName, imageUrl) = nameOf(itemCat.dbName, itemId)
+            fun milestone(limit: Int) = appearances.firstOrNull { it.position <= limit }?.let { short(p, it.date) }
+            SongReachTrack(
+                id = itemId,
+                name = itemName,
+                imageUrl = imageUrl,
+                peakPosition = peak.position,
+                peakDate = short(p, peak.date),
+                firstChartDate = short(p, appearances.first().date),
+                firstTop10Date = milestone(10),
+                firstTop5Date = milestone(5),
+                firstNumberOneDate = appearances.firstOrNull { it.position == 1 }?.let { short(p, it.date) },
+                chartPeriods = appearances.size,
+                top10Periods = appearances.count { it.position <= 10 },
+                top5Periods = appearances.count { it.position <= 5 },
+                numberOnePeriods = appearances.count { it.position == 1 }
+            )
+        }
+        val subLabel = def.subs[cat]?.firstOrNull { it.dbName == sub }?.label
+        val itemLabel = if (itemCat == RecordCategory.ALBUM) "album" else "titre"
+        return SongReachVisual(
+            contextLabel = listOfNotNull(p.frLabel, cat.label, subLabel).joinToString(" · "),
+            recordTitle = def.title,
+            itemLabel = itemLabel,
+            score = value.toInt(),
+            chartCount = currentCounts[0],
+            top10Count = currentCounts[1],
+            top5Count = currentCounts[2],
+            numberOneCount = currentCounts[3],
+            top10ConversionPercent = RecordMath.conversionPercent(currentCounts[1], currentCounts[0]),
+            top5ConversionPercent = RecordMath.conversionPercent(currentCounts[2], currentCounts[1]),
+            numberOneConversionPercent = RecordMath.conversionPercent(currentCounts[3], currentCounts[2]),
+            rank = rank,
+            tiedAtTop = tiedAtTop,
+            rival = rival,
+            featuredTracks = featured
+        )
+    }
+
     private suspend fun ownerStory(def: RecordDef, p: Period, cat: RecordCategory, sub: String?, id: Long, name: String): Story {
         val (itemCat, ids) = ownedIds(cat, sub, id)
         val all = allSeries(itemCat, p)
@@ -1021,19 +1158,52 @@ class RecordExplainer(private val db: NovaDatabase) {
         fun peakOf(s: List<RecordAppearance>) = s.minBy { it.position }
 
         return when (def.id) {
-            "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_AT_1" -> {
-                val limit = when (def.id) { "MOST_SONGS_TOP10" -> 10; "MOST_SONGS_AT_1" -> 1; else -> Int.MAX_VALUE }
-                val zone = when (limit) { 10 -> "dans le Top 10"; 1 -> "au #1"; else -> "dans le chart" }
+            "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1" -> {
+                val limit = when (def.id) {
+                    "MOST_SONGS_TOP10" -> 10
+                    "MOST_SONGS_TOP5" -> 5
+                    "MOST_SONGS_AT_1" -> 1
+                    else -> Int.MAX_VALUE
+                }
+                val zone = when (limit) {
+                    10 -> "dans le Top 10"
+                    5 -> "dans le Top 5"
+                    1 -> "au #1"
+                    else -> "dans le chart"
+                }
                 val hits = mine.filter { (_, s) -> s.any { it.position <= limit } }
-                val items = hits.entries.sortedBy { peakOf(it.value).position }.map { (iid, s) ->
-                    val pk = peakOf(s); item(iid, "peak ${pos(pk.position)} ${on(p, pk.date)} · ${s.size} ${unit(p, s.size)} classé", pk.position <= limit)
+                val items = hits.entries.sortedWith(
+                    compareBy<Map.Entry<Long, List<RecordAppearance>>> { peakOf(it.value).position }
+                        .thenByDescending { entry -> entry.value.count { it.position == 1 } }
+                        .thenByDescending { entry -> entry.value.size }
+                ).map { (iid, s) ->
+                    val peak = peakOf(s)
+                    val detail = "peak ${pos(peak.position)} ${on(p, peak.date)} · ${s.size} ${unit(p, s.size)} en chart · " +
+                        "${s.count { it.position <= 10 }} Top 10 · ${s.count { it.position <= 5 }} Top 5 · ${s.count { it.position == 1 }} #1"
+                    item(iid, detail, peak.position <= limit)
+                }
+                val visual = songReachVisual(def, p, cat, sub, id, hits.size.toDouble(), itemCat, mine, all, hits)
+                val zoneConversion = when (limit) {
+                    10 -> "${visual.top10ConversionPercent?.let { "$it%" } ?: "—"} du chart"
+                    5 -> "${visual.top5ConversionPercent?.let { "$it%" } ?: "—"} des titres du Top 10"
+                    1 -> "${visual.numberOneConversionPercent?.let { "$it%" } ?: "—"} des titres du Top 5"
+                    else -> null
                 }
                 Story(
-                    "${def.emoji} ${hits.size} ${plural(hits.size, what)} différents $zone",
-                    "$name a placé ${hits.size} ${plural(hits.size, what)} différents $zone du $chart" + (if (ids.size > hits.size) " (sur ${ids.size} ${plural(ids.size, what)} en bibliothèque)" else "") + ". " +
-                        (items.firstOrNull()?.let { "Le plus haut : ${it.name} (${it.detail.substringBefore(" ·")})." } ?: ""),
-                    listOf("$what".replaceFirstChar { it.uppercase() } + "s concernés" to "${hits.size}", "Total classés dans ce chart" to "${mine.size}"),
-                    itemsTitle = "Les ${plural(hits.size, what)} qui comptent", items = items
+                    headline = "${def.emoji} ${hits.size} ${plural(hits.size, what)} distincts $zone",
+                    narrative = "$name a placé ${hits.size} ${plural(hits.size, what)} distincts $zone du $chart" +
+                        (if (ids.size > hits.size) " (sur ${ids.size} ${plural(ids.size, what)} en bibliothèque)" else "") +
+                        ". Chaque élément ne compte qu'une fois, même s'il apparaît sur plusieurs périodes." +
+                        (zoneConversion?.let { " Conversion vers ce palier : $it." } ?: "") +
+                        (items.firstOrNull()?.let { " Meilleur peak : ${it.name} (${it.detail.substringBefore(" ·")})." } ?: ""),
+                    facts = listOf(
+                        "Score · éléments distincts" to "${hits.size}",
+                        "Classés dans ce chart" to "${visual.chartCount}",
+                        "Top 10 · Top 5 · #1" to "${visual.top10Count} · ${visual.top5Count} · ${visual.numberOneCount}"
+                    ),
+                    itemsTitle = "Les ${plural(hits.size, what)} qui comptent",
+                    items = items,
+                    songReachVisual = visual
                 )
             }
             "MOST_DEBUT_1", "MOST_DEBUT_TOP10" -> {

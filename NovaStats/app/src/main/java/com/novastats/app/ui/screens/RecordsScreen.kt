@@ -57,6 +57,7 @@ import com.novastats.app.data.repository.HonorGuests
 import com.novastats.app.data.db.dao.RecordRow
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.repository.RecordExplainer
+import com.novastats.app.ui.share.ShareCards
 import com.novastats.app.domain.Period
 import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.domain.Dates
@@ -701,6 +702,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     }
     val subLabel = def.subs[ref.category]?.firstOrNull { it.dbName == ref.sub }?.label
     val context = listOfNotNull(ref.period?.label, sectionLabel(ref.category), subLabel).joinToString(" · ")
+    val shareScope = rememberCoroutineScope()
+    var sharingSongReach by remember(ref) { mutableStateOf(false) }
+    var songReachShareError by remember(ref) { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
@@ -710,8 +714,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
             val successiveRecord = def.id == "MOST_SUCCESSIVE_1"
             val presenceRecord = def.id in setOf("MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1")
+            val songReachRecord = def.id in setOf("MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1")
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -765,6 +770,40 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         story?.presenceVisual?.let { visual ->
             item { PresenceSpotlight(name, row.imageUrl, ref.category == RecordCategory.ARTIST, def.id, visual, color) }
             item { PresencePositionRibbon(visual, color) }
+        }
+        story?.songReachVisual?.let { visual ->
+            item {
+                SongReachSpotlight(
+                    name = name,
+                    imageUrl = row.imageUrl,
+                    isArtist = ref.category == RecordCategory.ARTIST,
+                    visual = visual,
+                    color = color,
+                    sharing = sharingSongReach,
+                    shareError = songReachShareError,
+                    onShare = {
+                        if (!sharingSongReach) {
+                            sharingSongReach = true
+                            songReachShareError = false
+                            shareScope.launch {
+                                try {
+                                    val file = ShareCards.renderSongReachCard(
+                                        app, row.r.entityId, name, row.subtitle, row.imageUrl,
+                                        ref.category == RecordCategory.ARTIST, visual, theme
+                                    )
+                                    ShareCards.share(app, file, "Partager ce record")
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    songReachShareError = true
+                                } finally {
+                                    sharingSongReach = false
+                                }
+                            }
+                        }
+                    }
+                )
+            }
         }
         val st = story
         if (st == null) {
@@ -1254,6 +1293,214 @@ private fun SuccessiveRelayTimeline(visual: RecordExplainer.SuccessiveVisual, co
             }
         }
         Text("Les cartes compressent les périodes consécutives d'un même titre ou album; le score reste le nombre d'éléments distincts.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+    }
+}
+
+/** 🎼 Échelle des éléments distincts, face-à-face du Top 2 et parcours des titres signatures. */
+@Composable
+private fun SongReachSpotlight(
+    name: String,
+    imageUrl: String?,
+    isArtist: Boolean,
+    visual: RecordExplainer.SongReachVisual,
+    color: Color,
+    sharing: Boolean,
+    shareError: Boolean,
+    onShare: () -> Unit
+) {
+    val theme = Nova.theme
+    val accent = if (visual.rank == 1) NovaColors.Gold else color
+    val scoreCounter = remember(visual.score, visual.recordTitle) { Animatable(0f) }
+    LaunchedEffect(visual.score, visual.recordTitle) {
+        scoreCounter.snapTo(0f)
+        scoreCounter.animateTo(visual.score.toFloat(), tween(950))
+    }
+    val chartBase = visual.chartCount.coerceAtLeast(1)
+    val levels = listOf(
+        Triple("Chart", visual.chartCount, "Base"),
+        Triple("Top 10", visual.top10Count, visual.top10ConversionPercent?.let { "$it% du chart" } ?: "—"),
+        Triple("Top 5", visual.top5Count, visual.top5ConversionPercent?.let { "$it% du Top 10" } ?: "—"),
+        Triple("#1", visual.numberOneCount, visual.numberOneConversionPercent?.let { "$it% du Top 5" } ?: "—")
+    )
+    val levelColors = listOf(color, Color(0xFF5DADE2), Color(0xFFBA68C8), NovaColors.Gold)
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle("🎼 Échelle de domination · éléments distincts", accent)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.16f), theme.surface, theme.surface)))
+                .border(1.dp, accent.copy(alpha = if (visual.rank == 1) 0.62f else 0.34f), RoundedCornerShape(20.dp))
+                .padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 52, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(visual.contextLabel.uppercase(Locale.FRANCE), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(name, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Text(
+                    if (visual.rank == 1 && visual.tiedAtTop > 1) "🥇 #1 · ${visual.tiedAtTop} ex æquo" else if (visual.rank == 1) "🥇 DÉTENTEUR #1" else "#${visual.rank}",
+                    color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.End
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(scoreCounter.value.toInt().toString(), color = accent, fontWeight = FontWeight.Black, fontSize = 38.sp, lineHeight = 40.sp)
+                Column(Modifier.weight(1f).padding(bottom = 4.dp)) {
+                    Text(visual.recordTitle, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    Text("${visual.score} ${if (visual.score == 1) visual.itemLabel else "${visual.itemLabel}s"} ${if (visual.score == 1) "unique" else "uniques"} · score sans doublons de périodes", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("CHART  →  TOP 10  →  TOP 5  →  #1", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                levels.forEachIndexed { index, (label, count, ratio) ->
+                    SongReachMetricCard(
+                        label = label,
+                        count = count,
+                        ratio = ratio,
+                        fraction = (count.toFloat() / chartBase).coerceIn(0f, 1f),
+                        accent = levelColors[index],
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("Chaque ${visual.itemLabel} compte une fois au maximum; les taux décrivent la conversion entre les paliers, pas la durée passée dans le chart.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 15.sp)
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (sharing) color.copy(alpha = 0.13f) else theme.surface.copy(alpha = 0.78f))
+                    .border(1.dp, color.copy(alpha = 0.38f), RoundedCornerShape(12.dp))
+                    .clickable(enabled = !sharing, onClick = onShare),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(if (sharing) "⏳ Préparation de la carte…" else "📤 Partager la carte premium", color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+            }
+            if (shareError) Text("La carte n'a pas pu être préparée. Réessaie dans un instant.", color = Color(0xFFFF6B6B), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+        }
+
+        visual.rival?.let { rival ->
+            Spacer(Modifier.height(8.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(theme.surface.copy(alpha = 0.82f))
+                    .border(1.dp, NovaColors.Gold.copy(alpha = 0.34f), RoundedCornerShape(16.dp)).padding(12.dp)
+            ) {
+                Text("⚔ FACE-À-FACE · TOP 2", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CoverArt(imageUrl, name, size = 38, circle = isArtist)
+                    Column(Modifier.weight(1f)) {
+                        Text("#${visual.rank} · $name", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${visual.score} sur « ${visual.recordTitle} »", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text("VS", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(1f)) {
+                        Text("#${rival.rank} · ${rival.name}", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+                        Text("${rival.score} sur « ${visual.recordTitle} »", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                    }
+                    CoverArt(rival.imageUrl, rival.name, size = 38, circle = isArtist)
+                }
+                Spacer(Modifier.height(9.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        Triple("Chart", visual.chartCount, rival.chartCount),
+                        Triple("Top 10", visual.top10Count, rival.top10Count),
+                        Triple("Top 5", visual.top5Count, rival.top5Count),
+                        Triple("#1", visual.numberOneCount, rival.numberOneCount)
+                    ).forEachIndexed { index, (label, current, other) ->
+                        SongReachDuelMetric(label, current, other, levelColors[index], Modifier.weight(1f))
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                val gap = kotlin.math.abs(visual.score - rival.score)
+                Text(
+                    when {
+                        rival.tied -> "🤝 Même nombre de ${visual.itemLabel}s distincts : égalité au sommet."
+                        visual.rank < rival.rank -> "👑 $gap ${visual.itemLabel}${if (gap == 1) "" else "s"} d'avance sur le suivant."
+                        else -> "🎯 Il manque $gap ${visual.itemLabel}${if (gap == 1) "" else "s"} pour rejoindre le détenteur."
+                    },
+                    color = if (rival.tied) NovaColors.Gold else theme.textSecondary,
+                    fontWeight = if (rival.tied) FontWeight.Bold else FontWeight.Normal,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+
+        if (visual.featuredTracks.isNotEmpty()) {
+            SectionTitle("🎬 Trajectoire des ${visual.itemLabel}s signatures", color)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                visual.featuredTracks.forEach { track ->
+                    Column(
+                        Modifier.width(292.dp).clip(RoundedCornerShape(15.dp)).background(theme.surface.copy(alpha = 0.82f))
+                            .border(1.dp, color.copy(alpha = 0.28f), RoundedCornerShape(15.dp)).padding(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CoverArt(track.imageUrl, track.name, size = 42)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(track.name, color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Meilleur rang #${track.peakPosition} · ${track.peakDate}", color = color, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelSmall)
+                                Text("${track.chartPeriods} appar. · ${track.top5Periods} Top 5 · ${track.numberOnePeriods} #1", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SongReachMilestone("Chart", track.firstChartDate, color, Modifier.weight(1f))
+                            SongReachMilestone("Top 10", track.firstTop10Date, Color(0xFF5DADE2), Modifier.weight(1f))
+                            SongReachMilestone("Top 5", track.firstTop5Date, Color(0xFFBA68C8), Modifier.weight(1f))
+                            SongReachMilestone("#1", track.firstNumberOneDate, NovaColors.Gold, Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            Text("Première date de franchissement de chaque palier; les cases « — » indiquent un palier jamais atteint.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+@Composable
+private fun SongReachMetricCard(label: String, count: Int, ratio: String, fraction: Float, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(11.dp)).background(accent.copy(alpha = 0.11f))
+            .border(1.dp, accent.copy(alpha = 0.30f), RoundedCornerShape(11.dp)).padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Text(count.toString(), color = theme.text, fontWeight = FontWeight.Black, fontSize = 18.sp)
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(theme.textSecondary.copy(alpha = 0.16f))) {
+            Box(Modifier.fillMaxWidth(fraction).height(4.dp).clip(CircleShape).background(accent))
+        }
+        Text(ratio, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun SongReachDuelMetric(label: String, current: Int, rival: Int, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(9.dp)).background(accent.copy(alpha = 0.09f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(9.dp)).padding(horizontal = 3.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 1, fontSize = 8.sp)
+        Text("$current : $rival", color = theme.text, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SongReachMilestone(label: String, date: String?, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(8.dp)).background(accent.copy(alpha = if (date == null) 0.045f else 0.12f))
+            .border(1.dp, accent.copy(alpha = if (date == null) 0.12f else 0.34f), RoundedCornerShape(8.dp)).padding(horizontal = 3.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 1, fontSize = 8.sp)
+        Text(date ?: "—", color = if (date == null) theme.textSecondary else theme.text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 8.sp)
     }
 }
 

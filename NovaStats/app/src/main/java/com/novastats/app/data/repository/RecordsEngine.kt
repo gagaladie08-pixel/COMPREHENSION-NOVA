@@ -16,7 +16,7 @@ import com.novastats.app.domain.RecordResult
 import java.time.LocalDate
 
 /**
- * 🏅 Moteur des 31 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
+ * 🏅 Moteur des 32 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
  * et écrit le Top 10 de chaque record dans `records_cache`.
  * Tous les records se créent automatiquement (import JSON compris) — aucune saisie manuelle.
  */
@@ -109,6 +109,57 @@ class RecordsEngine(private val db: NovaDatabase) {
         db.withTransaction {
             db.recordDao().clearType("MOST_CUMULATIVE_TOP5")
             out.chunked(500).forEach { db.recordDao().insertAll(it) }
+        }
+    }
+
+    /**
+     * Amorçage ciblé du nouveau Most Songs in Top 5 depuis les snapshots présents.
+     * Les autres records ne sont pas recalculés; seul Most Records est actualisé car il dépend
+     * des détenteurs de tous les records.
+     */
+    suspend fun rebuildSongsTop5Only() {
+        val links = loadLinks()
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        for (p in chartPeriods) {
+            val trackSeries = toSeries(db.billboardDao().allTrackRows(p.dbName), p)
+            val albumSeries = toSeries(db.billboardDao().allAlbumRows(p.dbName), p)
+            data class View(
+                val category: RecordCategory,
+                val subcategory: String?,
+                val series: Map<Long, List<RecordAppearance>>,
+                val owners: (Long) -> Set<Long>
+            )
+            val views = listOf(
+                View(RecordCategory.ARTIST, "SONGS", trackSeries) { links.trackArtists[it].orEmpty() },
+                View(RecordCategory.ARTIST, "ALBUMS", albumSeries) { links.albumArtist[it]?.let { artistId -> setOf(artistId) }.orEmpty() },
+                View(RecordCategory.ALBUM, null, trackSeries) { links.trackAlbum[it]?.let { albumId -> setOf(albumId) }.orEmpty() }
+            )
+            for (view in views) {
+                val counts = HashMap<Long, MutableSet<Long>>()
+                val lastDate = HashMap<Long, String>()
+                for ((itemId, appearances) in view.series) {
+                    for (owner in view.owners(itemId)) {
+                        counts.getOrPut(owner) { HashSet() }
+                        lastDate[owner] = maxOf(lastDate[owner] ?: "", appearances.last().date)
+                    }
+                }
+                for (itemId in RecordMath.distinctItemsInZone(view.series, 5)) {
+                    for (owner in view.owners(itemId)) counts.getOrPut(owner) { HashSet() }.add(itemId)
+                }
+                val results = counts.mapNotNull { (owner, itemIds) ->
+                    itemIds.takeIf { it.isNotEmpty() }?.let { RecordResult(owner, it.size.toDouble(), lastDate[owner]) }
+                }
+                emit(out, "MOST_SONGS_TOP5", p, view.category, view.subcategory, results, now)
+            }
+        }
+        val sourceRows = db.recordDao().rowsForMostRecords().filterNot { it.recordType == "MOST_SONGS_TOP5" } + out
+        val mostRecords = ArrayList<RecordCacheEntity>()
+        mostRecords(mostRecords, now, sourceRows)
+        db.withTransaction {
+            db.recordDao().clearType("MOST_SONGS_TOP5")
+            db.recordDao().clearType("MOST_RECORDS")
+            (out + mostRecords).chunked(500).forEach { db.recordDao().insertAll(it) }
         }
     }
 
@@ -276,9 +327,14 @@ class RecordsEngine(private val db: NovaDatabase) {
                     }
                 }
             }
+            val top5 = HashMap<Long, MutableSet<Long>>()
+            for (itemId in RecordMath.distinctItemsInZone(v.series, 5)) {
+                for (owner in v.owners(itemId)) top5.getOrPut(owner) { HashSet() }.add(itemId)
+            }
             fun res(m: Map<Long, Set<Long>>) = m.map { (o, set) -> RecordResult(o, set.size.toDouble(), lastDate[o]) }
             emit(out, "MOST_SONGS_IN_CHART", p, v.cat, v.sub, res(inChart), now)
             emit(out, "MOST_SONGS_TOP10", p, v.cat, v.sub, res(top10), now)
+            emit(out, "MOST_SONGS_TOP5", p, v.cat, v.sub, res(top5), now)
             emit(out, "MOST_SONGS_AT_1", p, v.cat, v.sub, res(at1), now)
             emit(out, "MOST_DEBUT_1", p, v.cat, v.sub, res(debut1), now)
             emit(out, "MOST_DEBUT_TOP10", p, v.cat, v.sub, res(debut10), now)
@@ -354,9 +410,13 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     /* ---------------- 30. Most Records (palmarès) ---------------- */
 
-    private fun mostRecords(out: MutableList<RecordCacheEntity>, now: Long) {
+    private fun mostRecords(
+        out: MutableList<RecordCacheEntity>,
+        now: Long,
+        sourceRows: List<RecordCacheEntity> = out
+    ) {
         val ascTypes = RecordCatalog.ALL.filter { it.ascending }.map { it.id }.toSet()
-        val groups = out.filter { it.recordType != "MOST_RECORDS" }.groupBy { listOf(it.recordType, it.periodType, it.category, it.subcategory) }
+        val groups = sourceRows.filter { it.recordType != "MOST_RECORDS" }.groupBy { listOf(it.recordType, it.periodType, it.category, it.subcategory) }
         val counts = HashMap<Pair<String, Long>, Int>()          // (catégorie, entité) → nb de #1
         val families = HashMap<Pair<String, Long>, HashMap<String, Int>>()
         for ((key, rows) in groups) {

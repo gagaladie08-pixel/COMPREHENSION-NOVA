@@ -60,6 +60,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         RecordsEngine(db).rebuildCumulativeTop5Only()
     }
 
+    /** Amorçage ciblé de Most Songs in Top 5 et actualisation de son palmarès dépendant. */
+    suspend fun rebuildSongsTop5Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildSongsTop5Only()
+    }
+
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
     private suspend fun recomputeRootAggregatesFromScrobbles() {
         val totals = db.trackDao().rootAggregatesFromScrobbles()

@@ -97,6 +97,19 @@ object StartupRepair {
                         RebuildAudit.write(context, "⚠️ Amorçage Most Cumulative in Top 5 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }
                 }
+
+                // Ajout ciblé de Most Songs in Top 5 depuis les snapshots déjà présents.
+                // Seuls ce nouveau cache et Most Records (qui dépend des détenteurs) sont recalculés.
+                if (!prefs.getBoolean("songs_top5_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "💜 Amorçage ciblé Most Songs in Top 5 depuis les snapshots Billboard")
+                        app.rebuilder.rebuildSongsTop5Only()
+                        RebuildAudit.write(context, "✅ Cache Most Songs in Top 5 et palmarès dépendant recalculés")
+                        prefs.edit().putBoolean("songs_top5_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Amorçage Most Songs in Top 5 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
             }
         }
     }

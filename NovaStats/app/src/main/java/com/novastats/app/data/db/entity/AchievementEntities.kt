@@ -128,7 +128,7 @@ data class PantheonSpeedHistoryEntity(
     @ColumnInfo(name = "attainment_route", defaultValue = "'LEGACY_ESTIMATE'") val attainmentRoute: String = "LEGACY_ESTIMATE"
 )
 
-/** Table 25 — records_cache : résultats pré-calculés des 31 records */
+/** Table 25 — records_cache : résultats pré-calculés des 32 records */
 @Entity(
     tableName = "records_cache",
     indices = [Index(value = ["record_type", "period_type", "category", "subcategory"])]
