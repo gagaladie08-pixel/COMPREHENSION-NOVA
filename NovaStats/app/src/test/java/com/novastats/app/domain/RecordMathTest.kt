@@ -36,7 +36,7 @@ class RecordMathTest {
         val record = RecordCatalog.byId("MOST_SONGS_TOP5")!!
         assertEquals(32, record.number)
         assertEquals(RecordUnit.COUNT, record.unit)
-        assertEquals(setOf(RecordCategory.ARTIST, RecordCategory.ALBUM), record.categories)
+        assertEquals(listOf(RecordCategory.ARTIST, RecordCategory.ALBUM), record.categories)
         assertTrue(record.periods.isNotEmpty())
     }
 
