@@ -72,6 +72,58 @@ class RecordExplainer(private val db: NovaDatabase) {
         val calendarGrain: SpeedCalendarGrain,
         val calendar: List<SpeedActivityBucket>
     )
+    /** Une étape compressée de la frise : mêmes éléments au #1 sur des périodes consécutives. */
+    data class SuccessiveSegment(
+        val id: Long,
+        val type: String,
+        val name: String,
+        val imageUrl: String?,
+        val firstDate: String,
+        val lastDate: String,
+        val periodCount: Int,
+        val durationLabel: String
+    )
+    /** Cause visible de fin de série; l'élément reste null quand l'archive ne permet pas d'identifier le #1. */
+    data class SuccessiveStopper(
+        val name: String?,
+        val type: String?,
+        val id: Long?,
+        val imageUrl: String?,
+        val ownerName: String?,
+        val date: String?,
+        val direct: Boolean,
+        val explanation: String
+    )
+    data class SuccessiveRival(
+        val id: Long,
+        val name: String,
+        val imageUrl: String?,
+        val score: Int,
+        val gap: Int,
+        val tied: Boolean,
+        val ahead: Boolean
+    )
+    /** Carte premium dédiée à Most Successive #1. */
+    data class SuccessiveVisual(
+        val distinctCount: Int,
+        val periodCount: Int,
+        val durationLabel: String,
+        val itemLabel: String,
+        val contextLabel: String,
+        val startDate: String,
+        val endDate: String,
+        val startShort: String,
+        val endShort: String,
+        val continuing: Boolean,
+        val statusLine: String,
+        val rank: Int,
+        val boardSize: Int,
+        val recordHolder: Boolean,
+        val tiedAtTop: Int,
+        val rival: SuccessiveRival?,
+        val segments: List<SuccessiveSegment>,
+        val stopper: SuccessiveStopper?
+    )
     private data class SpeedStageSource(
         val key: String,
         val label: String,
@@ -102,7 +154,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** 🌐 Carte premium « constellation » du meilleur jour multi-chart. */
         val multiChartVisual: MultiChartVisual? = null,
         /** ⚡ Fiche premium chrono : rival, splits d'étapes, voie Panthéon et calendrier d'activité. */
-        val speedVisual: SpeedVisual? = null
+        val speedVisual: SpeedVisual? = null,
+        /** 🔁 Carte, frise compressée, statut et cause de rupture propres à Most Successive #1. */
+        val successiveVisual: SuccessiveVisual? = null
     )
 
     /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
@@ -392,7 +446,7 @@ class RecordExplainer(private val db: NovaDatabase) {
         }
 
         // 🧬 Profil dans le chart concerné (records basés sur une trajectoire)
-        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART")
+        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART", "MOST_SUCCESSIVE_1")
         if (chartBased) {
             val p = period!!
             val s = series(cat, p, id)
@@ -798,29 +852,212 @@ class RecordExplainer(private val db: NovaDatabase) {
                     timelineValueSuffix = "sièges"
                 )
             }
-            "MOST_SUCCESSIVE_1" -> {
-                // #1 du chart appartenant à cet artiste / album, triés par période ; plus longue suite consécutive
-                val ones = all.flatMap { (iid, s) -> s.filter { it.position == 1 }.map { iid to it } }.sortedBy { it.second.periodIndex }
-                var best = emptyList<Pair<Long, RecordAppearance>>(); var cur = ArrayList<Pair<Long, RecordAppearance>>(); var prev = Int.MIN_VALUE
-                for (n in ones) {
-                    val mineOne = n.first in ids
-                    if (mineOne && n.second.periodIndex == prev + 1) cur.add(n) else if (mineOne) cur = arrayListOf(n) else cur = ArrayList()
-                    if (cur.map { it.first }.toSet().size > best.map { it.first }.toSet().size) best = ArrayList(cur)
-                    prev = n.second.periodIndex
-                }
-                val distinct = best.map { it.first }.distinct()
-                val items = distinct.map { iid -> val dates = best.filter { it.first == iid }.map { short(p, it.second.date) }; item(iid, "#1 : " + dates.joinToString(", "), true) }
-                Story(
-                    "🔁 ${distinct.size} #1 différents à la suite",
-                    if (best.isEmpty()) "Aucune suite de #1 trouvée pour $name." else
-                        "De ${short(p, best.first().second.date)} à ${short(p, best.last().second.date)}, la première place du $chart n'a pas quitté $name pendant ${best.size} ${unit(p, best.size)} — avec ${distinct.size} ${plural(distinct.size, what)} différents qui se sont relayés au sommet : " +
-                            items.joinToString(", ") { it.name } + ".",
-                    listOf("Durée de la série" to "${best.size} ${unit(p, best.size)}", "${what.replaceFirstChar { it.uppercase() }}s différents" to "${distinct.size}"),
-                    itemsTitle = "Les #1 qui se sont relayés", items = items
-                )
-            }
+            "MOST_SUCCESSIVE_1" -> successiveStory(def, p, cat, sub, id, name, itemCat, all)
             else -> Story(def.title, def.description)
         }
+    }
+
+    /** Liens d'appartenance identiques à ceux du moteur (artistes principaux + crédits, ou album parent). */
+    private suspend fun successiveOwners(
+        cat: RecordCategory,
+        itemCat: RecordCategory,
+        chartItemIds: Set<Long>
+    ): Map<Long, Set<Long>> {
+        if (chartItemIds.isEmpty()) return emptyMap()
+        val owners = HashMap<Long, MutableSet<Long>>()
+        fun add(itemId: Long, ownerId: Long) { owners.getOrPut(itemId) { LinkedHashSet() }.add(ownerId) }
+        when {
+            cat == RecordCategory.ARTIST && itemCat == RecordCategory.TRACK -> {
+                db.trackLinkDao().allTrackArtists().asSequence()
+                    .filter { it.trackId in chartItemIds }
+                    .forEach { add(it.trackId, it.artistId) }
+                db.trackDao().allPlayed().asSequence()
+                    .filter { it.trackId in chartItemIds }
+                    .forEach { add(it.trackId, it.artistId) }
+            }
+            cat == RecordCategory.ARTIST && itemCat == RecordCategory.ALBUM -> {
+                db.albumDao().all().asSequence()
+                    .filter { it.albumId in chartItemIds }
+                    .forEach { album -> album.artistId?.let { add(album.albumId, it) } }
+            }
+            cat == RecordCategory.ALBUM && itemCat == RecordCategory.TRACK -> {
+                db.trackDao().allPlayed().asSequence()
+                    .filter { it.trackId in chartItemIds }
+                    .forEach { track -> track.albumId?.let { add(track.trackId, it) } }
+            }
+        }
+        return owners.mapValues { (_, ids) -> ids.toSet() }
+    }
+
+    private suspend fun successiveStory(
+        def: RecordDef,
+        p: Period,
+        cat: RecordCategory,
+        sub: String?,
+        id: Long,
+        name: String,
+        itemCat: RecordCategory,
+        all: Map<Long, List<RecordAppearance>>
+    ): Story {
+        val ownerMap = successiveOwners(cat, itemCat, all.keys)
+        val chart = "chart ${p.frLabel.lowercase()}"
+        val numberOnes = all.flatMap { (itemId, appearances) ->
+            val owners = ownerMap[itemId].orEmpty()
+            appearances.filter { it.position == 1 }.map { appearance ->
+                RecordMath.NumberOne(appearance.periodIndex, appearance.date, itemId, owners)
+            }
+        }.sortedWith(compareBy<RecordMath.NumberOne> { it.periodIndex }.thenBy { it.date }.thenBy { it.entityId })
+        val run = RecordMath.bestSuccessiveOneRun(numberOnes, id)
+            ?: return Story(
+                "🔁 Most Successive #1",
+                "Aucune succession admissible de deux ${if (itemCat == RecordCategory.ALBUM) "albums" else "titres"} distincts au #1 n'a été trouvée pour $name dans cette combinaison. Les éléments à un seul #1 sont exclus.",
+                listOf("Seuil d'admissibilité" to "2 éléments distincts consécutifs minimum")
+            )
+
+        val segments = RecordMath.successiveOneSegments(run).map { segment ->
+            val (itemName, image) = nameOf(itemCat.dbName, segment.entityId)
+            SuccessiveSegment(
+                id = segment.entityId,
+                type = itemCat.dbName,
+                name = itemName,
+                imageUrl = image,
+                firstDate = short(p, segment.first.date),
+                lastDate = short(p, segment.last.date),
+                periodCount = segment.periodCount,
+                durationLabel = "${segment.periodCount} ${unit(p, segment.periodCount)}"
+            )
+        }
+
+        val currentScore = run.distinctEntityIds.size
+        val scores = RecordMath.successiveNumberOnes(numberOnes)
+        val leaderScore = scores.values.maxOfOrNull { it.value }?.toInt() ?: currentScore
+        val recordHolder = currentScore >= leaderScore
+        val tiedAtTop = if (recordHolder) scores.values.count { it.value.toInt() == leaderScore } else 0
+        val cachedRows = db.recordDao().top10(def.id, p.dbName, cat.dbName, sub, asc = false).first()
+        val cachedIndex = cachedRows.indexOfFirst { it.r.entityId == id }
+        val rank = if (cachedIndex >= 0) cachedIndex + 1 else scores.values.count { it.value > currentScore.toDouble() } + 1
+
+        val coHolder = scores.entries.asSequence()
+            .filter { it.key != id && it.value.value.toInt() == currentScore }
+            .minByOrNull { it.value.date ?: "" }
+        val rivalEntry = coHolder ?: if (recordHolder) {
+            scores.entries.filter { it.key != id && it.value.value < currentScore.toDouble() }
+                .maxByOrNull { it.value.value }
+        } else {
+            scores.entries.filter { it.key != id && it.value.value > currentScore.toDouble() }
+                .minByOrNull { it.value.value }
+        }
+        val rival = rivalEntry?.let { (rivalId, result) ->
+            val (rivalName, rivalImage) = nameOf(cat.dbName, rivalId)
+            val rivalScore = result.value.toInt()
+            SuccessiveRival(
+                id = rivalId,
+                name = rivalName,
+                imageUrl = rivalImage,
+                score = rivalScore,
+                gap = kotlin.math.abs(rivalScore - currentScore),
+                tied = rivalScore == currentScore,
+                ahead = rivalScore > currentScore
+            )
+        }
+
+        val latestObservation = all.values.asSequence().flatten()
+            .maxWithOrNull(compareBy<RecordAppearance> { it.periodIndex }.thenBy { it.date })
+        val continuing = latestObservation?.periodIndex == run.last.periodIndex
+        val nextOne = numberOnes.firstOrNull { it.periodIndex > run.last.periodIndex }
+        val nextObserved = all.values.asSequence().flatten()
+            .filter { it.periodIndex > run.last.periodIndex }
+            .minWithOrNull(compareBy<RecordAppearance> { it.periodIndex }.thenBy { it.date })
+        val stopper = if (continuing) null else {
+            if (nextOne != null) {
+                val (nextName, nextImage) = nameOf(itemCat.dbName, nextOne.entityId)
+                val ownerNames = ArrayList<String>()
+                for (ownerId in nextOne.ownerIds.filter { it != id }) {
+                    val ownerLabel = nameOf(cat.dbName, ownerId).first
+                    if (ownerLabel !in ownerNames) ownerNames += ownerLabel
+                }
+                val ownerName = when {
+                    ownerNames.isNotEmpty() -> ownerNames.joinToString(", ")
+                    id in nextOne.ownerIds -> "$name (même détenteur)"
+                    else -> null
+                }
+                val nextLabel = short(p, nextOne.date)
+                val exactNextPeriod = nextOne.periodIndex == run.last.periodIndex + 1
+                val explanation = when {
+                    exactNextPeriod -> "Rupture nette au relevé suivant, $nextLabel : « $nextName » prend le #1" +
+                        (ownerName?.let { " pour $it" } ?: "") + "."
+                    else -> {
+                        val missing = (nextOne.periodIndex - run.last.periodIndex - 1).coerceAtLeast(1)
+                        "La période suivante n'a pas de #1 documenté; ${missing} ${plural(missing, "période")} ${if (missing == 1) "manque" else "manquent"} avant le prochain #1 relevé, « $nextName » ($nextLabel)" +
+                            (ownerName?.let { ", pour $it" } ?: "") + "."
+                    }
+                }
+                SuccessiveStopper(nextName, itemCat.dbName, nextOne.entityId, nextImage, ownerName, nextLabel, exactNextPeriod, explanation)
+            } else if (nextObserved != null) {
+                val missing = (nextObserved.periodIndex - run.last.periodIndex - 1).coerceAtLeast(1)
+                val explanation = if (nextObserved.periodIndex == run.last.periodIndex + 1) {
+                    "Le classement existe à ${short(p, nextObserved.date)}, mais aucun #1 identifiable n'est enregistré pour cette période."
+                } else {
+                    "Il manque ${missing} ${plural(missing, "période")} d'archive après la série; aucun #1 ne permet d'en attribuer la rupture."
+                }
+                SuccessiveStopper(null, null, null, null, null, short(p, nextObserved.date), false, explanation)
+            } else {
+                SuccessiveStopper(null, null, null, null, null, null, false, "Aucun relevé plus récent n'est disponible pour établir la cause de fin de série.")
+            }
+        }
+        val statusLine = if (continuing) {
+            "Série toujours en cours : le détenteur conserve le #1 dans le dernier relevé (${latestObservation?.let { short(p, it.date) } ?: short(p, run.last.date)})."
+        } else {
+            "Série terminée après ${on(p, run.last.date)}. ${stopper?.explanation.orEmpty()}"
+        }
+        val subLabel = def.subs[cat]?.firstOrNull { it.dbName == sub }?.label
+        val contextLabel = listOfNotNull(p.label, cat.label, subLabel).joinToString(" · ")
+        val duration = "${run.periodCount} ${unit(p, run.periodCount)}"
+        val visual = SuccessiveVisual(
+            distinctCount = currentScore,
+            periodCount = run.periodCount,
+            durationLabel = duration,
+            itemLabel = if (itemCat == RecordCategory.ALBUM) "albums" else "titres",
+            contextLabel = contextLabel,
+            startDate = on(p, run.first.date),
+            endDate = on(p, run.last.date),
+            startShort = short(p, run.first.date),
+            endShort = short(p, run.last.date),
+            continuing = continuing,
+            statusLine = statusLine,
+            rank = rank,
+            boardSize = scores.size,
+            recordHolder = recordHolder,
+            tiedAtTop = tiedAtTop,
+            rival = rival,
+            segments = segments,
+            stopper = stopper
+        )
+        val narrative = if (continuing) {
+            "Du ${short(p, run.first.date)} au ${short(p, run.last.date)}, $name a gardé le #1 du $chart avec $currentScore ${plural(currentScore, if (itemCat == RecordCategory.ALBUM) "album" else "titre")} distincts qui se sont relayés. Le score mesure ces éléments distincts; la durée ($duration) est affichée séparément."
+        } else {
+            "Du ${short(p, run.first.date)} au ${short(p, run.last.date)}, $name a gardé le #1 du chart avec $currentScore ${plural(currentScore, if (itemCat == RecordCategory.ALBUM) "album" else "titre")} distincts. ${stopper?.explanation ?: "La série est terminée."} Le score reste fondé sur les éléments distincts; la durée ($duration) complète le récit sans modifier le classement."
+        }
+        val itemWord = if (itemCat == RecordCategory.ALBUM) "album" else "titre"
+        val facts = buildList {
+            add("Score · éléments distincts" to "$currentScore")
+            add("Durée · périodes consécutives" to duration)
+            add("Début de série" to visual.startDate)
+            add("Fin de série" to visual.endDate)
+            add("Statut" to if (continuing) "Toujours en cours" else "Terminée")
+            add("Classement" to "${ordinal(rank)} sur ${scores.size}")
+            rival?.let {
+                val label = if (it.tied) "Comparaison" else if (it.ahead) "Écart au rang supérieur" else "Avance sur le suivant"
+                val detail = if (it.tied) "égalité · $currentScore" else "${it.gap} ${plural(it.gap, itemWord)} avec ${it.name}"
+                add(label to detail)
+            }
+        }
+        return Story(
+            headline = "🔁 $currentScore ${plural(currentScore, itemWord)} distincts · $duration",
+            narrative = narrative,
+            facts = facts,
+            successiveVisual = visual
+        )
     }
 
     /* ---------------- certifications, Panthéon, Hall of Fame, multi-chart ---------------- */

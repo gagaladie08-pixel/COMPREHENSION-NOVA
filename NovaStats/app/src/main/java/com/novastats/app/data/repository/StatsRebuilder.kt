@@ -50,6 +50,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         RecordsEngine(db).rebuildSpeedRecords()
     }
 
+    /** Répare seulement le cache Most Successive #1, sans toucher aux autres records ni aux données sources. */
+    suspend fun rebuildSuccessiveRecordsOnly() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildSuccessiveRecordsOnly()
+    }
+
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
     private suspend fun recomputeRootAggregatesFromScrobbles() {
         val totals = db.trackDao().rootAggregatesFromScrobbles()

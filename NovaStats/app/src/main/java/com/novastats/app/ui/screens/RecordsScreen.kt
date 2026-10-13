@@ -706,8 +706,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             // En-tête : pochette, nom et rang. Les deux records de vitesse reçoivent un chrono animé dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
             val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
+            val successiveRecord = def.id == "MOST_SUCCESSIVE_1"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -753,6 +754,10 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             item { SpeedSpotlight(name, row.imageUrl, ref.category == RecordCategory.ARTIST, visual, color) }
             item { SpeedStageLadder(def.id, visual, color) }
             item { SpeedActivityCalendar(visual, color) }
+        }
+        story?.successiveVisual?.let { visual ->
+            item { SuccessiveSpotlight(name, row.imageUrl, ref.category == RecordCategory.ARTIST, visual, color) }
+            item { SuccessiveRelayTimeline(visual, color) }
         }
         val st = story
         if (st == null) {
@@ -990,6 +995,256 @@ private fun SpeedSpotlight(name: String, imageUrl: String?, isArtist: Boolean, v
                 )
             }
         }
+    }
+}
+
+/** 👑 Carte premium de Most Successive #1 : score distinct, durée séparée, contexte, statut et dauphin. */
+@Composable
+private fun SuccessiveSpotlight(
+    name: String,
+    imageUrl: String?,
+    isArtist: Boolean,
+    visual: RecordExplainer.SuccessiveVisual,
+    color: Color
+) {
+    val theme = Nova.theme
+    val transition = rememberInfiniteTransition(label = "successive-ceremony")
+    val glow by transition.animateFloat(
+        initialValue = 0.12f,
+        targetValue = 0.32f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "successive-glow"
+    )
+    val scoreCounter = remember(visual.distinctCount, visual.recordHolder) {
+        Animatable(if (visual.recordHolder) 0f else visual.distinctCount.toFloat())
+    }
+    LaunchedEffect(visual.distinctCount, visual.recordHolder) {
+        if (visual.recordHolder) scoreCounter.animateTo(visual.distinctCount.toFloat(), tween(1100))
+    }
+    val panel = if (visual.recordHolder) {
+        Brush.horizontalGradient(listOf(NovaColors.Gold.copy(alpha = glow), color.copy(alpha = 0.12f), theme.surface))
+    } else {
+        Brush.horizontalGradient(listOf(color.copy(alpha = 0.16f), theme.surface, theme.surface))
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(if (visual.recordHolder) "👑 Cérémonie du relais au #1" else "🔁 Carte du relais au #1", color)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(panel)
+                .border(1.dp, (if (visual.recordHolder) NovaColors.Gold else color).copy(alpha = 0.52f), RoundedCornerShape(18.dp))
+                .padding(14.dp)
+        ) {
+            Text(
+                "CONTEXTE · ${visual.contextLabel}",
+                color = color,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 5.dp)
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 54, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("DÉTENTEUR DU RELAIS", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(name, color = theme.text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(6.dp))
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("CLASSEMENT", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        when {
+                            visual.recordHolder && visual.tiedAtTop > 1 -> "🥇 #1 · ex æquo"
+                            visual.recordHolder -> "🥇 #1"
+                            else -> "#${visual.rank} / ${visual.boardSize}"
+                        },
+                        color = if (visual.recordHolder) NovaColors.Gold else theme.text,
+                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+            Spacer(Modifier.height(11.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).background(theme.surface.copy(alpha = 0.72f)).padding(10.dp)
+                ) {
+                    Text("SCORE · DISTINCTS", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${scoreCounter.value.toInt()} ${visual.itemLabel}",
+                        color = if (visual.recordHolder) NovaColors.Gold else color,
+                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text("éléments différents au #1", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).background(theme.surface.copy(alpha = 0.72f)).padding(10.dp)
+                ) {
+                    Text("DURÉE · SÉRIE", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(visual.durationLabel, color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                    Text("sans interruption", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("Début · ${visual.startDate}", color = theme.text, style = MaterialTheme.typography.bodySmall)
+            Text("Fin · ${visual.endDate}", color = theme.text, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                (if (visual.continuing) "🟢 EN COURS · " else "🏁 TERMINÉE · ") + visual.statusLine,
+                color = if (visual.continuing) Color(0xFF69C779) else theme.textSecondary,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 18.sp
+            )
+            visual.rival?.let { rival ->
+                Spacer(Modifier.height(11.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(color.copy(alpha = 0.25f)))
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CoverArt(rival.imageUrl, rival.name, size = 42, circle = isArtist)
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                rival.tied -> "🤝 Égalité au classement"
+                                visual.recordHolder -> "🥈 Dauphin le plus proche"
+                                rival.ahead -> "🎯 Rang juste devant"
+                                else -> "🎯 Concurrent suivant"
+                            },
+                            color = color,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        Text(rival.name, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            if (rival.tied) "ÉGALITÉ" else "${rival.gap} ${visual.itemLabel.removeSuffix("s")}${if (rival.gap == 1) "" else "s"}",
+                            color = if (rival.tied) NovaColors.Gold else theme.text,
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        Text(if (rival.tied) "même score" else if (rival.ahead) "à rattraper" else "d'avance", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (!rival.tied) {
+                    Text(
+                        if (rival.ahead) "${rival.name} a ${rival.score}; il manque exactement ${rival.gap} ${visual.itemLabel.removeSuffix("s")}${if (rival.gap == 1) "" else "s"} pour l'égaler."
+                        else "${name} devance ${rival.name} de ${rival.gap} ${visual.itemLabel.removeSuffix("s")}${if (rival.gap == 1) "" else "s"} distincts.",
+                        color = theme.textSecondary,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 5.dp)
+                    )
+                }
+            } ?: Text("Aucun autre détenteur admissible dans cette combinaison.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+            visual.stopper?.let { stopper ->
+                Spacer(Modifier.height(11.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(theme.textSecondary.copy(alpha = 0.2f)))
+                Spacer(Modifier.height(9.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (stopper.name != null) CoverArt(stopper.imageUrl, stopper.name, size = 42)
+                    else Text("🕳️", fontSize = 32.sp, modifier = Modifier.size(42.dp), textAlign = TextAlign.Center)
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                stopper.direct -> "⛓ ÉLÉMENT QUI ROMPT LA SÉRIE"
+                                stopper.name != null -> "📎 PROCHAIN #1 DOCUMENTÉ"
+                                else -> "🕳 CAUSE NON IDENTIFIABLE"
+                            },
+                            color = color,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text(stopper.name ?: "Aucun #1 exploitable", color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        stopper.ownerName?.let { Text("Détenteur : $it", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        stopper.date?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+                Text(stopper.explanation, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+            if (visual.recordHolder) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (visual.tiedAtTop > 1) "✨ ${visual.tiedAtTop} détenteurs partagent la tête du classement."
+                    else "✨ Meilleure succession admissible de la combinaison — le relais est célébré !",
+                    color = NovaColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(NovaColors.Gold.copy(alpha = glow * 0.42f)).padding(horizontal = 9.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 🎞️ Frise de pochettes : regroupe les #1 consécutifs du même titre et marque la sortie du relais. */
+@Composable
+private fun SuccessiveRelayTimeline(visual: RecordExplainer.SuccessiveVisual, color: Color) {
+    val theme = Nova.theme
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle("🎞️ Frise illustrée · ${visual.segments.size} passage(s)", color)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+            visual.segments.forEachIndexed { index, segment ->
+                if (index > 0) Text("→", color = color, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Column(
+                    Modifier.width(160.dp).clip(RoundedCornerShape(14.dp)).background(theme.surface)
+                        .border(1.dp, color.copy(alpha = 0.38f), RoundedCornerShape(14.dp)).padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("RELAIS ${index + 1} · #1", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(7.dp))
+                    CoverArt(segment.imageUrl, segment.name, size = 68)
+                    Spacer(Modifier.height(7.dp))
+                    Text(segment.name, color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (segment.periodCount > 1) "reste #1 · ${segment.durationLabel}" else "prend le #1 · ${segment.durationLabel}",
+                        color = color,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        if (segment.firstDate == segment.lastDate) segment.firstDate else "${segment.firstDate} → ${segment.lastDate}",
+                        color = theme.textSecondary,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+            visual.stopper?.let { stopper ->
+                Text(if (stopper.direct) "⇢" else "⋯", color = theme.textSecondary, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Column(
+                    Modifier.width(188.dp).clip(RoundedCornerShape(14.dp))
+                        .background(if (stopper.direct) color.copy(alpha = 0.12f) else theme.surface)
+                        .border(1.dp, if (stopper.direct) color.copy(alpha = 0.65f) else theme.textSecondary.copy(alpha = 0.28f), RoundedCornerShape(14.dp))
+                        .padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(if (stopper.direct) "RUPTURE" else if (stopper.name != null) "PROCHAIN #1" else "ARCHIVES", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(7.dp))
+                    if (stopper.name != null) CoverArt(stopper.imageUrl, stopper.name, size = 58)
+                    else Text("🕳️", fontSize = 36.sp, modifier = Modifier.height(58.dp))
+                    Spacer(Modifier.height(7.dp))
+                    Text(stopper.name ?: "#1 inconnu", color = theme.text, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    stopper.date?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center) }
+                }
+            } ?: if (visual.continuing) {
+                Text("→", color = NovaColors.Gold, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Column(
+                    Modifier.width(148.dp).clip(RoundedCornerShape(14.dp)).background(NovaColors.Gold.copy(alpha = 0.12f))
+                        .border(1.dp, NovaColors.Gold.copy(alpha = 0.65f), RoundedCornerShape(14.dp)).padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("👑 EN COURS", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(9.dp))
+                    Text("#1 conservé", color = theme.text, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    Text(visual.endShort, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        Text("Les cartes compressent les périodes consécutives d'un même titre ou album; le score reste le nombre d'éléments distincts.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
     }
 }
 
@@ -1446,7 +1701,7 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
             "MOST_RECORDS" -> "$n record${if (n > 1) "s" else ""}"
             "MOST_CERTIFICATIONS" -> "$n certif${if (n > 1) "s" else ""}"
             "MOST_HOF", "MOST_GLOBAL" -> "$n entrée${if (n > 1) "s" else ""}"
-            "MOST_SUCCESSIVE_1" -> "$n #1 successifs"
+            "MOST_SUCCESSIVE_1" -> "$n éléments distincts au #1"
             "MOST_SIMULTANEOUS" -> "$n simultané${if (n > 1) "s" else ""}"
             else -> "$n"
         }

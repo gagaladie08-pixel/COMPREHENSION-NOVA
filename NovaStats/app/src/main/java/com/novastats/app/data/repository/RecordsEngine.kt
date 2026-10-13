@@ -43,6 +43,48 @@ class RecordsEngine(private val db: NovaDatabase) {
         }
     }
 
+    /** Recalcule uniquement Most Successive #1 après son nouveau seuil d'admissibilité. */
+    suspend fun rebuildSuccessiveRecordsOnly() {
+        val links = loadLinks()
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        for (p in chartPeriods) {
+            val trackSeries = toSeries(db.billboardDao().allTrackRows(p.dbName), p)
+            val albumSeries = toSeries(db.billboardDao().allAlbumRows(p.dbName), p)
+            data class View(
+                val category: RecordCategory,
+                val subcategory: String?,
+                val series: Map<Long, List<RecordAppearance>>,
+                val owners: (Long) -> Set<Long>
+            )
+            val views = listOf(
+                View(RecordCategory.ARTIST, "SONGS", trackSeries) { links.trackArtists[it].orEmpty() },
+                View(RecordCategory.ARTIST, "ALBUMS", albumSeries) { links.albumArtist[it]?.let { artistId -> setOf(artistId) }.orEmpty() },
+                View(RecordCategory.ALBUM, null, trackSeries) { links.trackAlbum[it]?.let { albumId -> setOf(albumId) }.orEmpty() }
+            )
+            for (view in views) {
+                val numberOnes = view.series.flatMap { (itemId, appearances) ->
+                    appearances.filter { it.position == 1 }.map { appearance ->
+                        RecordMath.NumberOne(appearance.periodIndex, appearance.date, itemId, view.owners(itemId))
+                    }
+                }
+                emit(
+                    out,
+                    "MOST_SUCCESSIVE_1",
+                    p,
+                    view.category,
+                    view.subcategory,
+                    RecordMath.successiveNumberOnes(numberOnes).values.toList(),
+                    now
+                )
+            }
+        }
+        db.withTransaction {
+            db.recordDao().clearType("MOST_SUCCESSIVE_1")
+            out.chunked(500).forEach { db.recordDao().insertAll(it) }
+        }
+    }
+
     suspend fun rebuildAll(onProgress: (String) -> Unit = {}) {
         onProgress("Records…")
         val links = loadLinks()

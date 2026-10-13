@@ -71,6 +71,19 @@ object StartupRepair {
                         RebuildAudit.write(context, "⚠️ Réparation ciblée Fastest Panthéon en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }
                 }
+
+                // Le seuil Most Successive #1 passe à deux éléments distincts. Remplacer uniquement
+                // son cache existant afin d'éliminer les entrées héritées à un seul titre / album.
+                if (!prefs.getBoolean("successive_no1_threshold_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "🔁 Réparation ciblée Most Successive #1 : séries continues de deux éléments distincts minimum")
+                        app.rebuilder.rebuildSuccessiveRecordsOnly()
+                        RebuildAudit.write(context, "✅ Cache Most Successive #1 recalculé pour les quatre périodes")
+                        prefs.edit().putBoolean("successive_no1_threshold_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Réparation ciblée Most Successive #1 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
             }
         }
     }

@@ -187,7 +187,7 @@ object RecordCatalog {
             mapOf(RecordCategory.TRACK to blockedZones, RecordCategory.ARTIST to blockedZones, RecordCategory.ALBUM to blockedZones)),
         RecordDef(23, "MOST_SIMULTANEOUS", "🎯", "Most Simultaneous Songs", "Le plus de titres en même temps dans une zone du chart", chartPeriods, artistAlbum,
             mapOf(RecordCategory.ARTIST to songsAlbums.flatMap { s -> zones.map { z -> RecordSub("${s.dbName}_${z.dbName}", "${s.label} · ${z.label}") } }, RecordCategory.ALBUM to zones), RecordUnit.COUNT),
-        RecordDef(24, "MOST_SUCCESSIVE_1", "🔁", "Most Successive #1", "Le plus de #1 successifs avec des titres différents, sans interruption", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
+        RecordDef(24, "MOST_SUCCESSIVE_1", "🔁", "Most Successive #1", "Le plus grand nombre de titres ou albums distincts au #1 dans une même série ininterrompue (minimum 2)", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
         // ---- Extension 25-30 ----
         RecordDef(25, "LONGEST_LIFESPAN", "⏱️", "Longest Lifespan", "Plus longue durée entre la première et la dernière apparition dans une zone du chart, absences comprises", chartPeriods, all3,
             mapOf(RecordCategory.TRACK to lifespanZones, RecordCategory.ARTIST to lifespanZones, RecordCategory.ALBUM to lifespanZones)),
@@ -348,36 +348,101 @@ object RecordMath {
         return if (n > 0) n to peak else null
     }
 
+    /** Une série continue au #1 pour un propriétaire donné. */
+    data class SuccessiveOneRun(val ownerId: Long, val entries: List<NumberOne>) {
+        val distinctEntityIds: List<Long> = entries.map { it.entityId }.distinct()
+        val periodCount: Int = entries.map { it.periodIndex }.distinct().size
+        val first: NumberOne get() = entries.first()
+        val last: NumberOne get() = entries.last()
+    }
+
+    /** Segment compressé d'un élément resté #1 pendant une ou plusieurs périodes consécutives. */
+    data class SuccessiveOneSegment(
+        val entityId: Long,
+        val first: NumberOne,
+        val last: NumberOne,
+        val periodCount: Int
+    )
+
+    /** Regroupe uniquement les répétitions consécutives du même élément; son score distinct n'est pas altéré. */
+    fun successiveOneSegments(run: SuccessiveOneRun): List<SuccessiveOneSegment> {
+        val groups = ArrayList<MutableList<NumberOne>>()
+        for (entry in run.entries) {
+            val previous = groups.lastOrNull()?.lastOrNull()
+            if (previous?.entityId == entry.entityId && entry.periodIndex in previous.periodIndex..(previous.periodIndex + 1)) {
+                groups.last().add(entry)
+            } else {
+                groups += arrayListOf(entry)
+            }
+        }
+        return groups.map { group ->
+            SuccessiveOneSegment(
+                entityId = group.first().entityId,
+                first = group.first(),
+                last = group.last(),
+                periodCount = group.map { it.periodIndex }.distinct().size
+            )
+        }
+    }
+
+    /** Segmente les périodes observées où [ownerId] détient le #1; toute rupture ou période manquante coupe la série. */
+    fun successiveOneRuns(numberOnes: List<NumberOne>, ownerId: Long): List<SuccessiveOneRun> {
+        if (numberOnes.isEmpty()) return emptyList()
+        val ordered = numberOnes.sortedWith(compareBy<NumberOne> { it.periodIndex }.thenBy { it.date }.thenBy { it.entityId })
+        val result = ArrayList<SuccessiveOneRun>()
+        var current = ArrayList<NumberOne>()
+        var previousPeriod: Int? = null
+        fun flush() {
+            if (current.isNotEmpty()) result += SuccessiveOneRun(ownerId, current.toList())
+        }
+        for ((periodIndex, entries) in ordered.groupBy { it.periodIndex }.toSortedMap()) {
+            val ownedOnes = entries.filter { ownerId in it.ownerIds }
+            if (ownedOnes.isEmpty()) {
+                flush()
+                current = ArrayList()
+            } else if (previousPeriod?.let { periodIndex == it + 1 } == true) {
+                current.addAll(ownedOnes)
+            } else {
+                flush()
+                current = ArrayList(ownedOnes)
+            }
+            previousPeriod = periodIndex
+        }
+        flush()
+        return result
+    }
+
+    /** Meilleure série; une seule entrée ne suffit pas à constituer une succession de titres différents. */
+    fun bestSuccessiveOneRun(numberOnes: List<NumberOne>, ownerId: Long, minDistinctItems: Int = 2): SuccessiveOneRun? {
+        var best: SuccessiveOneRun? = null
+        for (run in successiveOneRuns(numberOnes, ownerId)) {
+            if (run.distinctEntityIds.size >= minDistinctItems && run.distinctEntityIds.size > (best?.distinctEntityIds?.size ?: 0)) {
+                best = run
+            }
+        }
+        return best
+    }
+
     /**
-     * #1 successifs : plus longue suite de périodes consécutives où le #1 appartient au même propriétaire
-     * (artiste / album) — valeur = nombre de titres DIFFÉRENTS au #1 dans cette suite.
+     * Most Successive #1 : valeur = nombre de titres / albums DISTINCTS ayant pris le #1 pendant
+     * une suite ininterrompue de périodes. Les ex aequo sont conservés par le moteur du Top 10.
      * @param numberOnes liste (periodIndex, date, entityId du #1, ownerIds du #1)
      */
     fun successiveNumberOnes(numberOnes: List<NumberOne>): Map<Long, RecordResult> {
-        val best = HashMap<Long, RecordResult>()
+        val results = HashMap<Long, RecordResult>()
         val owners = numberOnes.flatMap { it.ownerIds }.toSet()
         for (owner in owners) {
-            var runTitles = LinkedHashSet<Long>(); var prevIdx = Int.MIN_VALUE; var runStart: String? = null
-            fun flush(endDate: String?) {
-                if (runTitles.size > 1 || (runTitles.size == 1 && best[owner] == null)) {
-                    val cur = best[owner]
-                    if (cur == null || runTitles.size > cur.value) best[owner] = RecordResult(owner, runTitles.size.toDouble(), endDate, "${runTitles.size} #1 différents · ${runStart ?: ""} → ${endDate ?: ""}")
-                }
-            }
-            var lastDate: String? = null
-            for (n in numberOnes) {
-                if (owner in n.ownerIds && n.periodIndex == prevIdx + 1) {
-                    runTitles.add(n.entityId)
-                } else if (owner in n.ownerIds) {
-                    flush(lastDate); runTitles = linkedSetOf(n.entityId); runStart = n.date
-                } else {
-                    flush(lastDate); runTitles = LinkedHashSet(); runStart = null
-                }
-                prevIdx = n.periodIndex; lastDate = n.date
-            }
-            flush(lastDate)
+            val run = bestSuccessiveOneRun(numberOnes, owner) ?: continue
+            val count = run.distinctEntityIds.size
+            val duration = "${run.periodCount} ${if (run.periodCount == 1) "période" else "périodes"}"
+            results[owner] = RecordResult(
+                owner,
+                count.toDouble(),
+                run.last.date,
+                "$count #1 différents · $duration · ${run.first.date} → ${run.last.date}"
+            )
         }
-        return best
+        return results
     }
 
     data class NumberOne(val periodIndex: Int, val date: String, val entityId: Long, val ownerIds: Set<Long>)

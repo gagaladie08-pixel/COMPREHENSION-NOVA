@@ -1,6 +1,7 @@
 package com.novastats.app.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -69,7 +70,7 @@ class RecordMathTest {
     }
 
     @Test
-    fun `numeros 1 successifs avec titres differents`() {
+    fun `most successive exige deux titres distincts dans une suite continue`() {
         val artist = setOf(7L)
         val ones = listOf(
             RecordMath.NumberOne(0, "2026-01-01", 100, artist),
@@ -78,9 +79,38 @@ class RecordMathTest {
             RecordMath.NumberOne(3, "2026-01-04", 200, setOf(8L)),
             RecordMath.NumberOne(4, "2026-01-05", 102, artist)
         )
-        val r = RecordMath.successiveNumberOnes(ones)
-        assertEquals(2.0, r.getValue(7L).value, 0.0)
-        assertEquals(1.0, r.getValue(8L).value, 0.0)
+        val results = RecordMath.successiveNumberOnes(ones)
+        assertEquals(2.0, results.getValue(7L).value, 0.0)
+        assertFalse("Un seul titre au #1 ne forme pas une succession", 8L in results)
+
+        val best = RecordMath.bestSuccessiveOneRun(ones, 7L)!!
+        assertEquals(listOf(100L, 101L), best.distinctEntityIds)
+        assertEquals(3, best.periodCount)
+        assertEquals("2026-01-01", best.first.date)
+        assertEquals("2026-01-03", best.last.date)
+        val relay = RecordMath.successiveOneSegments(best)
+        assertEquals(listOf(100L, 101L), relay.map { it.entityId })
+        assertEquals(1, relay[0].periodCount)
+        assertEquals(2, relay[1].periodCount)
+        assertEquals("2026-01-02", relay[1].first.date)
+        assertEquals("2026-01-03", relay[1].last.date)
+    }
+
+    @Test
+    fun `meme titre repete ou periode manquante ne qualifie pas`() {
+        val artist = setOf(7L)
+        val sameTitle = listOf(
+            RecordMath.NumberOne(0, "2026-01-01", 100, artist),
+            RecordMath.NumberOne(1, "2026-01-02", 100, artist),
+            RecordMath.NumberOne(2, "2026-01-03", 100, artist)
+        )
+        assertTrue(RecordMath.successiveNumberOnes(sameTitle).isEmpty())
+
+        val gap = listOf(
+            RecordMath.NumberOne(0, "2026-01-01", 100, artist),
+            RecordMath.NumberOne(2, "2026-01-03", 101, artist)
+        )
+        assertTrue(RecordMath.successiveNumberOnes(gap).isEmpty())
     }
 
     @Test
