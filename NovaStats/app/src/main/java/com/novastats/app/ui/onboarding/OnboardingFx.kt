@@ -336,6 +336,18 @@ fun ObCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() ->
     Column(modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(ObColors.Surface.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(22.dp)), content = content)
 }
 
+/** Carte de célébration, réservée aux moments-clés de l'onboarding. */
+@Composable
+fun ObGlowCard(accent: Color, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(28.dp)
+    Column(
+        modifier.fillMaxWidth().clip(shape)
+            .background(Brush.linearGradient(listOf(accent.copy(alpha = 0.17f), ObColors.Surface, ObColors.Surface.copy(alpha = 0.96f))))
+            .border(1.dp, Brush.linearGradient(listOf(accent.copy(alpha = 0.48f), Color.White.copy(alpha = 0.06f))), shape),
+        content = content
+    )
+}
+
 @Composable
 fun ObDivider() = Box(Modifier.fillMaxWidth().padding(start = 68.dp).height(0.6.dp).background(ObColors.Separator))
 

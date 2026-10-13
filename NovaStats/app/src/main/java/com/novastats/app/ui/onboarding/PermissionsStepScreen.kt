@@ -20,6 +20,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -172,51 +173,67 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
                 Appear(beats >= 2) { ObSub("L'accès Android aux notifications est requis; NovaStats filtre celles des lecteurs média. Batterie conseillée; démarrage auto et alertes facultatifs.") }
                 Spacer(Modifier.height(26.dp))
                 Appear(beats >= 3) {
-                    ObCard {
-                        PermRow(
-                            icon = Icons.Rounded.Notifications, color = Color(0xFFFF3B30), title = "Accès aux notifications", required = true, done = perms.listener,
-                            subtitle = "Requis pour reconnaître titre et artiste; NovaStats filtre les notifications des lecteurs média.",
-                            help = if (listenerTries >= 1 && !perms.listener) PermissionChecks.manualListenerPath() else null,
-                            buttonLabel = if (listenerTries >= 1) "Ouvrir" else "Autoriser"
-                        ) { waitingFor = "listener"; audio.tap(); PermissionChecks.openListenerSettings(ctx) }
-                        ObDivider()
-                        PermRow(
-                            icon = Icons.Rounded.BatteryChargingFull, color = Color(0xFF34C759), title = "Batterie sans restriction", required = false, done = batteryOk,
-                            subtitle = "Conseillée pour la fiabilité en arrière-plan, surtout sur les téléphones stricts. Pas indispensable pour commencer.",
-                            recommended = true,
-                            help = when {
-                                batteryUnavailable && !batteryManualOpened -> "Pas d'écran direct sur cet appareil. " + PermissionChecks.manualBatteryPath()
-                                batteryTries >= 1 && !perms.battery -> PermissionChecks.manualBatteryPath()
-                                else -> null
-                            },
-                            buttonLabel = if (batteryUnavailable) "Ouvrir" else if (batteryTries >= 1) "Réessayer" else "Régler"
-                        ) {
-                            audio.tap()
-                            if (batteryUnavailable) {
-                                waitingFor = "battery_manual"
-                                runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                            } else {
-                                waitingFor = "battery"
-                                if (!PermissionChecks.requestBattery(ctx)) { batteryUnavailable = true; waitingFor = null }
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ObGlowCard(accent) {
+                            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                ObEyebrow("INDISPENSABLE", accent)
+                                Spacer(Modifier.weight(1f))
+                                ObTag("01 / 01", accent)
                             }
+                            PermRow(
+                                icon = Icons.Rounded.Notifications, color = Color(0xFFFF3B30), title = "Accès aux notifications", required = true, done = perms.listener,
+                                subtitle = "Requis pour reconnaître titre et artiste; NovaStats filtre les notifications des lecteurs média.",
+                                help = if (listenerTries >= 1 && !perms.listener) PermissionChecks.manualListenerPath() else null,
+                                buttonLabel = if (listenerTries >= 1) "Ouvrir" else "Autoriser"
+                            ) { waitingFor = "listener"; audio.tap(); PermissionChecks.openListenerSettings(ctx) }
                         }
-                        ObDivider()
-                        PermRow(
-                            icon = Icons.Rounded.RestartAlt, color = Color(0xFF0A84FF), title = "Relance au redémarrage", required = false, done = perms.boot,
-                            subtitle = "NovaStats se remet à l'écoute après un redémarrage.", help = null, buttonLabel = "Activer"
-                        ) { PermissionChecks.setBoot(ctx, true); perms = perms.copy(boot = true); audio.tick(); audio.success() }
-                        ObDivider()
-                        PermRow(
-                            icon = Icons.Rounded.Notifications, color = Color(0xFF7C6CFF), title = "Notifications NovaStats", required = false, done = appNotifications,
-                            subtitle = "Reçois les certifications, premières écoutes et bilans même quand l'app est fermée.",
-                            help = if (!appNotifications && (appNotificationPrompted || NotificationAccess.hasRuntimePermission(ctx))) "Paramètres → Applications → NovaStats → Notifications → Autoriser." else null,
-                            buttonLabel = if (Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(ctx) && !appNotificationPrompted) "Autoriser" else "Ouvrir"
-                        ) {
-                            audio.tap()
-                            if (Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(ctx) && !appNotificationPrompted) {
-                                appNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                runCatching { ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)) }
+                        ObCard {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("À TON RYTHME", color = ObColors.Gray, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.sp)
+                                    Text("La détection fonctionne aussi sans ces options.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
+                                }
+                                ObTag("OPTIONS", ObColors.Gray)
+                            }
+                            ObDivider()
+                            PermRow(
+                                icon = Icons.Rounded.BatteryChargingFull, color = Color(0xFF34C759), title = "Batterie sans restriction", required = false, done = batteryOk,
+                                subtitle = "Conseillée pour la fiabilité en arrière-plan, surtout sur les téléphones stricts.",
+                                recommended = true,
+                                help = when {
+                                    batteryUnavailable && !batteryManualOpened -> "Pas d'écran direct sur cet appareil. " + PermissionChecks.manualBatteryPath()
+                                    batteryTries >= 1 && !perms.battery -> PermissionChecks.manualBatteryPath()
+                                    else -> null
+                                },
+                                buttonLabel = if (batteryUnavailable) "Ouvrir" else if (batteryTries >= 1) "Réessayer" else "Régler"
+                            ) {
+                                audio.tap()
+                                if (batteryUnavailable) {
+                                    waitingFor = "battery_manual"
+                                    runCatching { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                } else {
+                                    waitingFor = "battery"
+                                    if (!PermissionChecks.requestBattery(ctx)) { batteryUnavailable = true; waitingFor = null }
+                                }
+                            }
+                            ObDivider()
+                            PermRow(
+                                icon = Icons.Rounded.RestartAlt, color = Color(0xFF0A84FF), title = "Relance au redémarrage", required = false, done = perms.boot,
+                                subtitle = "NovaStats se remet à l'écoute après un redémarrage.", help = null, buttonLabel = "Activer"
+                            ) { PermissionChecks.setBoot(ctx, true); perms = perms.copy(boot = true); audio.tick(); audio.success() }
+                            ObDivider()
+                            PermRow(
+                                icon = Icons.Rounded.Notifications, color = Color(0xFF7C6CFF), title = "Notifications NovaStats", required = false, done = appNotifications,
+                                subtitle = "Reçois les certifications, premières écoutes et bilans même quand l'app est fermée.",
+                                help = if (!appNotifications && (appNotificationPrompted || NotificationAccess.hasRuntimePermission(ctx))) "Paramètres → Applications → NovaStats → Notifications → Autoriser." else null,
+                                buttonLabel = if (Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(ctx) && !appNotificationPrompted) "Autoriser" else "Ouvrir"
+                            ) {
+                                audio.tap()
+                                if (Build.VERSION.SDK_INT >= 33 && !NotificationAccess.hasRuntimePermission(ctx) && !appNotificationPrompted) {
+                                    appNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                } else {
+                                    runCatching { ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)) }
+                                }
                             }
                         }
                     }

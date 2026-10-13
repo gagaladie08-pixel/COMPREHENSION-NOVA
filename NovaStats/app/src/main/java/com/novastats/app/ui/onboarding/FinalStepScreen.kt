@@ -1,6 +1,9 @@
 package com.novastats.app.ui.onboarding
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,7 +87,7 @@ fun FinalStepScreen(
                 Spacer(Modifier.height(16.dp))
 
                 Appear(beats >= 2) {
-                    ObCard {
+                    ObGlowCard(accent) {
                         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 ObEyebrow("THÈME CHOISI", accent)
@@ -129,37 +134,40 @@ fun FinalStepScreen(
                 Spacer(Modifier.height(16.dp))
 
                 Appear(beats >= 4) {
-                    ObCard {
-                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    ObGlowCard(if (detectedTrack != null) ObColors.Green else accent) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("♫", color = accent, fontFamily = ObFonts.inter, fontWeight = FontWeight.Black, fontSize = 23.sp)
-                                Spacer(Modifier.width(10.dp))
+                                Box(
+                                    Modifier.size(48.dp).clip(CircleShape)
+                                        .background(if (detectedTrack != null) ObColors.Green.copy(alpha = 0.18f) else accent.copy(alpha = 0.16f))
+                                        .border(1.dp, if (detectedTrack != null) ObColors.Green.copy(alpha = 0.5f) else accent.copy(alpha = 0.45f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(if (detectedTrack != null) "✓" else "♫", color = if (detectedTrack != null) ObColors.Green else accent, fontFamily = ObFonts.inter, fontWeight = FontWeight.Black, fontSize = 23.sp)
+                                }
+                                Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text("Première mission", color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                                    Text("Une vraie écoute, zéro fausse donnée", color = ObColors.Gray, fontFamily = ObFonts.inter, fontSize = 12.sp)
+                                    Text(if (detectedTrack != null) "Mission accomplie" else "Première mission", color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                    Text(if (detectedTrack != null) "Ton premier titre est reconnu." else "Une écoute réelle. Aucune fausse donnée.", color = ObColors.Gray, fontFamily = ObFonts.inter, fontSize = 11.sp, lineHeight = 15.sp)
                                 }
-                                ObTag(if (detection.listenerConnected) "Connecté" else "En attente", if (detection.listenerConnected) ObColors.Green else ObColors.Orange)
+                                ObTag(if (detectedTrack != null) "Réussie" else "Bonus", if (detectedTrack != null) ObColors.Green else accent)
                             }
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(14.dp))
                             if (detectedTrack != null) {
-                                Row(verticalAlignment = Alignment.Top) {
-                                    ObCheck(true, 22.dp)
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Première détection confirmée !", color = ObColors.Green, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                        Text("« $detectedTrack »", color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 3.dp))
-                                        Text("Laisse le morceau jouer ${thresholdSec}s pour atteindre le seuil actuel et valider l'écoute.", color = ObColors.Gray, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 4.dp))
-                                    }
-                                }
+                                Text("« $detectedTrack »", color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 23.sp)
+                                Text("Laisse-le jouer encore ${thresholdSec}s pour atteindre le seuil actuel et valider l'écoute.", color = ObColors.Gray, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 5.dp))
                             } else {
                                 Text(
-                                    if (testStarted) "En attente d'un nouveau titre… Lance ou change de morceau dans ton lecteur."
-                                    else "Facultatif : appuie ici, puis lance ou change de morceau dans ton lecteur. L'observation utilise uniquement la détection réelle.",
+                                    if (testStarted) "Observation lancée · démarre ou change de morceau dans ton lecteur."
+                                    else "Lance ou change de morceau après le test. NovaStats félicitera la première détection réelle.",
                                     color = ObColors.Gray, fontFamily = ObFonts.inter, fontSize = 13.sp, lineHeight = 18.sp
                                 )
-                                Spacer(Modifier.height(10.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    ObMiniButton(if (testStarted) "Relancer le test" else "Observer une écoute", accent) {
+                                Spacer(Modifier.height(11.dp))
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (detection.listenerConnected) ObColors.Green else ObColors.Orange))
+                                    Spacer(Modifier.width(7.dp))
+                                    Text(if (detection.listenerConnected) "Service connecté" else "Service en attente", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                                    ObMiniButton(if (testStarted) "Réessayer" else "Lancer le test", accent) {
                                         baselineLog = latestLog
                                         detectedTrack = null
                                         testStarted = true
@@ -169,8 +177,8 @@ fun FinalStepScreen(
                             }
                             if (!detection.listenerConnected) {
                                 Text(
-                                    "Si le service ne se connecte pas après l'installation, désactive puis réactive l'accès aux notifications dans Android, ou redémarre le téléphone. Tu peux aussi continuer sans faire ce test.",
-                                    color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 11.sp, lineHeight = 15.sp,
+                                    "Si le service ne se connecte pas après l'installation, réactive son accès aux notifications dans Android ou redémarre le téléphone. Tu peux terminer sans ce test.",
+                                    color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 10.sp, lineHeight = 14.sp,
                                     modifier = Modifier.padding(top = 10.dp)
                                 )
                             }
