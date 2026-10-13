@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -703,12 +705,13 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
         item {
-            // En-tête : pochette, nom et rang. Les deux records de vitesse reçoivent un chrono animé dédié.
+            // En-tête : pochette, nom et rang. Les records premium de vitesse, succession et présence ont leur fond dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
             val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
             val successiveRecord = def.id == "MOST_SUCCESSIVE_1"
+            val presenceRecord = def.id in setOf("MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1")
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -758,6 +761,10 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         story?.successiveVisual?.let { visual ->
             item { SuccessiveSpotlight(name, row.imageUrl, ref.category == RecordCategory.ARTIST, visual, color) }
             item { SuccessiveRelayTimeline(visual, color) }
+        }
+        story?.presenceVisual?.let { visual ->
+            item { PresenceSpotlight(name, row.imageUrl, ref.category == RecordCategory.ARTIST, def.id, visual, color) }
+            item { PresencePositionRibbon(visual, color) }
         }
         val st = story
         if (st == null) {
@@ -814,7 +821,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty()) item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
@@ -1247,6 +1254,276 @@ private fun SuccessiveRelayTimeline(visual: RecordExplainer.SuccessiveVisual, co
             }
         }
         Text("Les cartes compressent les périodes consécutives d'un même titre ou album; le score reste le nombre d'éléments distincts.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+    }
+}
+
+/** 📊 Échelle de présence, duel, statut et paliers — réservés aux quatre records de durée dans le chart. */
+@Composable
+private fun PresenceSpotlight(
+    name: String,
+    imageUrl: String?,
+    isArtist: Boolean,
+    recordId: String,
+    visual: RecordExplainer.PresenceVisual,
+    color: Color
+) {
+    val theme = Nova.theme
+    val transition = rememberInfiniteTransition(label = "presence-ceremony")
+    val glow by transition.animateFloat(
+        initialValue = 0.14f,
+        targetValue = 0.32f,
+        animationSpec = infiniteRepeatable(tween(1050), RepeatMode.Reverse),
+        label = "presence-glow"
+    )
+    val accent = if (visual.recordHolder) NovaColors.Gold else color
+    val scoreCounter = remember(visual.score, recordId) { Animatable(0f) }
+    LaunchedEffect(visual.score, recordId) {
+        scoreCounter.snapTo(0f)
+        scoreCounter.animateTo(visual.score.toFloat(), tween(if (visual.crownCeremony) 1350 else 750))
+    }
+    val panel = if (visual.recordHolder) {
+        Brush.horizontalGradient(listOf(NovaColors.Gold.copy(alpha = if (visual.crownCeremony) glow else 0.18f), color.copy(alpha = 0.12f), theme.surface))
+    } else {
+        Brush.horizontalGradient(listOf(color.copy(alpha = 0.17f), theme.surface, theme.surface))
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(
+            when {
+                visual.crownCeremony -> "👑 Cérémonie du règne au #1"
+                visual.isNumberOneRecord -> "👑 Cumul des #1 · règne continu"
+                else -> "📊 Échelle de domination"
+            },
+            accent
+        )
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(panel)
+                .border(1.dp, accent.copy(alpha = if (visual.crownCeremony) 0.7f else 0.45f), RoundedCornerShape(18.dp))
+                .padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 52, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(visual.contextLabel.uppercase(Locale.FRANCE), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(name, color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("CLASSEMENT", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        when {
+                            visual.recordHolder && visual.tiedAtTop > 1 -> "🥇 #1 · ex æquo"
+                            visual.recordHolder -> "🥇 Détenteur #1"
+                            else -> "#${visual.rank ?: "?"}"
+                        },
+                        color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.End
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    scoreCounter.value.toInt().toString(), color = accent, fontWeight = FontWeight.Black, fontSize = 36.sp, lineHeight = 38.sp
+                )
+                Column(Modifier.weight(1f).padding(bottom = 3.dp)) {
+                    Text(visual.recordLabel, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    Text(visual.periodUnit, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("ÉCHELLE DE DOMINATION", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                PresenceMetricCard("Chart", visual.chartCount, visual.chartCoveragePercent, "% de la période", color, Modifier.weight(1f))
+                PresenceMetricCard("Top 10", visual.top10Count, visual.top10ConversionPercent, "% du chart", Color(0xFF5DADE2), Modifier.weight(1f))
+                PresenceMetricCard("Top 5", visual.top5Count, visual.top5ConversionPercent, "% du Top 10", Color(0xFFBA68C8), Modifier.weight(1f))
+                PresenceMetricCard("#1", visual.numberOneCount, visual.numberOneConversionPercent, "% du Top 5", NovaColors.Gold, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(11.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(if (visual.activeAtLatest) accent.copy(alpha = 0.13f) else theme.surface.copy(alpha = 0.82f))
+                    .border(1.dp, (if (visual.activeAtLatest) accent else theme.textSecondary).copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .padding(10.dp)
+            ) {
+                Text(
+                    (if (visual.activeAtLatest) "🟢 " else "⚪ ") + visual.statusTitle.uppercase(Locale.FRANCE),
+                    color = if (visual.activeAtLatest) accent else theme.textSecondary,
+                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(visual.statusDetail, color = theme.text, style = MaterialTheme.typography.bodySmall, lineHeight = 18.sp)
+                Spacer(Modifier.height(7.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Série actuelle · ${visual.currentRun} ${visual.periodUnit}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text("Record continu · ${visual.longestRun} ${visual.periodUnit}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                if (visual.longestRunStart != null && visual.longestRunEnd != null) {
+                    Text("${visual.longestRunStart} → ${visual.longestRunEnd}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(9.dp))
+            Text("DERNIÈRES DATES PERTINENTES", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOfNotNull(
+                    visual.lastAppearance?.let { "Chart" to it },
+                    visual.lastTop10?.let { "Top 10" to it },
+                    visual.lastTop5?.let { "Top 5" to it },
+                    visual.lastNumberOne?.let { "#1" to it }
+                ).forEach { (label, date) ->
+                    Column(
+                        Modifier.padding(top = 5.dp).clip(RoundedCornerShape(9.dp)).background(theme.surface.copy(alpha = 0.75f))
+                            .border(1.dp, color.copy(alpha = 0.22f), RoundedCornerShape(9.dp)).padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Text(label, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text(date, color = theme.text, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            visual.rival?.let { rival ->
+                Spacer(Modifier.height(10.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(color.copy(alpha = 0.25f)))
+                Spacer(Modifier.height(9.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CoverArt(rival.imageUrl, rival.name, size = 42, circle = isArtist)
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                rival.tied -> "🤝 À égalité"
+                                rival.ahead -> "🎯 Juste devant"
+                                else -> "🥈 Dauphin le plus proche"
+                            },
+                            color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium
+                        )
+                        Text(rival.name, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Score · ${rival.score} ${visual.periodUnit}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            if (rival.tied) "ÉGALITÉ" else "ÉCART · ${rival.gap}",
+                            color = if (rival.tied) NovaColors.Gold else theme.text,
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                        if (!rival.tied) Text(
+                            "${visual.periodUnit} ${if (rival.ahead) "de retard" else "d'avance"}",
+                            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End
+                        )
+                    }
+                }
+            } ?: Text("Aucun dauphin distinct dans les données de ce classement.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 10.dp))
+            Spacer(Modifier.height(10.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(color.copy(alpha = 0.2f)))
+            Spacer(Modifier.height(9.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${visual.milestone.reachedEmoji} ${visual.milestone.reachedLabel}", color = accent, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(
+                    if (visual.milestone.nextThreshold != null) "${visual.milestone.remaining} avant le prochain palier" else "Sommet atteint",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End
+                )
+            }
+            Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(theme.textSecondary.copy(alpha = 0.16f))) {
+                Box(Modifier.fillMaxWidth(visual.milestone.progress).height(6.dp).background(Brush.horizontalGradient(listOf(color, accent))))
+            }
+            visual.milestone.nextLabel?.let {
+                Text("Prochain palier · $it${visual.milestone.nextThreshold?.let { n -> " à $n ${visual.periodUnit}" } ?: ""}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresenceMetricCard(label: String, count: Int, percent: Int, ratioLabel: String, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(10.dp)).background(accent.copy(alpha = 0.10f))
+            .border(1.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(10.dp)).padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Text(count.toString(), color = theme.text, fontWeight = FontWeight.Black, fontSize = 18.sp)
+        Text("$percent%", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+        Text(ratioLabel, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, maxLines = 2, textAlign = TextAlign.Center, lineHeight = 10.sp)
+    }
+}
+
+/** 🟨 Frise positionnelle : un jalon par apparition, un interstice visible quand une période est manquée. */
+@Composable
+private fun PresencePositionRibbon(visual: RecordExplainer.PresenceVisual, color: Color) {
+    val theme = Nova.theme
+    val reveal = remember(visual) { Animatable(if (visual.crownCeremony) 0f else visual.longestRun.toFloat()) }
+    LaunchedEffect(visual) {
+        if (visual.crownCeremony) {
+            reveal.snapTo(0f)
+            reveal.animateTo(visual.longestRun.toFloat(), tween(1250))
+        } else reveal.snapTo(visual.longestRun.toFloat())
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(if (visual.crownCeremony) "👑 Révélation du plus long règne" else "🎨 Frise des positions · ${visual.cells.size} période(s)", color)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PresenceLegend("#1", NovaColors.Gold)
+            PresenceLegend("#2–5", color)
+            PresenceLegend("#6–10", Color(0xFF5DADE2))
+            PresenceLegend("Reste", theme.textSecondary)
+        }
+        Spacer(Modifier.height(7.dp))
+        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            itemsIndexed(visual.cells, key = { _, cell -> "${cell.periodIndex}:${cell.date}" }) { _, cell ->
+                if (cell.gapBefore > 0) {
+                    Column(Modifier.width(43.dp).height(70.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                        Text("⋯", color = theme.textSecondary, fontWeight = FontWeight.Black, fontSize = 19.sp)
+                        Text("+${cell.gapBefore}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+                        Text("${visual.periodUnit} sans apparition", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, textAlign = TextAlign.Center, lineHeight = 9.sp)
+                    }
+                }
+                val highlightRun = cell.longestRunStep > 0 && (!visual.crownCeremony || cell.longestRunStep <= reveal.value)
+                val bandColor = when (cell.band) {
+                    RecordExplainer.PresenceBand.NUMBER_ONE -> NovaColors.Gold
+                    RecordExplainer.PresenceBand.TOP_FIVE -> color
+                    RecordExplainer.PresenceBand.TOP_TEN -> Color(0xFF5DADE2)
+                    RecordExplainer.PresenceBand.REST -> theme.textSecondary
+                }
+                Column(
+                    Modifier.width(58.dp).height(70.dp).clip(RoundedCornerShape(10.dp))
+                        .background(if (cell.band == RecordExplainer.PresenceBand.REST) theme.surface else bandColor.copy(alpha = if (cell.band == RecordExplainer.PresenceBand.NUMBER_ONE) 0.2f else 0.14f))
+                        .border(1.dp, if (highlightRun) NovaColors.Gold else bandColor.copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 4.dp, vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(cell.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, fontSize = 9.sp)
+                    Text(if (cell.position == 1) "👑" else "#${cell.position}", color = bandColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                    Text(
+                        if (highlightRun) "SÉRIE ${cell.longestRunStep}" else "${cell.position}e place",
+                        color = if (highlightRun) NovaColors.Gold else theme.textSecondary,
+                        fontWeight = if (highlightRun) FontWeight.Bold else FontWeight.Normal,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 8.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+        Text(
+            if (visual.crownCeremony) "Le doré révèle le plus long règne continu; le score principal reste le cumul total de #1, règnes isolés compris."
+            else "Un jalon par période observée. Les pointillés marquent les périodes sans apparition; couleurs = niveau de position.",
+            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp)
+        )
+    }
+}
+
+@Composable
+private fun PresenceLegend(label: String, accent: Color) {
+    val theme = Nova.theme
+    Row(
+        Modifier.clip(RoundedCornerShape(8.dp)).background(accent.copy(alpha = 0.11f))
+            .border(1.dp, accent.copy(alpha = 0.3f), RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
+        Spacer(Modifier.width(4.dp))
+        Text(label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
     }
 }
 

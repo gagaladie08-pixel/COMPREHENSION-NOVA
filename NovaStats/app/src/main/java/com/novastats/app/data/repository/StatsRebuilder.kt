@@ -55,6 +55,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         RecordsEngine(db).rebuildSuccessiveRecordsOnly()
     }
 
+    /** Initialise uniquement le nouveau cache Most Cumulative in Top 5 depuis les snapshots existants. */
+    suspend fun rebuildCumulativeTop5Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildCumulativeTop5Only()
+    }
+
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
     private suspend fun recomputeRootAggregatesFromScrobbles() {
         val totals = db.trackDao().rootAggregatesFromScrobbles()

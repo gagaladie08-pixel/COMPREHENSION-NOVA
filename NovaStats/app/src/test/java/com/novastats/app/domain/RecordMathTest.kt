@@ -12,19 +12,23 @@ class RecordMathTest {
     private fun s(vararg p: Pair<Int, Int>) = p.map { (idx, pos) -> RecordAppearance(idx, "2026-01-%02d".format(idx + 1), pos, 10) }
 
     @Test
-    fun `catalogue expose les 30 records`() {
-        assertEquals(30, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue expose les 31 records`() {
+        assertEquals(31, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertTrue(RecordCatalog.ALL.all { it.categories.isNotEmpty() })
         // sous-sections uniquement pour des catégories proposées
         RecordCatalog.ALL.forEach { d -> d.subs.keys.forEach { c -> assertTrue("${d.id}/$c", c in d.categories) } }
     }
 
     @Test
-    fun `cumulative et top10`() {
+    fun `cumulative et seuils top10 et top5`() {
         val series = s(0 to 5, 1 to 12, 2 to 1, 3 to 1)
         assertEquals(4, RecordMath.cumulative(series))
         assertEquals(3, RecordMath.cumulative(series, 10))
+        assertEquals(3, RecordMath.cumulative(series, 5))
         assertEquals(2, RecordMath.timesAt1(series))
+
+        // Le cumul Top 5 inclut les #1 et compte les périodes non consécutives.
+        assertEquals(2, RecordMath.cumulative(s(0 to 5, 1 to 6, 3 to 4), 5))
     }
 
     @Test

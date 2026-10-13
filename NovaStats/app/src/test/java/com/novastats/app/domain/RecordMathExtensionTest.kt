@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Règles des records 25-30 + Fastest Rise (exemples du cahier des charges). */
+/** Règles des records 25-31 + Fastest Rise (exemples du cahier des charges). */
 class RecordMathExtensionTest {
 
     private fun a(idx: Int, pos: Int) = RecordAppearance(idx, "d$idx", pos, 1)
@@ -93,8 +93,10 @@ class RecordMathExtensionTest {
     }
 
     @Test
-    fun `catalogue 30 records et groupes`() {
-        assertEquals(30, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue 31 records et groupes`() {
+        assertEquals(31, RecordCatalog.ALL.map { it.number }.distinct().size)
+        assertEquals(RecordGroup.DURATION, RecordCatalog.groupOf["MOST_CUMULATIVE_TOP5"])
+        assertTrue(RecordCatalog.byId("MOST_CUMULATIVE_TOP5")!!.title.contains("Top 5"))
         assertEquals(RecordGroup.PALMARES, RecordCatalog.groupOf["MOST_RECORDS"])
         assertEquals(RecordGroup.PALMARES, RecordGroup.entries.first())
         assertEquals(5, RecordCatalog.byId("FASTEST_RISE")!!.subs[RecordCategory.TRACK]!!.size)

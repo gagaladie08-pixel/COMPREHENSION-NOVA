@@ -16,7 +16,7 @@ import com.novastats.app.domain.RecordResult
 import java.time.LocalDate
 
 /**
- * 🏅 Moteur des 30 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
+ * 🏅 Moteur des 31 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
  * et écrit le Top 10 de chaque record dans `records_cache`.
  * Tous les records se créent automatiquement (import JSON compris) — aucune saisie manuelle.
  */
@@ -81,6 +81,33 @@ class RecordsEngine(private val db: NovaDatabase) {
         }
         db.withTransaction {
             db.recordDao().clearType("MOST_SUCCESSIVE_1")
+            out.chunked(500).forEach { db.recordDao().insertAll(it) }
+        }
+    }
+
+    /** Remplit uniquement le nouveau record cumulatif Top 5 depuis les snapshots déjà disponibles. */
+    suspend fun rebuildCumulativeTop5Only() {
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        for (p in chartPeriods) {
+            val seriesByCategory = mapOf(
+                RecordCategory.TRACK to toSeries(db.billboardDao().allTrackRows(p.dbName), p),
+                RecordCategory.ARTIST to toSeries(db.billboardDao().allArtistRows(p.dbName), p),
+                RecordCategory.ALBUM to toSeries(db.billboardDao().allAlbumRows(p.dbName), p)
+            )
+            for ((category, series) in seriesByCategory) {
+                val results = series.map { (id, appearances) ->
+                    RecordResult(
+                        id,
+                        RecordMath.cumulative(appearances, 5).toDouble(),
+                        appearances.lastOrNull { it.position <= 5 }?.date
+                    )
+                }
+                emit(out, "MOST_CUMULATIVE_TOP5", p, category, null, results, now)
+            }
+        }
+        db.withTransaction {
+            db.recordDao().clearType("MOST_CUMULATIVE_TOP5")
             out.chunked(500).forEach { db.recordDao().insertAll(it) }
         }
     }
@@ -177,6 +204,7 @@ class RecordsEngine(private val db: NovaDatabase) {
 
         emit(out, "MOST_CUMULATIVE", p, cat, null, each { id, s -> RecordResult(id, RecordMath.cumulative(s).toDouble(), s.last().date) }, now)
         emit(out, "MOST_CUMULATIVE_TOP10", p, cat, null, each { id, s -> RecordResult(id, RecordMath.cumulative(s, 10).toDouble(), s.lastOrNull { it.position <= 10 }?.date) }, now)
+        emit(out, "MOST_CUMULATIVE_TOP5", p, cat, null, each { id, s -> RecordResult(id, RecordMath.cumulative(s, 5).toDouble(), s.lastOrNull { it.position <= 5 }?.date) }, now)
         emit(out, "MOST_TIME_AT_1", p, cat, null, each { id, s -> RecordResult(id, RecordMath.timesAt1(s).toDouble(), s.lastOrNull { it.position == 1 }?.date) }, now)
         if (p != Period.YEARLY) {
             // Une même entité peut occuper plusieurs places du top 10 : on garde ses 10 meilleures périodes,

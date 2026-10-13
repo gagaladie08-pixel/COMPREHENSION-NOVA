@@ -124,6 +124,70 @@ class RecordExplainer(private val db: NovaDatabase) {
         val segments: List<SuccessiveSegment>,
         val stopper: SuccessiveStopper?
     )
+    enum class PresenceBand { NUMBER_ONE, TOP_FIVE, TOP_TEN, REST }
+    data class PresenceCell(
+        val periodIndex: Int,
+        val date: String,
+        val label: String,
+        val position: Int,
+        val band: PresenceBand,
+        val gapBefore: Int,
+        /** 1..N pour les cellules du plus long règne / passage continu, 0 pour les autres. */
+        val longestRunStep: Int
+    )
+    data class PresenceRival(
+        val id: Long,
+        val name: String,
+        val imageUrl: String?,
+        val score: Int,
+        val gap: Int,
+        val tied: Boolean,
+        val ahead: Boolean
+    )
+    data class PresenceMilestone(
+        val reachedLabel: String,
+        val reachedEmoji: String,
+        val nextLabel: String?,
+        val nextThreshold: Int?,
+        val remaining: Int,
+        val progress: Float
+    )
+    /** Données premium communes aux quatre records de présence dans le chart. */
+    data class PresenceVisual(
+        val contextLabel: String,
+        val recordLabel: String,
+        val score: Int,
+        val scoreUnit: String,
+        val periodUnit: String,
+        val chartCount: Int,
+        val top10Count: Int,
+        val top5Count: Int,
+        val numberOneCount: Int,
+        val chartCoveragePercent: Int,
+        val top10ConversionPercent: Int,
+        val top5ConversionPercent: Int,
+        val numberOneConversionPercent: Int,
+        val lastAppearance: String?,
+        val lastTop10: String?,
+        val lastTop5: String?,
+        val lastNumberOne: String?,
+        val latestChartDate: String?,
+        val activeAtLatest: Boolean,
+        val statusTitle: String,
+        val statusDetail: String,
+        val currentRun: Int,
+        val longestRun: Int,
+        val longestRunStart: String?,
+        val longestRunEnd: String?,
+        val rank: Int?,
+        val recordHolder: Boolean,
+        val tiedAtTop: Int,
+        val rival: PresenceRival?,
+        val milestone: PresenceMilestone,
+        val isNumberOneRecord: Boolean,
+        val crownCeremony: Boolean,
+        val cells: List<PresenceCell>
+    )
     private data class SpeedStageSource(
         val key: String,
         val label: String,
@@ -156,7 +220,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** ⚡ Fiche premium chrono : rival, splits d'étapes, voie Panthéon et calendrier d'activité. */
         val speedVisual: SpeedVisual? = null,
         /** 🔁 Carte, frise compressée, statut et cause de rupture propres à Most Successive #1. */
-        val successiveVisual: SuccessiveVisual? = null
+        val successiveVisual: SuccessiveVisual? = null,
+        /** 👑 Funnel, comparaison, statut, jalons et frise des rangs pour les quatre records de présence. */
+        val presenceVisual: PresenceVisual? = null
     )
 
     /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
@@ -240,6 +306,187 @@ class RecordExplainer(private val db: NovaDatabase) {
             prev = a.periodIndex
         }
         return best
+    }
+
+    private data class PresenceTierSpec(val threshold: Int, val label: String, val emoji: String)
+
+    private fun presenceMilestone(p: Period, score: Int): PresenceMilestone {
+        val tiers = when (p) {
+            Period.DAILY -> listOf(
+                PresenceTierSpec(7, "Présence installée", "✨"), PresenceTierSpec(30, "Pilier du chart", "🔥"),
+                PresenceTierSpec(90, "Dominant", "👑"), PresenceTierSpec(180, "Icône", "💎"), PresenceTierSpec(365, "Légende", "🏆")
+            )
+            Period.WEEKLY -> listOf(
+                PresenceTierSpec(4, "Présence installée", "✨"), PresenceTierSpec(13, "Pilier du chart", "🔥"),
+                PresenceTierSpec(26, "Dominant", "👑"), PresenceTierSpec(52, "Icône", "💎"), PresenceTierSpec(104, "Légende", "🏆")
+            )
+            Period.MONTHLY -> listOf(
+                PresenceTierSpec(3, "Présence installée", "✨"), PresenceTierSpec(6, "Pilier du chart", "🔥"),
+                PresenceTierSpec(12, "Dominant", "👑"), PresenceTierSpec(24, "Icône", "💎"), PresenceTierSpec(60, "Légende", "🏆")
+            )
+            Period.YEARLY -> listOf(
+                PresenceTierSpec(2, "Présence installée", "✨"), PresenceTierSpec(3, "Pilier du chart", "🔥"),
+                PresenceTierSpec(5, "Dominant", "👑"), PresenceTierSpec(10, "Icône", "💎"), PresenceTierSpec(20, "Légende", "🏆")
+            )
+            Period.GLOBAL -> emptyList()
+        }
+        val reachedIndex = tiers.indexOfLast { score >= it.threshold }
+        val reached = tiers.getOrNull(reachedIndex)
+        val next = tiers.getOrNull(reachedIndex + 1)
+        val previousThreshold = reached?.threshold ?: 0
+        val progress = if (next == null) 1f else
+            ((score - previousThreshold).toFloat() / (next.threshold - previousThreshold).coerceAtLeast(1)).coerceIn(0f, 1f)
+        return PresenceMilestone(
+            reachedLabel = reached?.label ?: "En progression",
+            reachedEmoji = reached?.emoji ?: "🌱",
+            nextLabel = next?.label,
+            nextThreshold = next?.threshold,
+            remaining = next?.let { (it.threshold - score).coerceAtLeast(0) } ?: 0,
+            progress = progress
+        )
+    }
+
+    private suspend fun presenceVisual(
+        def: RecordDef,
+        p: Period,
+        cat: RecordCategory,
+        id: Long,
+        value: Double,
+        s: List<RecordAppearance>
+    ): PresenceVisual {
+        val qualifies: (RecordAppearance) -> Boolean = when (def.id) {
+            "MOST_CUMULATIVE_TOP10" -> ({ it.position <= 10 })
+            "MOST_CUMULATIVE_TOP5" -> ({ it.position <= 5 })
+            "MOST_TIME_AT_1" -> ({ it.position == 1 })
+            else -> ({ true })
+        }
+        val zoneLabel = when (def.id) {
+            "MOST_CUMULATIVE_TOP10" -> "Top 10"
+            "MOST_CUMULATIVE_TOP5" -> "Top 5"
+            "MOST_TIME_AT_1" -> "#1"
+            else -> "chart"
+        }
+        val all = allSeries(cat, p)
+        val latest = all.values.asSequence().flatten()
+            .maxWithOrNull(compareBy<RecordAppearance> { it.periodIndex }.thenBy { it.date })
+        val rows = db.recordDao().top10(def.id, p.dbName, cat.dbName, null, asc = false).first()
+        val myScore = rows.firstOrNull { it.r.entityId == id }?.r?.value?.toInt() ?: value.toInt()
+        val leaderScore = rows.maxOfOrNull { it.r.value.toInt() } ?: myScore
+        val holder = myScore == leaderScore
+        val tiedAtTop = rows.count { it.r.value.toInt() == leaderScore }.coerceAtLeast(1)
+        val rank = rows.indexOfFirst { it.r.entityId == id }.takeIf { it >= 0 }?.plus(1)
+            ?: (rows.count { it.r.value > myScore.toDouble() } + 1)
+        val peer = rows.firstOrNull { it.r.entityId != id && it.r.value.toInt() == myScore }
+        val rivalRow = peer ?: if (holder) {
+            rows.firstOrNull { it.r.value.toInt() < myScore }
+        } else {
+            rows.lastOrNull { it.r.value > myScore.toDouble() }
+        }
+        val rival = rivalRow?.let {
+            val rivalScore = it.r.value.toInt()
+            PresenceRival(
+                id = it.r.entityId,
+                name = it.name ?: "Inconnu",
+                imageUrl = it.imageUrl,
+                score = rivalScore,
+                gap = kotlin.math.abs(rivalScore - myScore),
+                tied = rivalScore == myScore,
+                ahead = rivalScore > myScore
+            )
+        }
+
+        val top10 = s.count { it.position <= 10 }
+        val top5 = s.count { it.position <= 5 }
+        val numberOnes = s.count { it.position == 1 }
+        val span = (s.last().periodIndex - s.first().periodIndex + 1).coerceAtLeast(1)
+        val lastAppearance = s.lastOrNull()
+        val lastQualified = s.lastOrNull(qualifies)
+        val lastTop10 = s.lastOrNull { it.position <= 10 }
+        val lastTop5 = s.lastOrNull { it.position <= 5 }
+        val lastNumberOne = s.lastOrNull { it.position == 1 }
+        val activeAtLatest = latest != null && lastAppearance != null && lastAppearance.periodIndex == latest.periodIndex && qualifies(lastAppearance)
+        val bestRun = longestRun(s, qualifies)
+        var currentRun = 0
+        if (activeAtLatest) {
+            var previous: Int? = null
+            for (appearance in s.asReversed()) {
+                if (!qualifies(appearance) || (previous != null && appearance.periodIndex != previous - 1)) break
+                currentRun++
+                previous = appearance.periodIndex
+            }
+        }
+        val runSteps = bestRun.mapIndexed { index, appearance -> appearance.periodIndex to index + 1 }.toMap()
+        var previousIndex: Int? = null
+        val cells = s.map { appearance ->
+            val gap = previousIndex?.let { (appearance.periodIndex - it - 1).coerceAtLeast(0) } ?: 0
+            previousIndex = appearance.periodIndex
+            PresenceCell(
+                periodIndex = appearance.periodIndex,
+                date = appearance.date,
+                label = short(p, appearance.date),
+                position = appearance.position,
+                band = when {
+                    appearance.position == 1 -> PresenceBand.NUMBER_ONE
+                    appearance.position <= 5 -> PresenceBand.TOP_FIVE
+                    appearance.position <= 10 -> PresenceBand.TOP_TEN
+                    else -> PresenceBand.REST
+                },
+                gapBefore = gap,
+                longestRunStep = runSteps[appearance.periodIndex] ?: 0
+            )
+        }
+        val latestDateLabel = latest?.date?.let { on(p, it) }
+        val qualifiedDateLabel = lastQualified?.date?.let { on(p, it) }
+        val statusDetail = if (activeAtLatest) {
+            "Au $zoneLabel dans le dernier relevé${latestDateLabel?.let { " ($it)" } ?: ""} · série active de $currentRun ${unit(p, currentRun)}."
+        } else {
+            val state = if (lastAppearance?.periodIndex == latest?.periodIndex) "Hors du $zoneLabel au dernier relevé" else "Absent du dernier relevé"
+            "$state${latestDateLabel?.let { " ($it)" } ?: ""}. " +
+                (qualifiedDateLabel?.let { "Dernier passage au $zoneLabel : $it." } ?: "Aucun passage dans cette zone.")
+        }
+        val scoreLabel = when (def.id) {
+            "MOST_CUMULATIVE_TOP10" -> "Périodes dans le Top 10"
+            "MOST_CUMULATIVE_TOP5" -> "Périodes dans le Top 5"
+            "MOST_TIME_AT_1" -> "Périodes au #1"
+            else -> "Périodes dans le chart"
+        }
+        val percentages = { numerator: Int, denominator: Int -> if (denominator <= 0) 0 else numerator * 100 / denominator }
+        val scoreInt = value.toInt()
+        return PresenceVisual(
+            contextLabel = "${p.frLabel} · ${cat.label}",
+            recordLabel = scoreLabel,
+            score = scoreInt,
+            scoreUnit = "${scoreInt} ${unit(p, scoreInt)}",
+            periodUnit = unit(p, 2),
+            chartCount = s.size,
+            top10Count = top10,
+            top5Count = top5,
+            numberOneCount = numberOnes,
+            chartCoveragePercent = percentages(s.size, span),
+            top10ConversionPercent = percentages(top10, s.size),
+            top5ConversionPercent = percentages(top5, top10),
+            numberOneConversionPercent = percentages(numberOnes, top5),
+            lastAppearance = lastAppearance?.date?.let { on(p, it) },
+            lastTop10 = lastTop10?.date?.let { on(p, it) },
+            lastTop5 = lastTop5?.date?.let { on(p, it) },
+            lastNumberOne = lastNumberOne?.date?.let { on(p, it) },
+            latestChartDate = latestDateLabel,
+            activeAtLatest = activeAtLatest,
+            statusTitle = if (activeAtLatest) "Série active au dernier relevé" else "Série terminée ou hors zone",
+            statusDetail = statusDetail,
+            currentRun = currentRun,
+            longestRun = bestRun.size,
+            longestRunStart = bestRun.firstOrNull()?.date?.let { short(p, it) },
+            longestRunEnd = bestRun.lastOrNull()?.date?.let { short(p, it) },
+            rank = rank,
+            recordHolder = holder,
+            tiedAtTop = tiedAtTop,
+            rival = rival,
+            milestone = presenceMilestone(p, scoreInt),
+            isNumberOneRecord = def.id == "MOST_TIME_AT_1",
+            crownCeremony = def.id == "MOST_TIME_AT_1" && holder,
+            cells = cells
+        )
     }
 
     /* ------------------------------------------------------------------ fiche ------------------------------------------------------------------ */
@@ -362,7 +609,7 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     private suspend fun explainCore(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story = runCatching {
         when (def.id) {
-            "MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_TIME_AT_1", "MOST_CONSISTENT", "MOST_BLOCKED_TOP5",
+            "MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1", "MOST_CONSISTENT", "MOST_BLOCKED_TOP5",
             "BIGGEST_JUMP", "BIGGEST_FALL", "BIGGEST_COMEBACK", "BIGGEST_CLIMBER", "SLEEPER_HIT", "FASTEST_RISE", "LONGEST_ROAD",
             "BIGGEST_PERIOD", "BIGGEST_DEBUT", "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name, value)
             "PODIUM_SWEEP" -> podiumSweep(period ?: Period.WEEKLY, cat, sub, id, name)
@@ -539,6 +786,8 @@ class RecordExplainer(private val db: NovaDatabase) {
     private suspend fun chartStory(def: RecordDef, p: Period, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double? = null): Story {
         val s = series(cat, p, id)
         if (s.isEmpty()) return Story(def.title, "$name n'a plus d'historique dans le chart ${p.frLabel.lowercase()} (les records seront recalculés à la prochaine écoute).")
+        val presence = if (def.id in setOf("MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1"))
+            presenceVisual(def, p, cat, id, value ?: 0.0, s) else null
         val chart = "chart ${p.frLabel.lowercase()}"
         val first = s.first(); val last = s.last()
         val peak = s.minBy { it.position }
@@ -558,7 +807,8 @@ class RecordExplainer(private val db: NovaDatabase) {
                     "$name est apparu $n fois dans le $chart : depuis son entrée ${on(p, first.date)} (${pos(first.position)}) jusqu'à ${on(p, last.date)}. " +
                         "Sur les $span ${unit(p, span)} écoulées depuis son entrée, il était classé $n fois (${100 * n / span} %). Il a culminé ${pos(peak.position)} ${on(p, peak.date)}.",
                     base + ("Taux de présence" to "${100 * n / span} % des ${unit(p, span)} depuis l'entrée"),
-                    "Toutes ses apparitions (le peak en surbrillance)", points(p, s, { it.position == peak.position })
+                    "Toutes ses apparitions (le peak en surbrillance)", points(p, s, { it.position == peak.position }),
+                    presenceVisual = presence
                 )
             }
             "MOST_CUMULATIVE_TOP10" -> {
@@ -570,7 +820,22 @@ class RecordExplainer(private val db: NovaDatabase) {
                         "Première fois ${on(p, top.first().date)} (${pos(top.first().position)}), dernière fois ${on(p, top.last().date)}. " +
                         (if (run.size > 1) "Plus longue série sans sortir du Top 10 : ${run.size} ${unit(p, run.size)} (${short(p, run.first().date)} → ${short(p, run.last().date)})." else ""),
                     base + ("Apparitions hors Top 10" to "${s.size - top.size}"),
-                    "Trajectoire (Top 10 en surbrillance)", points(p, s, { it.position <= 10 })
+                    "Trajectoire (Top 10 en surbrillance)", points(p, s, { it.position <= 10 }),
+                    presenceVisual = presence
+                )
+            }
+            "MOST_CUMULATIVE_TOP5" -> {
+                val top = s.filter { it.position <= 5 }
+                val run = longestRun(s) { it.position <= 5 }
+                Story(
+                    "🏅 ${top.size} ${unit(p, top.size)} dans le Top 5",
+                    "$name a atteint les places 1 à 5 du $chart pendant ${top.size} ${unit(p, top.size)}, consécutives ou non. " +
+                        "C'est un cumul de toutes les périodes Top 5 (${s.size} apparitions au total), distinct de Most Consistent Top 5 qui exige une série continue. " +
+                        "Première fois ${on(p, top.first().date)} (${pos(top.first().position)}), dernière fois ${on(p, top.last().date)}.",
+                    base + ("Apparitions hors Top 5" to "${s.size - top.size}") +
+                        ("Plus longue série continue (info)" to "${run.size} ${unit(p, run.size)}"),
+                    "Trajectoire (Top 5 en surbrillance)", points(p, s, { it.position <= 5 }),
+                    presenceVisual = presence
                 )
             }
             "MOST_TIME_AT_1" -> {
@@ -582,7 +847,8 @@ class RecordExplainer(private val db: NovaDatabase) {
                         (if (run.size > 1) "Son plus long règne : ${run.size} ${unit(p, run.size)} consécutives, de ${short(p, run.first().date)} à ${short(p, run.last().date)}. " else "Chaque passage au #1 a été isolé (pas deux périodes de suite). ") +
                         "Pendant ces périodes de domination, il a cumulé ${ones.sumOf { it.plays }} écoutes.",
                     base + ("Premier #1" to on(p, ones.first().date)) + ("Dernier #1" to on(p, ones.last().date)) + ("Plus long règne" to "${run.size} ${unit(p, run.size)}"),
-                    "Trajectoire (#1 en surbrillance)", points(p, s, { it.position == 1 })
+                    "Trajectoire (#1 en surbrillance)", points(p, s, { it.position == 1 }),
+                    presenceVisual = presence
                 )
             }
             "MOST_CONSISTENT" -> {

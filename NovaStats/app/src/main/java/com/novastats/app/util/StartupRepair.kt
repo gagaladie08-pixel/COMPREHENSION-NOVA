@@ -84,6 +84,19 @@ object StartupRepair {
                         RebuildAudit.write(context, "⚠️ Réparation ciblée Most Successive #1 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }
                 }
+
+                // Amorçage ciblé du nouveau record Top 5 à partir des snapshots Billboard présents.
+                // Aucun autre cache ni aucune donnée source ne sont modifiés.
+                if (!prefs.getBoolean("cumulative_top5_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "🏅 Amorçage ciblé Most Cumulative in Top 5 depuis les snapshots existants")
+                        app.rebuilder.rebuildCumulativeTop5Only()
+                        RebuildAudit.write(context, "✅ Cache Most Cumulative in Top 5 recalculé pour les quatre périodes")
+                        prefs.edit().putBoolean("cumulative_top5_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Amorçage Most Cumulative in Top 5 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
             }
         }
     }
