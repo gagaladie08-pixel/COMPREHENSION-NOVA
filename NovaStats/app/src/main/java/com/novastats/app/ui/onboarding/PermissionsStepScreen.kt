@@ -67,8 +67,8 @@ import com.novastats.app.ui.theme.NovaTheme
 import kotlinx.coroutines.delay
 
 /** État des 3 connexions. */
-data class Permissions(val listener: Boolean, val battery: Boolean, val boot: Boolean) {
-    val count get() = listOf(listener, battery, boot).count { it }
+data class Permissions(val listener: Boolean, val battery: Boolean, val boot: Boolean, val appNotifications: Boolean = false) {
+    val count get() = listOf(listener, battery, boot, appNotifications).count { it }
 }
 
 object PermissionChecks {
@@ -81,7 +81,7 @@ object PermissionChecks {
             if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP
         )
     }
-    fun all(ctx: Context) = Permissions(listener(ctx), battery(ctx), boot(ctx))
+    fun all(ctx: Context) = Permissions(listener(ctx), battery(ctx), boot(ctx), NotificationAccess.canPost(ctx))
 
     fun openListenerSettings(ctx: Context) = runCatching { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 
@@ -107,9 +107,8 @@ object PermissionChecks {
 }
 
 /**
- * Étape 2/4 — Liste « Réglages » bloquante : notifications + optimisation batterie obligatoires (pas de « Passer »,
- * bouton inactif tant que les deux ne sont pas réellement accordés, vérification à chaque retour dans l'app).
- * Redémarrage automatique recommandé. Chemins manuels HiOS / Phone Master si le réglage n'a pas pris.
+ * Étape 2/4 — Accès aux notifications média requis pour détecter les écoutes; batterie recommandée selon l'appareil.
+ * Le démarrage automatique et les notifications de NovaStats restent facultatifs. Les statuts sont revérifiés au retour.
  */
 @Composable
 fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, onNext: (Permissions) -> Unit) {
@@ -143,16 +142,24 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
         onPauseOrDispose { }
     }
 
-    val batteryOk = perms.battery || (batteryUnavailable && batteryManualOpened)
-    val required = perms.listener && batteryOk
-    val missing = listOfNotNull(if (!perms.listener) "notifications" else null, if (!batteryOk) "batterie" else null)
+    val batteryOk = perms.battery
+    val required = perms.listener
+    val missing = listOfNotNull(if (!perms.listener) "accès aux notifications média" else null)
 
     ObStage(base = theme.background, accent = accent) {
         ObLayout(step = 2, accent = accent, bottom = {
             Appear(beats >= 4) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    ObPrimaryButton(if (required) "Continuer" else "Il manque : ${missing.joinToString(" + ")}", enabled = required, fill = if (required) accent else ObColors.Text) { audio.tap(); audio.whoosh(); onNext(perms) }
-                    Text(if (required) "Tout est en place." else "Les deux premiers réglages sont obligatoires.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+                    ObPrimaryButton(if (required) "Continuer" else "Il manque : ${missing.joinToString(" + ")}", enabled = required, fill = if (required) accent else ObColors.Text) { audio.tap(); audio.whoosh(); onNext(perms.copy(appNotifications = appNotifications)) }
+                    Text(
+                        when {
+                            !required -> "L'accès aux notifications média est requis pour détecter tes écoutes."
+                            !batteryOk -> "La détection est prête; l'exemption batterie reste conseillée."
+                            else -> "Accès requis actif. Les autres réglages restent facultatifs."
+                        },
+                        color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 16.sp,
+                        modifier = Modifier.padding(top = 10.dp)
+                    )
                     ObLinkButton("Retour", ObColors.Gray) { onBack() }
                 }
             }
@@ -160,28 +167,29 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
                 Appear(beats >= 1) { ObEyebrow("Connexion", accent) }
                 Spacer(Modifier.height(6.dp))
-                Appear(beats >= 1) { ObHeadline("Deux réglages.\nRien de plus.") }
+                Appear(beats >= 1) { ObHeadline("Un accès requis.\nDes choix clairs.") }
                 Spacer(Modifier.height(12.dp))
-                Appear(beats >= 2) { ObSub("NovaStats lit uniquement le titre en cours de lecture. Ces réglages lui permettent de ne jamais être coupé.") }
+                Appear(beats >= 2) { ObSub("L'accès Android aux notifications est requis; NovaStats filtre celles des lecteurs média. Batterie conseillée; démarrage auto et alertes facultatifs.") }
                 Spacer(Modifier.height(26.dp))
                 Appear(beats >= 3) {
                     ObCard {
                         PermRow(
                             icon = Icons.Rounded.Notifications, color = Color(0xFFFF3B30), title = "Accès aux notifications", required = true, done = perms.listener,
-                            subtitle = "Voir le titre qui joue dans Spotify, YouTube Music, Deezer…",
+                            subtitle = "Requis pour reconnaître titre et artiste; NovaStats filtre les notifications des lecteurs média.",
                             help = if (listenerTries >= 1 && !perms.listener) PermissionChecks.manualListenerPath() else null,
                             buttonLabel = if (listenerTries >= 1) "Ouvrir" else "Autoriser"
                         ) { waitingFor = "listener"; audio.tap(); PermissionChecks.openListenerSettings(ctx) }
                         ObDivider()
                         PermRow(
-                            icon = Icons.Rounded.BatteryChargingFull, color = Color(0xFF34C759), title = "Batterie sans restriction", required = true, done = batteryOk,
-                            subtitle = "Empêche Android et Phone Master de couper NovaStats en arrière-plan.",
+                            icon = Icons.Rounded.BatteryChargingFull, color = Color(0xFF34C759), title = "Batterie sans restriction", required = false, done = batteryOk,
+                            subtitle = "Conseillée pour la fiabilité en arrière-plan, surtout sur les téléphones stricts. Pas indispensable pour commencer.",
+                            recommended = true,
                             help = when {
                                 batteryUnavailable && !batteryManualOpened -> "Pas d'écran direct sur cet appareil. " + PermissionChecks.manualBatteryPath()
                                 batteryTries >= 1 && !perms.battery -> PermissionChecks.manualBatteryPath()
                                 else -> null
                             },
-                            buttonLabel = if (batteryUnavailable) "Ouvrir" else if (batteryTries >= 1) "Réessayer" else "Désactiver"
+                            buttonLabel = if (batteryUnavailable) "Ouvrir" else if (batteryTries >= 1) "Réessayer" else "Régler"
                         ) {
                             audio.tap()
                             if (batteryUnavailable) {
@@ -215,7 +223,11 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
                 }
                 Spacer(Modifier.height(16.dp))
                 Appear(beats >= 4) {
-                    Text("Aucune notification n'est lue ni stockée. Tout reste sur ton téléphone.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 4.dp))
+                    Text(
+                        "Cette autorisation Android donne au service accès au flux de notifications de l'appareil. NovaStats s'appuie d'abord sur la session média, puis filtre les notifications des lecteurs comme secours, pour extraire titre et artiste et créer une écoute locale. Le contenu complet des notifications n'est pas archivé.",
+                        color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 17.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
                 }
                 Spacer(Modifier.height(16.dp))
             }
@@ -225,13 +237,16 @@ fun PermissionsStepScreen(audio: ObAudio, theme: NovaTheme, onBack: () -> Unit, 
 
 /** Ligne de réglage : icône colorée, titre + état, action à droite ; aide manuelle dépliée si besoin. */
 @Composable
-fun PermRow(icon: ImageVector, color: Color, title: String, required: Boolean, done: Boolean, subtitle: String, help: String?, buttonLabel: String, onAction: () -> Unit) {
+fun PermRow(icon: ImageVector, color: Color, title: String, required: Boolean, done: Boolean, subtitle: String, help: String?, buttonLabel: String, recommended: Boolean = false, onAction: () -> Unit) {
     Column {
         ObRow(icon, color, title, subtitle, trailing = { if (done) ObCheck(true) else ObMiniButton(buttonLabel, ObColors.Text, onAction) })
         Row(Modifier.padding(start = 68.dp, end = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            ObTag(if (done) "Activé" else if (required) "Requis" else "Conseillé", if (done) ObColors.Green else if (required) ObColors.Orange else ObColors.Gray)
+            ObTag(
+                if (done) "Activé" else if (required) "Requis" else if (recommended) "Conseillé" else "Facultatif",
+                if (done) ObColors.Green else if (required) ObColors.Orange else if (recommended) color else ObColors.Gray
+            )
         }
-        AnimatedVisibility(visible = help != null && !done, enter = fadeIn(tween(300)) + expandVertically(tween(350, easing = ObEasing)), exit = fadeOut(tween(150)) + shrinkVertically(tween(250))) {
+        AnimatedVisibility(visible = help != null && !done, enter = fadeIn(tween(obMotionDuration(300))) + expandVertically(tween(obMotionDuration(350), easing = ObEasing)), exit = fadeOut(tween(obMotionDuration(150))) + shrinkVertically(tween(obMotionDuration(250)))) {
             Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(ObColors.Surface2).padding(12.dp)) {
                 Text("Chemin manuel : " + (help ?: ""), color = ObColors.Text, fontFamily = ObFonts.inter, fontSize = 13.sp, lineHeight = 19.sp)
             }
@@ -242,4 +257,4 @@ fun PermRow(icon: ImageVector, color: Color, title: String, required: Boolean, d
 // compat (ancienne checklist)
 @Composable
 fun ChecklistItem(theme: NovaTheme, index: Int, last: Boolean, active: Boolean, done: Boolean, required: Boolean, title: String, body: String, help: String?, buttonLabel: String, onAction: () -> Unit) =
-    PermRow(Icons.Rounded.Check, theme.primary, title, required, done, body, help, buttonLabel, onAction)
+    PermRow(Icons.Rounded.Check, theme.primary, title, required, done, body, help, buttonLabel, recommended = false, onAction = onAction)

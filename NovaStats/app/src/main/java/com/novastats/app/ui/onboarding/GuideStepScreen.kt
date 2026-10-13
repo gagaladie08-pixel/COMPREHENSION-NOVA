@@ -153,6 +153,45 @@ object BrandGuides {
     )
 }
 
+@Composable
+private fun SettingsPathPreview(instruction: String, accent: Color, modifier: Modifier = Modifier) {
+    val segments = instruction
+        .replace("⚙️", "")
+        .replace("✅", "")
+        .split("→")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    if (segments.isEmpty()) return
+
+    Column(modifier.fillMaxWidth()) {
+        Text("CHEMIN DES RÉGLAGES", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 9.sp, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 6.dp))
+        segments.forEachIndexed { index, segment ->
+            val last = index == segments.lastIndex
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(20.dp).clip(CircleShape).background(if (last) accent else accent.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(if (last) "✓" else "${index + 1}", color = if (last) ObColors.Black else accent, fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    segment,
+                    color = ObColors.Text,
+                    fontFamily = ObFonts.inter,
+                    fontWeight = if (last) FontWeight.SemiBold else FontWeight.Medium,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
+                        .background(if (last) accent.copy(alpha = 0.14f) else ObColors.Surface2)
+                        .padding(horizontal = 10.dp, vertical = 7.dp)
+                )
+            }
+            if (!last) Box(Modifier.padding(start = 9.dp).width(2.dp).height(7.dp).background(accent.copy(alpha = 0.35f)))
+        }
+    }
+}
+
 /**
  * Étape 3/4 — Guide constructeur : liste « Réglages » des étapes propres à la marque (détectée, ou choisie),
  * coche verte dès qu'une étape est validée (vérification automatique au retour quand c'est possible).
@@ -214,9 +253,16 @@ fun GuideStepScreen(audio: ObAudio, theme: NovaTheme, embedded: Boolean = false,
                     guide.steps.forEachIndexed { i, step ->
                         val isDone = i in done
                         Column {
-                            ObRow(Icons.Rounded.Tune, if (isDone) ObColors.Green.copy(alpha = 0.9f) else accent, step.title, step.instruction, trailing = {
-                                if (isDone) ObCheck(true) else ObMiniButton("Ouvrir", ObColors.Text) { pending = i; audio.tap(); step.open(ctx) }
-                            })
+                            ObRow(
+                                Icons.Rounded.Tune,
+                                if (isDone) ObColors.Green.copy(alpha = 0.9f) else accent,
+                                step.title,
+                                if (embedded) step.instruction else "Suis le chemin ci-dessous dans les réglages du téléphone.",
+                                trailing = {
+                                    if (isDone) ObCheck(true) else ObMiniButton("Ouvrir", ObColors.Text) { pending = i; audio.tap(); step.open(ctx) }
+                                }
+                            )
+                            if (!embedded) SettingsPathPreview(step.instruction, accent, Modifier.padding(start = 68.dp, end = 16.dp, bottom = 12.dp))
                             if (pending == i && !isDone) Text("En attente de ton retour…", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, modifier = Modifier.padding(start = 68.dp, bottom = 10.dp))
                             if (i != guide.steps.lastIndex) ObDivider()
                         }
@@ -224,7 +270,7 @@ fun GuideStepScreen(audio: ObAudio, theme: NovaTheme, embedded: Boolean = false,
                     Spacer(Modifier.height(6.dp))
                 }
             }
-            AnimatedVisibility(visible = complete, enter = fadeIn(tween(400)) + expandVertically(tween(450, easing = ObEasing))) {
+            AnimatedVisibility(visible = complete, enter = fadeIn(tween(obMotionDuration(400))) + expandVertically(tween(obMotionDuration(450), easing = ObEasing))) {
                 Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     ObCheck(true, 22.dp); Spacer(Modifier.width(10.dp))
                     Text(guide.success, color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp)

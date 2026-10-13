@@ -39,6 +39,8 @@ class SettingsRepository(private val context: Context) {
         val AUTO_BACKUP = booleanPreferencesKey("auto_backup")
         val LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
         val HAPTICS = booleanPreferencesKey("haptics")
+        val ONBOARDING_REDUCED_MOTION = booleanPreferencesKey("onboarding_reduced_motion")
+        val ONBOARDING_SOUNDS = booleanPreferencesKey("onboarding_sound_effects")
         val FONT_SCALE = intPreferencesKey("font_scale_pct")
         val DYNAMIC_ICON = booleanPreferencesKey("dynamic_icon")
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
@@ -190,6 +192,8 @@ class SettingsRepository(private val context: Context) {
     val autoBackup: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_BACKUP] ?: false }
     val lastBackupAt: Flow<Long?> = context.dataStore.data.map { it[Keys.LAST_BACKUP_AT] }
     val haptics: Flow<Boolean> = context.dataStore.data.map { it[Keys.HAPTICS] ?: true }
+    val onboardingReducedMotion: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_REDUCED_MOTION] ?: false }
+    val onboardingSoundEffects: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_SOUNDS] ?: true }
     /** 🔠 Taille du texte en % (80…140, pas de 10) — appliquée à toute l'app via LocalDensity.fontScale. */
     val fontScalePct: Flow<Int> = context.dataStore.data.map { it[Keys.FONT_SCALE] ?: 100 }
     suspend fun setFontScalePct(pct: Int) = context.dataStore.edit { it[Keys.FONT_SCALE] = pct.coerceIn(FONT_MIN, FONT_MAX) }
@@ -206,6 +210,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setAgentLastSync(v: Long) = context.dataStore.edit { it[Keys.AGENT_LAST_SYNC] = v }
     suspend fun setLastBackupAt(v: Long) = context.dataStore.edit { it[Keys.LAST_BACKUP_AT] = v }
     suspend fun setHaptics(v: Boolean) = context.dataStore.edit { it[Keys.HAPTICS] = v }
+    suspend fun setOnboardingReducedMotion(v: Boolean) = context.dataStore.edit { it[Keys.ONBOARDING_REDUCED_MOTION] = v }
+    suspend fun setOnboardingSoundEffects(v: Boolean) = context.dataStore.edit { it[Keys.ONBOARDING_SOUNDS] = v }
     /** Icône du launcher qui suit le thème (bascule d'activity-alias, appliquée quand l'app passe en arrière-plan). */
     val dynamicIcon: Flow<Boolean> = context.dataStore.data.map { it[Keys.DYNAMIC_ICON] ?: true }
     suspend fun setDynamicIcon(v: Boolean) = context.dataStore.edit { it[Keys.DYNAMIC_ICON] = v }

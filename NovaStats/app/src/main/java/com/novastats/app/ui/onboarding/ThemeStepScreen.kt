@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novastats.app.ui.theme.NovaTheme
@@ -52,12 +53,15 @@ fun ThemeStepScreen(audio: ObAudio, initial: NovaTheme, onThemeSelected: (NovaTh
     val settled = themes[pager.settledPage]
     val tilt = rememberTilt()
     val beats = rememberBeats(3, startMs = 150, stepMs = 150)
+    val reducedMotion = LocalOnboardingReducedMotion.current
+    val nameEnterDuration = if (reducedMotion) 0 else 300
+    val nameExitDuration = if (reducedMotion) 0 else 150
 
     LaunchedEffect(pager) {
         snapshotFlow { pager.settledPage }.collect { i -> val t = themes[i]; if (i != startPage || t.id != initial.id) { audio.tick(0.12f); audio.tap() }; onThemeSelected(t) }
     }
-    val base by animateColorAsState(settled.background, tween(600, easing = ObEasing), label = "base")
-    val accent by animateColorAsState(settled.primary, tween(600, easing = ObEasing), label = "accent")
+    val base by animateColorAsState(settled.background, tween(obMotionDuration(600), easing = ObEasing), label = "base")
+    val accent by animateColorAsState(settled.primary, tween(obMotionDuration(600), easing = ObEasing), label = "accent")
 
     val screenW = LocalConfiguration.current.screenWidthDp.dp
     val cardW = (screenW * 0.46f).coerceAtMost(210.dp)
@@ -72,7 +76,7 @@ fun ThemeStepScreen(audio: ObAudio, initial: NovaTheme, onThemeSelected: (NovaTh
                 Appear(beats >= 1) { ObEyebrow("Choisis ton univers", accent) }
                 Spacer(Modifier.height(6.dp))
                 Appear(beats >= 1) {
-                    AnimatedContent(settled, transitionSpec = { (fadeIn(tween(300, 80, ObEasing)) + slideInVertically(tween(350, 80, ObEasing)) { 14 }) togetherWith (fadeOut(tween(150)) + slideOutVertically(tween(150)) { -10 }) }, label = "name") { t ->
+                    AnimatedContent(settled, transitionSpec = { (fadeIn(tween(nameEnterDuration, if (reducedMotion) 0 else 80, ObEasing)) + slideInVertically(tween(if (reducedMotion) 0 else 350, if (reducedMotion) 0 else 80, ObEasing)) { 14 }) togetherWith (fadeOut(tween(nameExitDuration)) + slideOutVertically(tween(nameExitDuration)) { -10 }) }, label = "name") { t ->
                         Column {
                             ObHeadline(t.name, size = 38)
                             Spacer(Modifier.height(8.dp))
@@ -80,8 +84,10 @@ fun ThemeStepScreen(audio: ObAudio, initial: NovaTheme, onThemeSelected: (NovaTh
                             Spacer(Modifier.height(12.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Swatches(t)
-                                Spacer(Modifier.width(12.dp))
-                                Text("${t.titleFont} · ${t.bodyFont}", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                                Spacer(Modifier.width(10.dp))
+                                Text("${t.titleFont} · ${t.bodyFont}", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontWeight = FontWeight.Medium, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                Spacer(Modifier.width(8.dp))
+                                ObTag("Aperçu", t.primary)
                             }
                         }
                     }
@@ -112,7 +118,7 @@ fun ThemeStepScreen(audio: ObAudio, initial: NovaTheme, onThemeSelected: (NovaTh
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Text("Tu pourras en changer à tout moment dans Réglages → Apparence.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp))
+            Text("La palette et l'aperçu suivent ton choix en direct; aucune écoute n'est créée.\nTu pourras changer le thème dans Réglages → Apparence.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 11.sp, lineHeight = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp))
         }
     }
 }

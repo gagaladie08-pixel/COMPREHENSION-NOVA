@@ -47,11 +47,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +97,11 @@ import kotlin.math.sin
 
 /* ===================================== Couleurs ===================================== */
 
+val LocalOnboardingReducedMotion = compositionLocalOf { false }
+
+@Composable
+fun obMotionDuration(durationMs: Int): Int = if (LocalOnboardingReducedMotion.current) 0 else durationMs
+
 object ObColors {
     val Black = Color(0xFF000000)
     val Ink = Color(0xFF0B0B0F)
@@ -127,6 +138,8 @@ val ObEasing: Easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 
 /** Trois sons seulement : souffle (étape), tick (succès), boom + shimmer (final). Volume 20 %. */
 class ObAudio(private val context: Context) {
+    @Volatile private var soundEnabled = true
+    @Volatile private var hapticsEnabled = true
     private val pool = SoundPool.Builder().setMaxStreams(3)
         .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()).build()
     private val whoosh = runCatching { pool.load(context, R.raw.ob_whoosh, 1) }.getOrDefault(0)
@@ -134,7 +147,10 @@ class ObAudio(private val context: Context) {
     private val boom = runCatching { pool.load(context, R.raw.ob_boom, 1) }.getOrDefault(0)
     private val vibrator: Vibrator? = runCatching { context.getSystemService(Vibrator::class.java) }.getOrNull()
 
-    private fun playId(id: Int, volume: Float) { if (id != 0) runCatching { pool.play(id, volume, volume, 1, 0, 1f) } }
+    fun setSoundEnabled(enabled: Boolean) { soundEnabled = enabled }
+    fun setHapticsEnabled(enabled: Boolean) { hapticsEnabled = enabled }
+
+    private fun playId(id: Int, volume: Float) { if (soundEnabled && id != 0) runCatching { pool.play(id, volume, volume, 1, 0, 1f) } }
     fun whoosh(volume: Float = 0.2f) = playId(whoosh, volume)
     fun tick(volume: Float = 0.22f) = playId(tick, volume)
     fun boom(volume: Float = 0.3f) = playId(boom, volume)
@@ -146,7 +162,9 @@ class ObAudio(private val context: Context) {
     fun startAmbient() {}
     fun stopAmbient() {}
 
-    private fun vibrate(pattern: LongArray) { runCatching { vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1)) } }
+    private fun vibrate(pattern: LongArray) {
+        if (hapticsEnabled) runCatching { vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1)) }
+    }
     fun tap() = vibrate(longArrayOf(0, 14))
     fun success() = vibrate(longArrayOf(0, 35, 60, 50))
     fun impact() = vibrate(longArrayOf(0, 180))
@@ -169,10 +187,12 @@ fun rememberObAudio(): ObAudio {
 @Composable
 fun rememberTilt(): State<Offset> {
     val ctx = LocalContext.current
+    val reducedMotion = LocalOnboardingReducedMotion.current
     val tilt = remember { mutableStateOf(Offset.Zero) }
-    DisposableEffect(Unit) {
+    LaunchedEffect(reducedMotion) { if (reducedMotion) tilt.value = Offset.Zero }
+    DisposableEffect(reducedMotion) {
         val sm = ctx.getSystemService(SensorManager::class.java)
-        val sensor = sm?.getDefaultSensor(Sensor.TYPE_GRAVITY) ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val sensor = if (reducedMotion) null else sm?.getDefaultSensor(Sensor.TYPE_GRAVITY) ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         val listener = object : SensorEventListener {
             override fun onSensorChanged(e: SensorEvent) {
                 val x = (e.values[0] / 9.81f).coerceIn(-1f, 1f); val y = (e.values[1] / 9.81f).coerceIn(-1f, 1f)
@@ -181,7 +201,7 @@ fun rememberTilt(): State<Offset> {
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
-        if (sensor != null) sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
+        if (sensor != null) sm?.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
         onDispose { sm?.unregisterListener(listener) }
     }
     return tilt
@@ -200,10 +220,14 @@ fun Modifier.parallax(tilt: State<Offset>, depth: Dp): Modifier = graphicsLayer 
  */
 @Composable
 fun ObStage(base: Color, accent: Color, ambient: NovaTheme? = null, ambientAlpha: Float = 0.55f, content: @Composable BoxScope.() -> Unit) {
-    val t = rememberInfiniteTransition(label = "stage")
-    val drift by t.animateFloat(0f, 1f, infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Restart), label = "drift")
+    val reducedMotion = LocalOnboardingReducedMotion.current
+    val drift = if (reducedMotion) 0f else {
+        val t = rememberInfiniteTransition(label = "stage")
+        val animatedDrift by t.animateFloat(0f, 1f, infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Restart), label = "drift")
+        animatedDrift
+    }
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(base, ObColors.Black)))) {
-        if (ambient != null) Box(Modifier.fillMaxSize().graphicsLayer { alpha = ambientAlpha }) { ThemeAmbient(ambient, Modifier.fillMaxSize()) }
+        if (ambient != null && !reducedMotion) Box(Modifier.fillMaxSize().graphicsLayer { alpha = ambientAlpha }) { ThemeAmbient(ambient, Modifier.fillMaxSize()) }
         Canvas(Modifier.fillMaxSize()) {
             val a = drift * 2f * Math.PI.toFloat()
             val c = Offset(size.width * (0.5f + 0.18f * cos(a)), size.height * (0.42f + 0.08f * sin(a * 1.3f)))
@@ -233,7 +257,7 @@ fun ObLayout(step: Int?, accent: Color, bottom: @Composable ColumnScope.() -> Un
 fun StepDots(step: Int, accent: Color, total: Int = 4) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         for (i in 1..total) {
-            val w by animateFloatAsState(if (i == step) 22f else 6f, tween(400, easing = ObEasing), label = "dot")
+            val w by animateFloatAsState(if (i == step) 22f else 6f, tween(obMotionDuration(400), easing = ObEasing), label = "dot")
             Box(Modifier.height(6.dp).width(w.dp).clip(CircleShape).background(if (i <= step) accent else ObColors.Gray2.copy(alpha = 0.5f)))
         }
     }
@@ -269,11 +293,12 @@ val ObBodyStyle: TextStyle @Composable get() = TextStyle(fontFamily = ObFonts.in
 /** Pilule pleine, 54 dp, texte semi-gras. [fill] blanc par défaut (keynote), ou couleur du thème. */
 @Composable
 fun ObPrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, fill: Color = ObColors.Text, onClick: () -> Unit) {
-    val a by animateFloatAsState(if (enabled) 1f else 0.35f, tween(300), label = "btn")
+    val a by animateFloatAsState(if (enabled) 1f else 0.35f, tween(obMotionDuration(300)), label = "btn")
     val onFill = if (fill.luminanceApprox() > 0.5f) ObColors.Black else ObColors.Text
+    val reducedMotion = LocalOnboardingReducedMotion.current
     var pressed by remember { mutableStateOf(false) }
-    val s by animateFloatAsState(if (pressed) 0.97f else 1f, tween(120), label = "press")
-    LaunchedEffect(pressed) { if (pressed) { delay(140); pressed = false } }
+    val s by animateFloatAsState(if (pressed && !reducedMotion) 0.97f else 1f, tween(obMotionDuration(120)), label = "press")
+    LaunchedEffect(pressed, reducedMotion) { if (pressed) { delay(if (reducedMotion) 0 else 140); pressed = false } }
     Box(
         modifier.fillMaxWidth().height(54.dp).graphicsLayer { alpha = a; scaleX = s; scaleY = s }.clip(CircleShape).background(fill)
             .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null) { pressed = true; onClick() },
@@ -345,12 +370,78 @@ fun ObTag(text: String, color: Color) {
         modifier = Modifier.clip(CircleShape).background(color.copy(alpha = 0.14f)).padding(horizontal = 8.dp, vertical = 4.dp))
 }
 
+data class OnboardingEffects(
+    val reducedMotion: Boolean = false,
+    val soundEffects: Boolean = true,
+    val haptics: Boolean = true
+)
+
+/** Accès anticipé aux réglages d'accessibilité, avec aperçu immédiat et persistance par le parent. */
+@Composable
+fun OnboardingAccessibilityOptions(
+    effects: OnboardingEffects,
+    accent: Color,
+    onEffectsChange: (OnboardingEffects) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showAccessibilityDialog by remember { mutableStateOf(false) }
+    TextButton(onClick = { showAccessibilityDialog = true }, modifier = modifier) {
+        Text("Accessibilité", color = ObColors.Gray, fontFamily = ObFonts.inter, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+    }
+    if (showAccessibilityDialog) {
+        AlertDialog(
+            onDismissRequest = { showAccessibilityDialog = false },
+            containerColor = ObColors.Surface,
+            titleContentColor = ObColors.Text,
+            textContentColor = ObColors.Gray,
+            title = { Text("Personnalise les effets", fontFamily = ObFonts.inter, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    AccessibilityToggle("Animations réduites", "Transitions et effets visuels plus discrets.", effects.reducedMotion, accent) {
+                        onEffectsChange(effects.copy(reducedMotion = it))
+                    }
+                    AccessibilityToggle("Sons d'interface", "Sons joués pendant l'onboarding.", effects.soundEffects, accent) {
+                        onEffectsChange(effects.copy(soundEffects = it))
+                    }
+                    AccessibilityToggle("Vibrations", "Partage le réglage Retour haptique de NovaStats.", effects.haptics, accent) {
+                        onEffectsChange(effects.copy(haptics = it))
+                    }
+                    Text("Ces préférences sont conservées sur cet appareil.", color = ObColors.Gray2, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAccessibilityDialog = false }) {
+                    Text("Terminé", color = accent, fontFamily = ObFonts.inter, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun AccessibilityToggle(label: String, description: String, checked: Boolean, accent: Color, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(label, color = ObColors.Text, fontFamily = ObFonts.inter, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(description, color = ObColors.Gray, fontFamily = ObFonts.inter, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = accent, checkedTrackColor = accent.copy(alpha = 0.42f))
+        )
+    }
+}
+
 /* ===================================== Apparition ===================================== */
 
 /** Apparition « keynote » : fondu + montée de 18 dp, 450 ms, décalage optionnel. */
 @Composable
 fun Appear(visible: Boolean, delayMs: Int = 0, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    AnimatedVisibility(visible, modifier, enter = fadeIn(tween(450, delayMs, ObEasing)) + slideInVertically(tween(550, delayMs, ObEasing)) { (it * 0.35f).toInt() }, exit = fadeOut(tween(200))) { content() }
+    val reducedMotion = LocalOnboardingReducedMotion.current
+    val enter = if (reducedMotion) fadeIn(tween(80)) else
+        fadeIn(tween(450, delayMs, ObEasing)) + slideInVertically(tween(550, delayMs, ObEasing)) { (it * 0.35f).toInt() }
+    AnimatedVisibility(visible, modifier, enter = enter, exit = fadeOut(tween(if (reducedMotion) 60 else 200))) { content() }
 }
 
 // compat
@@ -359,8 +450,18 @@ fun Appear(visible: Boolean, delayMs: Int = 0, modifier: Modifier = Modifier, co
 /** Séquenceur : renvoie le nombre de « temps » écoulés (0..n) avec [stepMs] entre chaque, après [startMs]. */
 @Composable
 fun rememberBeats(n: Int, startMs: Int = 250, stepMs: Int = 160): Int {
+    val reducedMotion = LocalOnboardingReducedMotion.current
+    val reducedNow by rememberUpdatedState(reducedMotion)
     var beats by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { delay(startMs.toLong()); for (i in 1..n) { beats = i; delay(stepMs.toLong()) } }
+    LaunchedEffect(n, startMs, stepMs) {
+        delay(startMs.toLong())
+        for (i in 1..n) {
+            if (reducedNow) { beats = n; break }
+            beats = i
+            delay(stepMs.toLong())
+        }
+    }
+    LaunchedEffect(reducedMotion) { if (reducedMotion) beats = n }
     return beats
 }
 
@@ -373,11 +474,12 @@ fun rememberBeats(n: Int, startMs: Int = 250, stepMs: Int = 160): Int {
 @Composable
 fun DeviceMockup(theme: NovaTheme, modifier: Modifier = Modifier, rotY: Float = 0f, rotX: Float = 0f, tilt: State<Offset>? = null, ambient: Boolean = true, glow: Boolean = true) {
     val density = LocalDensity.current.density
+    val reducedMotion = LocalOnboardingReducedMotion.current
     Box(
         modifier.aspectRatio(0.49f).graphicsLayer {
             cameraDistance = 16f * density
-            rotationY = rotY + (tilt?.value?.x ?: 0f) * 9f
-            rotationX = rotX - (tilt?.value?.y ?: 0f) * 6f
+            rotationY = if (reducedMotion) 0f else rotY + (tilt?.value?.x ?: 0f) * 9f
+            rotationX = if (reducedMotion) 0f else rotX - (tilt?.value?.y ?: 0f) * 6f
         }
     ) {
         if (glow) Box(Modifier.fillMaxSize().padding(6.dp).graphicsLayer { shadowElevation = 60f; shape = RoundedCornerShape(38.dp); clip = true; ambientShadowColor = theme.primary; spotShadowColor = theme.primary })
@@ -385,7 +487,7 @@ fun DeviceMockup(theme: NovaTheme, modifier: Modifier = Modifier, rotY: Float = 
         Box(Modifier.fillMaxSize().clip(RoundedCornerShape(38.dp)).background(Color(0xFF151518)).border(1.5.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(38.dp)).padding(7.dp)) {
             // Écran
             Box(Modifier.fillMaxSize().clip(RoundedCornerShape(31.dp)).background(theme.background)) {
-                if (ambient) Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0.8f }) { ThemeAmbient(theme, Modifier.fillMaxSize()) }
+                if (ambient && !reducedMotion) Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0.8f }) { ThemeAmbient(theme, Modifier.fillMaxSize()) }
                 Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                     Spacer(Modifier.height(10.dp))
                     // Barre d'état + encoche
@@ -463,7 +565,7 @@ fun HSpace(w: Dp) = Spacer(Modifier.width(w))
 /** Voile plein écran (fondu). */
 @Composable
 fun Veil(visible: Boolean, durationMs: Int = 600, color: Color = Color.Black, modifier: Modifier = Modifier) {
-    val a by animateFloatAsState(if (visible) 1f else 0f, tween(durationMs, easing = ObEasing), label = "veil")
+    val a by animateFloatAsState(if (visible) 1f else 0f, tween(obMotionDuration(durationMs), easing = ObEasing), label = "veil")
     if (a > 0f) Box(modifier.fillMaxSize().graphicsLayer { alpha = a }.background(color))
 }
 
