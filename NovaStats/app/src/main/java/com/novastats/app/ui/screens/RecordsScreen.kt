@@ -1213,7 +1213,8 @@ private fun SuccessiveRelayTimeline(visual: RecordExplainer.SuccessiveVisual, co
                     )
                 }
             }
-            visual.stopper?.let { stopper ->
+            val stopper = visual.stopper
+            if (stopper != null) {
                 Text(if (stopper.direct) "⇢" else "⋯", color = theme.textSecondary, fontWeight = FontWeight.Black, fontSize = 20.sp)
                 Column(
                     Modifier.width(188.dp).clip(RoundedCornerShape(14.dp))
@@ -1230,7 +1231,8 @@ private fun SuccessiveRelayTimeline(visual: RecordExplainer.SuccessiveVisual, co
                     Text(stopper.name ?: "#1 inconnu", color = theme.text, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     stopper.date?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center) }
                 }
-            } ?: if (visual.continuing) {
+            }
+            if (stopper == null && visual.continuing) {
                 Text("→", color = NovaColors.Gold, fontWeight = FontWeight.Black, fontSize = 20.sp)
                 Column(
                     Modifier.width(148.dp).clip(RoundedCornerShape(14.dp)).background(NovaColors.Gold.copy(alpha = 0.12f))
