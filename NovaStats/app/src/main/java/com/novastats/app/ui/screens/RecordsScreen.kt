@@ -1045,6 +1045,122 @@ private fun MostRecordsVictoryRow(
     }
 }
 
+@Composable
+private fun MostConsistentSpotlight(
+    def: RecordDef,
+    name: String,
+    imageUrl: String?,
+    isArtist: Boolean,
+    score: Int,
+    rank: Int?,
+    period: Period?,
+    zoneLabel: String,
+    points: List<RecordExplainer.Point>,
+    color: Color
+) {
+    val theme = Nova.theme
+    val accent = Color(0xFF80AEE8)
+    val glow by rememberInfiniteTransition(label = "consistent-glow").animateFloat(
+        initialValue = 0.10f,
+        targetValue = 0.28f,
+        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+        label = "consistent-rim"
+    )
+    val counter = remember(score) { Animatable(0f) }
+    LaunchedEffect(score) {
+        counter.snapTo(0f)
+        counter.animateTo(score.coerceAtLeast(0).toFloat(), tween(1000))
+    }
+    val runPoints = remember(points) { points.filter { it.highlight } }
+    val runStepByDate = remember(runPoints) { runPoints.mapIndexed { index, point -> point.date to (index + 1) }.toMap() }
+    val bestPosition = runPoints.mapNotNull { it.position }.minOrNull()
+    val rim = Brush.horizontalGradient(
+        listOf(accent.copy(alpha = 0.34f + glow), color.copy(alpha = 0.22f + glow * 0.4f), accent.copy(alpha = 0.30f + glow))
+    )
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+        SectionTitle("🧱 La série de fer", accent)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                .background(Brush.linearGradient(listOf(accent.copy(alpha = 0.18f), theme.surface.copy(alpha = 0.97f), color.copy(alpha = 0.10f))))
+                .border(1.5.dp, rim, RoundedCornerShape(22.dp)).padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 48, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("SÉRIE RECORD · ${zoneLabel.uppercase(Locale.FRANCE)}", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(name, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(period?.label ?: "Cadence non précisée", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                rank?.let {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background((if (it == 1) NovaColors.Gold else accent).copy(alpha = 0.13f)).border(1.dp, (if (it == 1) NovaColors.Gold else accent).copy(alpha = 0.42f), RoundedCornerShape(12.dp)).padding(horizontal = 9.dp, vertical = 6.dp)) {
+                        Text("RANG", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text("#$it", color = if (it == 1) NovaColors.Gold else accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+            Spacer(Modifier.height(13.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(counter.value.toInt().toString(), color = accent, fontWeight = FontWeight.Black, fontSize = 43.sp, lineHeight = 46.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(formatRecordValue(def, period, score.toDouble()).uppercase(Locale.FRANCE), color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                    Text("dans cette zone, sans interruption", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                MostConsistentMetric(runPoints.firstOrNull()?.label ?: "—", "DÉBUT", accent, Modifier.weight(1f))
+                MostConsistentMetric(runPoints.lastOrNull()?.label ?: "—", "FIN", accent, Modifier.weight(1f))
+                MostConsistentMetric(bestPosition?.let { "#$it" } ?: "—", "MEILLEUR RANG", NovaColors.Gold, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(13.dp))
+            Text("TRAJECTOIRE · SÉRIE RECORD EN SURBRILLANCE", color = theme.textSecondary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(7.dp))
+            if (points.isEmpty()) {
+                Text("La trajectoire détaillée n'est pas disponible.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            } else {
+                LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(points, key = { index, point -> "consistent-${point.date}-$index" }) { _, point ->
+                        val inRun = point.highlight
+                        val step = runStepByDate[point.date]
+                        val pointAccent = if (inRun) accent else theme.textSecondary
+                        Column(
+                            Modifier.width(76.dp).clip(RoundedCornerShape(12.dp))
+                                .background(if (inRun) accent.copy(alpha = 0.16f) else theme.surface.copy(alpha = 0.68f))
+                                .border(1.dp, pointAccent.copy(alpha = if (inRun) 0.55f else 0.18f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 6.dp, vertical = 7.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(if (inRun) "SÉRIE · ${step ?: ""}" else "APPARITION", color = pointAccent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(point.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(point.position?.let { "#$it" } ?: "—", color = if (point.position == 1) NovaColors.Gold else if (inRun) accent else theme.text, fontWeight = FontWeight.Black, fontSize = 19.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Les étapes lumineuses composent la plus longue série continue. Une période manquée ou une sortie de la zone la brise.",
+                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 15.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun MostConsistentMetric(value: String, label: String, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(accent.copy(alpha = 0.09f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp)).padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 private fun RecordExplainer.Held.groupForMostRecords(): RecordGroup = RecordCatalog.groupOf[def.id] ?: RecordGroup.TOTALS
 
 /* ================================ 🧐 Page « pourquoi il est là » — spécifique à chaque record ================================ */
@@ -1181,8 +1297,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val artistNoOneRecord = def.id == "MOST_CUMULATIVE_ARTIST_NO1"
             val perfectAllKillRecord = def.id == "MOST_PERFECT_ALL_KILL"
             val mostRecordsRecord = def.id == "MOST_RECORDS"
+            val mostConsistentRecord = def.id == "MOST_CONSISTENT"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord || mostConsistentRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -1405,6 +1522,22 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         if (st == null) {
             item { Text("Reconstruction de l'histoire…", color = theme.textSecondary, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
         } else {
+            if (def.id == "MOST_CONSISTENT") {
+                item(key = "most-consistent-showcase") {
+                    MostConsistentSpotlight(
+                        def = def,
+                        name = name,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        score = row.r.value.toInt().coerceAtLeast(0),
+                        rank = ref.rank,
+                        period = ref.period,
+                        zoneLabel = subLabel ?: "Chart",
+                        points = st.timeline,
+                        color = color
+                    )
+                }
+            }
             if (def.id == "MOST_RECORDS") {
                 item(key = "most-records-showcase") {
                     MostRecordsShowcase(
@@ -1522,7 +1655,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty() && st.presenceVisual == null) item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null && def.id != "MOST_CONSISTENT") item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
