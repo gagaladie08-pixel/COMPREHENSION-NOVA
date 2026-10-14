@@ -1323,6 +1323,7 @@ private fun lifespanDateLabel(period: Period?, iso: String?): String {
         Period.WEEKLY -> "sem. du $fullDate"
         Period.MONTHLY -> date.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE))
         Period.YEARLY -> date.year.toString()
+        Period.GLOBAL -> fullDate
         null -> fullDate
     }
 }
