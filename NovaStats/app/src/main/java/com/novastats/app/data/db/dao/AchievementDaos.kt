@@ -181,6 +181,9 @@ interface HallOfFameDao {
     @Insert suspend fun insertBadge(badge: HallOfFameBadgeEntity): Long
     @Query("SELECT * FROM hall_of_fame WHERE period_type = :period AND entity_type = :entityType ORDER BY entry_date DESC") fun list(period: String, entityType: String): Flow<List<HallOfFameEntity>>
     @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType") suspend fun exists(entityId: Long, entityType: String, period: String, entryType: String): Int
+    /** Événement HoF daté : PAK peut être décroché plusieurs fois au cours d'une même cadence. */
+    @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType AND entry_date = :entryDate")
+    suspend fun existsOnDate(entityId: Long, entityType: String, period: String, entryType: String, entryDate: String): Int
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
     @Query("SELECT * FROM hall_of_fame") suspend fun all(): List<HallOfFameEntity>
     @Query("SELECT * FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType ORDER BY entry_date") suspend fun ofEntity(entityId: Long, entityType: String): List<HallOfFameEntity>
@@ -204,7 +207,7 @@ interface HallOfFameDao {
 interface RecordDao {
     @Insert suspend fun insertAll(rows: List<RecordCacheEntity>)
 
-    /** Top 10 d'un record (avec nom / sous-titre / image de l'entité). Tri décroissant, ou croissant si [asc]. */
+    /** Top [limit] d'un record (nom / sous-titre / image inclus); 10 par défaut, 20 pour la cérémonie PAK. */
     @Query(
         """
         SELECT r.*,
@@ -221,10 +224,10 @@ interface RecordDao {
         WHERE r.record_type = :type AND ((:period IS NULL AND r.period_type IS NULL) OR r.period_type = :period)
           AND r.category = :category AND ((:sub IS NULL AND r.subcategory IS NULL) OR r.subcategory = :sub)
         ORDER BY CASE WHEN :asc THEN r.value END ASC, CASE WHEN :asc THEN NULL ELSE r.value END DESC
-        LIMIT 10
+        LIMIT :limit
         """
     )
-    fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean): Flow<List<RecordRow>>
+    fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean, limit: Int = 10): Flow<List<RecordRow>>
 
     /** 🔍 Recherche d'un titre / artiste / album dans tous les records (nom contenant [q]). */
     @Query(

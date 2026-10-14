@@ -113,24 +113,24 @@ object StartupRepair {
 
                 // Rattrapage idempotent du Perfect All Kill : ajout uniquement des événements absents.
                 // Les snapshots et les autres distinctions ne sont ni effacés ni réattribués.
-                if (!prefs.getBoolean("perfect_all_kill_v1_done", false)) {
+                if (!prefs.getBoolean("perfect_all_kill_v2_done", false)) {
                     try {
-                        RebuildAudit.write(context, "💎 Amorçage ciblé Perfect All Kill depuis les snapshots Daily/Weekly/Monthly/Yearly")
+                        RebuildAudit.write(context, "💎 Rattrapage daté Perfect All Kill depuis tous les snapshots conservés")
                         app.rebuilder.rebuildPerfectAllKillsOnly()
-                        RebuildAudit.write(context, "✅ Perfect All Kill historique et caches HoF dépendants recalculés")
-                        prefs.edit().putBoolean("perfect_all_kill_v1_done", true).apply()
+                        RebuildAudit.write(context, "✅ Événements Perfect All Kill datés et classements dépendants recalculés")
+                        prefs.edit().putBoolean("perfect_all_kill_v2_done", true).apply()
                     } catch (t: Throwable) {
                         RebuildAudit.write(context, "⚠️ Amorçage Perfect All Kill en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }
                 }
 
                 // Le nouveau record démarre depuis l'historique déjà stocké, sans mélanger les cadences.
-                if (!prefs.getBoolean("artist_cumulative_no1_v1_done", false)) {
+                if (!prefs.getBoolean("artist_cumulative_no1_v2_done", false)) {
                     try {
-                        RebuildAudit.write(context, "👑 Amorçage ciblé Most Cumulative #1 par artiste et par chart")
+                        RebuildAudit.write(context, "👑 Mise à niveau ciblée Most Cumulative #1 · Hot 100 et Albums 75 uniquement")
                         app.rebuilder.rebuildArtistCumulativeNo1Only()
-                        RebuildAudit.write(context, "✅ Cache Most Cumulative #1 recalculé pour Daily/Weekly/Monthly et ses trois charts")
-                        prefs.edit().putBoolean("artist_cumulative_no1_v1_done", true).apply()
+                        RebuildAudit.write(context, "✅ Cache Most Cumulative #1 recalculé sans Artist 50, en conservant les cadences séparées")
+                        prefs.edit().putBoolean("artist_cumulative_no1_v2_done", true).apply()
                     } catch (t: Throwable) {
                         RebuildAudit.write(context, "⚠️ Amorçage Most Cumulative #1 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }

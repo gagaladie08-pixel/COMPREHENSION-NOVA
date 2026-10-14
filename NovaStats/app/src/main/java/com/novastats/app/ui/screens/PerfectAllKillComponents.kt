@@ -122,6 +122,40 @@ fun PerfectAllKillTriadPanel(
                 modifier = Modifier.weight(1f)
             )
         }
+        if (!compact && visual.margins.isNotEmpty()) {
+            Spacer(Modifier.height(11.dp))
+            Text("DAUPHIN & ÉCART · CHAQUE CHART SÉPARÉMENT", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(5.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                visual.margins.forEach { margin ->
+                    val chartAccent = when (margin.chartLabel) {
+                        "Hot 100" -> Color(0xFF65C7FF)
+                        "Artist 50" -> accent
+                        else -> Color(0xFFFFC86B)
+                    }
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                            .background(chartAccent.copy(alpha = 0.10f))
+                            .border(1.dp, chartAccent.copy(alpha = 0.28f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 6.dp, vertical = 7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(margin.chartLabel.uppercase(), color = chartAccent, fontWeight = FontWeight.Black, fontSize = 8.sp, maxLines = 1)
+                        Text("#1 ${formatCount(margin.leaderPlays)}", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text(margin.runnerUpName?.let { "#2 $it" } ?: "Pas de #2", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(margin.runnerUpPlays?.let { "${formatCount(it)} éc. #2" } ?: "—", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        Text(
+                            margin.gap?.let { "+${formatCount(it)} d'avance" } ?: "Écart —",
+                            color = chartAccent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(if (compact) 6.dp else 9.dp))
         Text(
             "Trois charts · un artiste · le même snapshot",

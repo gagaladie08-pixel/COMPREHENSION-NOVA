@@ -9,6 +9,7 @@ import com.novastats.app.data.db.entity.CertificationHistoryEntity
 import com.novastats.app.domain.ArtistChartNumberOnes
 import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.Dates
+import com.novastats.app.domain.HallOfFameRules
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
@@ -17,8 +18,8 @@ import com.novastats.app.domain.RecordResult
 import java.time.LocalDate
 
 /**
- * 🏅 Moteur des 33 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
- * et écrit le Top 10 de chaque record dans `records_cache`.
+ * 🏅 Moteur des 34 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
+ * et écrit le Top 10 de chaque record (Top 20 pour Most Perfect All Kill) dans `records_cache`.
  * Tous les records se créent automatiquement (import JSON compris) — aucune saisie manuelle.
  */
 class RecordsEngine(private val db: NovaDatabase) {
@@ -186,12 +187,13 @@ class RecordsEngine(private val db: NovaDatabase) {
         replaceRecordFamiliesAndRefreshPalmares(setOf("MOST_CUMULATIVE_ARTIST_NO1"), out, now)
     }
 
-    /** Actualise uniquement les records Hall of Fame/Global après l'amorçage ciblé de nouvelles distinctions. */
+    /** Actualise uniquement les records HoF/Global/PAK et Most Records après le rattrapage des intronisations. */
     suspend fun rebuildHallOfFameRecordsOnly() {
         val out = ArrayList<RecordCacheEntity>()
         val now = System.currentTimeMillis()
         hallOfFameRecords(out, now)
-        replaceRecordFamiliesAndRefreshPalmares(setOf("MOST_HOF", "MOST_GLOBAL"), out, now)
+        perfectAllKillRecords(out, now)
+        replaceRecordFamiliesAndRefreshPalmares(setOf("MOST_HOF", "MOST_GLOBAL", "MOST_PERFECT_ALL_KILL"), out, now)
     }
 
     /** Remplace les seules familles visées, puis leur agrégat dépendant Most Records. */
@@ -235,6 +237,7 @@ class RecordsEngine(private val db: NovaDatabase) {
         certificationRecords(links, out, now)
         pantheonRecords(out, now)
         hallOfFameRecords(out, now)
+        perfectAllKillRecords(out, now)
         onProgress("Records · séries d'écoute…")
         listeningStreaks(links, out, now)
         onProgress("Records · palmarès…")
@@ -248,7 +251,7 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     /* ------------------------------------------------------------------ */
 
-    /** Cumuls #1 d'artiste par chart — chaque sous-section garde ses propres ancres et son unité. */
+    /** Cumuls #1 d'artiste sur Hot 100 et Albums 75 — chaque sous-section garde ses propres ancres. */
     private fun artistCumulativeNo1Records(
         period: Period,
         seriesByCategory: Map<RecordCategory, Map<Long, List<RecordAppearance>>>,
@@ -259,7 +262,7 @@ class RecordsEngine(private val db: NovaDatabase) {
         if (period !in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY)) return
         val snapshots = artistNumberOneSnapshots(seriesByCategory, links)
         val datesByChart = ArtistChartNumberOnes.cumulativeDates(snapshots)
-        for (chart in ArtistChartNumberOnes.charts) {
+        for (chart in ArtistChartNumberOnes.cumulativeCharts) {
             val results = datesByChart[chart].orEmpty().map { (artistId, dates) ->
                 RecordResult(artistId, dates.size.toDouble(), dates.maxOrNull())
             }
@@ -280,9 +283,8 @@ class RecordsEngine(private val db: NovaDatabase) {
             }
         }
         val hot100 = leaders(RecordCategory.TRACK)
-        val artist50 = leaders(RecordCategory.ARTIST)
         val albums75 = leaders(RecordCategory.ALBUM)
-        val dates = (hot100.keys + artist50.keys + albums75.keys).toSortedSet()
+        val dates = (hot100.keys + albums75.keys).toSortedSet()
         return dates.map { date ->
             val hot100Artists = hot100[date]?.let { trackId ->
                 val credited = links.trackArtists[trackId].orEmpty().ifEmpty {
@@ -290,10 +292,9 @@ class RecordsEngine(private val db: NovaDatabase) {
                 }
                 credited.filterTo(linkedSetOf()) { it in links.activeArtistIds }
             }.orEmpty()
-            val artist50Leader = artist50[date]?.takeIf { it in links.activeArtistIds }
             val albumOwners = albums75[date]?.let { albumId -> links.albumArtist[albumId] }
                 ?.takeIf { it in links.activeArtistIds }?.let(::setOf).orEmpty()
-            ArtistChartNumberOnes.Snapshot(date, hot100Artists, artist50Leader, albumOwners)
+            ArtistChartNumberOnes.Snapshot(date, hot100Artists, artist50LeaderId = null, albums75ArtistIds = albumOwners)
         }
     }
 
@@ -330,20 +331,21 @@ class RecordsEngine(private val db: NovaDatabase) {
     private fun row(type: String, period: Period?, cat: RecordCategory, sub: String?, r: RecordResult, now: Long) =
         RecordCacheEntity(recordType = type, periodType = period?.dbName, category = cat.dbName, subcategory = sub, entityId = r.entityId, value = r.value, valueDate = r.date, extraData = r.extra, calculatedAt = now)
 
-    /** Top 10, en conservant tous les ex æquo à la frontière ; date la plus ancienne pour l'ordre d'affichage. */
-    private fun top(results: List<RecordResult>, asc: Boolean = false): List<RecordResult> {
+    /** Top [limit], en conservant tous les ex æquo à la frontière ; date la plus ancienne pour l'ordre. */
+    private fun top(results: List<RecordResult>, asc: Boolean = false, limit: Int = 10): List<RecordResult> {
         val sorted = if (asc) {
             results.sortedWith(compareBy<RecordResult> { it.value }.thenBy { it.date ?: "~" })
         } else {
             results.sortedWith(compareByDescending<RecordResult> { it.value }.thenBy { it.date ?: "~" })
         }
-        if (sorted.size <= 10) return sorted
-        val cutoff = sorted[9].value
+        if (sorted.size <= limit) return sorted
+        val cutoff = sorted[limit - 1].value
         return sorted.takeWhile { if (asc) it.value <= cutoff else it.value >= cutoff }
     }
 
     private fun emit(out: MutableList<RecordCacheEntity>, type: String, period: Period?, cat: RecordCategory, sub: String?, results: List<RecordResult>, now: Long, asc: Boolean = false) {
-        top(results.filter { it.value > 0 }, asc).forEach { out += row(type, period, cat, sub, it, now) }
+        val limit = if (type == "MOST_PERFECT_ALL_KILL") 20 else 10
+        top(results.filter { it.value > 0 }, asc, limit).forEach { out += row(type, period, cat, sub, it, now) }
     }
 
     /* ---------------- Records par entité (1, 2, 3, 10, 11, 15-20, 22) ---------------- */
@@ -650,6 +652,20 @@ class RecordsEngine(private val db: NovaDatabase) {
             emit(out, "MOST_GLOBAL", null, cat, "ALL_KILL", agg(global.filter { it.entryType == "ALL_KILL" }), now)
             emit(out, "MOST_GLOBAL", null, cat, "LEGENDARY_RUN", agg(global.filter { it.entryType == "LEGENDARY_RUN" }), now)
             emit(out, "MOST_GLOBAL", null, cat, "ALL", agg(global), now)
+        }
+    }
+
+    /** Nombre d'événements PAK distincts par artiste et par cadence — aucune cadence n'est additionnée. */
+    private suspend fun perfectAllKillRecords(out: MutableList<RecordCacheEntity>, now: Long) {
+        val events = db.hallOfFameDao().all()
+            .filter { it.entityType == EntityType.ARTIST && it.entryType == HallOfFameRules.PERFECT_ALL_KILL }
+            .map { ArtistChartNumberOnes.PerfectAllKillEvent(it.entityId, it.periodType, it.entryDate) }
+        for (period in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY)) {
+            val byArtist = ArtistChartNumberOnes.perfectAllKillDates(events, period.dbName)
+            val results = byArtist.map { (artistId, dates) ->
+                RecordResult(artistId, dates.size.toDouble(), dates.maxOrNull())
+            }
+            emit(out, "MOST_PERFECT_ALL_KILL", period, RecordCategory.ARTIST, null, results, now)
         }
     }
 }

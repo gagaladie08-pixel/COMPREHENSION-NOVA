@@ -490,7 +490,8 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
     fun selectCategory(c: RecordCategory) { category = c; sub = def.subs[c]?.firstOrNull() }
 
     LaunchedEffect(def, period, category, sub) {
-        dao.top10(def.id, period?.dbName, category.dbName, sub?.dbName, def.ascending).collect { st.rows = it }
+        val limit = if (def.id == "MOST_PERFECT_ALL_KILL") 20 else 10
+        dao.top10(def.id, period?.dbName, category.dbName, sub?.dbName, def.ascending, limit).collect { st.rows = it }
     }
     val rows = st.rows
     val maxValue = remember(rows) { rows.maxOfOrNull { it.r.value } ?: 0.0 }
@@ -531,6 +532,26 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                 Text("Pas encore de record ici", color = theme.text, fontWeight = FontWeight.SemiBold)
                 Text("Il faut plus d'historique pour cette combinaison (période · section).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
             }
+        } else if (def.id == "MOST_PERFECT_ALL_KILL") {
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+                    SectionTitle("🏛️ CÉRÉMONIE · TOP 20 ${period?.label?.uppercase(Locale.FRANCE).orEmpty()}", NovaColors.Gold)
+                    Text("Les trois premiers sur le podium; les autres événements du classement restent accessibles juste dessous.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            val podiumCount = minOf(3, rows.size)
+            if (podiumCount == 3) item {
+                PerfectAllKillTop20Podium(rows.take(3), def, period, color) { row, rank ->
+                    onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, rank))
+                }
+            }
+            items(rows.size - podiumCount) { offset ->
+                val i = offset + podiumCount
+                val row = rows[i]
+                Box(Modifier.padding(horizontal = 14.dp)) {
+                    RecordEntryRow(i + 1, row, def, period, category, maxValue, color, rows.getOrNull(i + 1)?.r?.value) { onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, i + 1)) }
+                }
+            }
         } else {
             items(rows.size) { i ->
                 val row = rows[i]
@@ -540,6 +561,44 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun PerfectAllKillTop20Podium(
+    rows: List<RecordRow>,
+    def: RecordDef,
+    period: Period?,
+    color: Color,
+    onEntry: (RecordRow, Int) -> Unit
+) {
+    val theme = Nova.theme
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 7.dp).height(166.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        listOf(1, 0, 2).forEach { index ->
+            val row = rows[index]
+            val first = index == 0
+            val medalColor = when (index) { 0 -> NovaColors.Gold; 1 -> NovaColors.Silver; else -> Color(0xFFCD7F32) }
+            Column(
+                Modifier.weight(if (first) 1.15f else 1f)
+                    .height(if (first) 166.dp else if (index == 1) 139.dp else 126.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Brush.verticalGradient(listOf(medalColor.copy(alpha = 0.28f), theme.surface.copy(alpha = 0.94f))))
+                    .border(1.3.dp, medalColor.copy(alpha = 0.58f), RoundedCornerShape(15.dp))
+                    .clickable { onEntry(row, index + 1) }
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(listOf("🥇", "🥈", "🥉")[index], fontSize = if (first) 23.sp else 19.sp)
+                CoverArt(row.imageUrl, row.name ?: "Artiste inconnu", size = if (first) 50 else 42, circle = true)
+                Text(row.name ?: "Inconnu", color = if (first) NovaColors.Gold else theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(formatRecordValue(def, period, row.r.value), color = medalColor, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
+        }
     }
 }
 
@@ -709,6 +768,39 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     var honorShareError by remember(ref) { mutableStateOf(false) }
     var sharingArtistNoOne by remember(ref) { mutableStateOf(false) }
     var artistNoOneShareError by remember(ref) { mutableStateOf(false) }
+    var sharingPakRecord by remember(ref) { mutableStateOf(false) }
+    var pakRecordShareError by remember(ref) { mutableStateOf(false) }
+    var selectedPakEventDate by remember(ref) { mutableStateOf<String?>(null) }
+    var selectedPakEvent by remember(ref) { mutableStateOf<RecordExplainer.PerfectAllKillVisual?>(null) }
+    var loadingPakEvent by remember(ref) { mutableStateOf(false) }
+    var sharingPakEvent by remember(ref) { mutableStateOf(false) }
+    var pakEventShareError by remember(ref) { mutableStateOf(false) }
+
+    LaunchedEffect(story?.perfectAllKillRecordVisual?.dates) {
+        if (selectedPakEventDate == null) selectedPakEventDate = story?.perfectAllKillRecordVisual?.dates?.lastOrNull()
+    }
+    LaunchedEffect(ref, selectedPakEventDate, story?.perfectAllKillRecordVisual?.featuredEvents) {
+        val date = selectedPakEventDate ?: return@LaunchedEffect
+        val recordVisual = story?.perfectAllKillRecordVisual ?: return@LaunchedEffect
+        val preloaded = recordVisual.featuredEvents.firstOrNull { it.dateIso == date }
+        if (preloaded != null) {
+            selectedPakEvent = preloaded
+            loadingPakEvent = false
+        } else {
+            loadingPakEvent = true
+            try {
+                selectedPakEvent = app.recordExplainer.perfectAllKillVisual(
+                    ref.period?.dbName ?: Period.DAILY.dbName, date, row.r.entityId, includeMargins = true
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                selectedPakEvent = null
+            } finally {
+                loadingPakEvent = false
+            }
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
@@ -721,8 +813,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val songReachRecord = def.id in setOf("MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1")
             val honorRecord = def.id == "MOST_HOF" || def.id == "MOST_GLOBAL"
             val artistNoOneRecord = def.id == "MOST_CUMULATIVE_ARTIST_NO1"
+            val perfectAllKillRecord = def.id == "MOST_PERFECT_ALL_KILL"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -836,6 +929,68 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                                     artistNoOneShareError = true
                                 } finally {
                                     sharingArtistNoOne = false
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        story?.perfectAllKillRecordVisual?.let { visual ->
+            val selectedDate = selectedPakEventDate ?: visual.dates.lastOrNull()
+            val event = selectedDate?.let { date ->
+                selectedPakEvent?.takeIf { it.dateIso == date }
+                    ?: visual.featuredEvents.firstOrNull { it.dateIso == date }
+            }
+            item {
+                PerfectAllKillRecordSpotlight(
+                    name = name,
+                    imageUrl = row.imageUrl,
+                    visual = visual,
+                    selectedDate = selectedDate,
+                    selectedEvent = event,
+                    eventLoading = loadingPakEvent,
+                    sharing = sharingPakRecord,
+                    shareError = pakRecordShareError,
+                    sharingEvent = sharingPakEvent,
+                    eventShareError = pakEventShareError,
+                    color = color,
+                    onSelectDate = { selectedPakEventDate = it },
+                    onShareRecord = {
+                        if (!sharingPakRecord) {
+                            sharingPakRecord = true
+                            pakRecordShareError = false
+                            shareScope.launch {
+                                try {
+                                    val file = ShareCards.renderPerfectAllKillRecordCard(
+                                        app, row.r.entityId, name, row.imageUrl, visual, theme
+                                    )
+                                    ShareCards.share(app, file, "Partager ce record PAK")
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    pakRecordShareError = true
+                                } finally {
+                                    sharingPakRecord = false
+                                }
+                            }
+                        }
+                    },
+                    onShareEvent = {
+                        val eventToShare = event
+                        if (eventToShare != null && !sharingPakEvent) {
+                            sharingPakEvent = true
+                            pakEventShareError = false
+                            shareScope.launch {
+                                try {
+                                    val file = ShareCards.renderPerfectAllKillCard(app, eventToShare, theme)
+                                    ShareCards.share(app, file, "Partager l'événement Perfect All Kill")
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    pakEventShareError = true
+                                } finally {
+                                    sharingPakEvent = false
                                 }
                             }
                         }
@@ -1850,7 +2005,165 @@ private fun SongReachSpotlight(
     }
 }
 
-/** 💎 Trois cumuls indépendants, rival et historique des périodes #1 pour le record artiste. */
+/** 💎 Cérémonie Most Perfect All Kill : classement par cadence, rival, éphéméride et trinité partageable. */
+@Composable
+private fun PerfectAllKillRecordSpotlight(
+    name: String,
+    imageUrl: String?,
+    visual: RecordExplainer.PerfectAllKillRecordVisual,
+    selectedDate: String?,
+    selectedEvent: RecordExplainer.PerfectAllKillVisual?,
+    eventLoading: Boolean,
+    sharing: Boolean,
+    shareError: Boolean,
+    sharingEvent: Boolean,
+    eventShareError: Boolean,
+    color: Color,
+    onSelectDate: (String) -> Unit,
+    onShareRecord: () -> Unit,
+    onShareEvent: () -> Unit
+) {
+    val theme = Nova.theme
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(color.copy(alpha = 0.24f), theme.surface.copy(alpha = 0.98f), NovaColors.Gold.copy(alpha = 0.10f))))
+            .border(1.5.dp, Brush.horizontalGradient(listOf(color.copy(alpha = 0.72f), NovaColors.Gold.copy(alpha = 0.48f), color.copy(alpha = 0.50f))), shape)
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CoverArt(imageUrl, name, size = 56, circle = true)
+            Column(Modifier.weight(1f)) {
+                Text("MOST PERFECT ALL KILL", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, letterSpacing = 0.7.sp)
+                Text("${visual.period.label} · trois charts à la fois", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text("${visual.dates.size} événement${if (visual.dates.size == 1) "" else "s"} conservé${if (visual.dates.size == 1) "" else "s"}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("#${visual.rank}", color = if (visual.rank == 1) NovaColors.Gold else color, fontWeight = FontWeight.Black, fontSize = 26.sp)
+                if (visual.tiedAtTop > 1) Text("${visual.tiedAtTop} ex æquo", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 11.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.12f)).padding(9.dp)) {
+                Text("TOTAL · ${visual.period.label.uppercase(Locale.FRANCE)}", color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                Text("${visual.score} PAK", color = theme.text, fontWeight = FontWeight.Black, fontSize = 20.sp)
+            }
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(NovaColors.Gold.copy(alpha = 0.10f)).padding(9.dp)) {
+                Text("ÉCART AU RIVAL", color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                val rival = visual.rival
+                Text(
+                    rival?.let { "${kotlin.math.abs(visual.score - it.score)} événement${if (kotlin.math.abs(visual.score - it.score) == 1) "" else "s"}" } ?: "—",
+                    color = theme.text,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 18.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        visual.rival?.let { rival ->
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(theme.background.copy(alpha = 0.46f))
+                    .border(1.dp, NovaColors.Gold.copy(alpha = 0.24f), RoundedCornerShape(13.dp)).padding(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CoverArt(imageUrl, name, size = 40, circle = true)
+                Column(Modifier.weight(1f)) {
+                    Text("#${visual.rank} · $name", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${visual.score} PAK ${visual.period.label.lowercase()}", color = color, style = MaterialTheme.typography.labelSmall)
+                }
+                Text(if (rival.tied) "🤝" else "VS", color = NovaColors.Gold, fontWeight = FontWeight.Black)
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                    Text("#${rival.rank} · ${rival.name}", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+                    Text("${rival.score} PAK ${visual.period.label.lowercase()}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                }
+                CoverArt(rival.imageUrl, rival.name, size = 40, circle = true)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        SectionTitle("ÉPHÉMÉRIDE · CHAQUE DATE PAK", color)
+        Text("Choisis une date pour revoir les trois éléments n°1 et leur dauphin dans chaque chart.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+        if (visual.dates.isNotEmpty()) {
+            LazyRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                items(visual.dates) { date ->
+                    val selected = date == selectedDate
+                    val parts = date.split('-')
+                    val dateLabel = if (parts.size == 3) when (visual.period) {
+                        Period.DAILY, Period.WEEKLY -> "${parts[2]}/${parts[1]}"
+                        Period.MONTHLY -> "${parts[1]}/${parts[0]}"
+                        Period.YEARLY -> parts[0]
+                        Period.GLOBAL -> date
+                    } else date
+                    Text(
+                        dateLabel,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) color.copy(alpha = 0.28f) else theme.background.copy(alpha = 0.55f))
+                            .border(1.dp, if (selected) color else theme.textSecondary.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
+                            .clickable { onSelectDate(date) }.padding(horizontal = 9.dp, vertical = 7.dp),
+                        color = if (selected) color else theme.textSecondary,
+                        fontWeight = if (selected) FontWeight.Black else FontWeight.Medium,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+            visual.heatmap.takeLast(56).chunked(7).forEach { week ->
+                Spacer(Modifier.height(4.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    week.forEach { cell ->
+                        val selected = cell.dateIso == selectedDate
+                        val fill = if (cell.isPak) {
+                            Brush.verticalGradient(listOf(color.copy(alpha = if (selected) 0.96f else 0.67f), NovaColors.Gold.copy(alpha = if (selected) 0.80f else 0.32f)))
+                        } else {
+                            Brush.verticalGradient(listOf(theme.background.copy(alpha = 0.65f), theme.background.copy(alpha = 0.65f)))
+                        }
+                        Box(
+                            Modifier.weight(1f).height(27.dp).clip(RoundedCornerShape(6.dp))
+                                .background(fill)
+                                .border(1.dp, if (selected) Color.White.copy(alpha = 0.85f) else color.copy(alpha = if (cell.isPak) 0.32f else 0.12f), RoundedCornerShape(6.dp))
+                                .clickable(enabled = cell.isPak) { onSelectDate(cell.dateIso) },
+                            contentAlignment = Alignment.Center
+                        ) { Text(cell.dateIso.takeLast(2), color = if (cell.isPak) Color.White else theme.textSecondary.copy(alpha = 0.55f), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall) }
+                    }
+                    repeat(7 - week.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            Text("Case lumineuse = PAK · case sombre = snapshot sans PAK.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+        } else {
+            Text("Aucune date PAK disponible pour l'instant.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+        }
+
+        Spacer(Modifier.height(11.dp))
+        if (eventLoading) {
+            Text("⏳ Chargement des trois charts pour cette date…", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else if (selectedEvent != null) {
+            SectionTitle("LES TROIS PILIERS · ${selectedEvent.dateLabel.uppercase(Locale.FRANCE)}", color)
+            PerfectAllKillTriadPanel(
+                visual = selectedEvent,
+                accent = color,
+                sharing = sharingEvent,
+                shareError = eventShareError,
+                onShare = onShareEvent
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.15f))
+                .border(1.dp, color.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
+                .clickable(enabled = !sharing, onClick = onShareRecord).padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(if (sharing) "⏳ Préparation de la carte…" else "✦ PARTAGER LA FICHE · ${visual.period.label.uppercase(Locale.FRANCE)} ✦", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+        }
+        if (shareError) Text("Impossible de préparer la carte. Réessaie.", color = Color(0xFFFF6B6B), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** 💎 Deux cumuls indépendants, rival et historique des périodes #1 pour le record artiste. */
 @Composable
 private fun ArtistCumulativeNoOneSpotlight(
     name: String,
@@ -1864,7 +2177,6 @@ private fun ArtistCumulativeNoOneSpotlight(
     val theme = Nova.theme
     val chartColors = mapOf(
         "HOT_100" to Color(0xFF62C8FF),
-        "ARTIST_50" to Color(0xFFB39AFF),
         "ALBUMS_75" to Color(0xFFFFC76A)
     )
     val unit = when (visual.period) {
@@ -1895,7 +2207,7 @@ private fun ArtistCumulativeNoOneSpotlight(
             }
         }
         Spacer(Modifier.height(12.dp))
-        SectionTitle("LES TROIS PILIERS · UNITÉS SÉPARÉES", color)
+        SectionTitle("DEUX CHARTS · COMPTEURS SÉPARÉS", color)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             visual.pillars.forEach { pillar ->
                 val accent = chartColors[pillar.key] ?: color
@@ -1910,7 +2222,7 @@ private fun ArtistCumulativeNoOneSpotlight(
                     Text(pillar.count.toString(), color = theme.text, fontWeight = FontWeight.Black, fontSize = 22.sp)
                     Text(unit, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                     Spacer(Modifier.height(5.dp))
-                    CoverArt(pillar.latestImageUrl, pillar.latestNumberOne ?: pillar.label, size = 38, circle = pillar.key == "ARTIST_50")
+                    CoverArt(pillar.latestImageUrl, pillar.latestNumberOne ?: pillar.label, size = 38)
                     Text(pillar.latestNumberOne ?: "Aucun #1", color = theme.text, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(pillar.latestDate ?: "—", color = accent, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
                 }
@@ -1995,6 +2307,44 @@ private fun ArtistCumulativeNoOneSpotlight(
             Text("${visual.period.label} · $from → $to · traits = chart où l'artiste était #1", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
         } else {
             Text("Aucun snapshot historique disponible pour cette cadence.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.height(12.dp))
+        SectionTitle("ÉLÉMENTS CONTRIBUTEURS · PÉRIODE #1 (${visual.contributions.size})", color)
+        Text("Titres/artistes crédités au Hot 100 et albums/propriétaires des Albums 75, datés selon la cadence sélectionnée.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+        if (visual.contributions.isEmpty()) {
+            Text("Aucun élément #1 conservé pour cette cadence.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 7.dp))
+        } else {
+            LazyRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                items(visual.contributions) { contribution ->
+                    Column(
+                        Modifier.width(218.dp).clip(RoundedCornerShape(13.dp)).background(theme.background.copy(alpha = 0.50f))
+                            .border(1.dp, color.copy(alpha = 0.26f), RoundedCornerShape(13.dp)).padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Text(contribution.dateLabel, color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        contribution.hot100Track?.let { track ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                CoverArt(track.imageUrl, track.name, size = 40)
+                                Column(Modifier.weight(1f)) {
+                                    Text("🔥 HOT 100 · TITRE #1", color = chartColors.getValue("HOT_100"), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                                    Text(track.name, color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("Crédit : ${track.creditedArtists ?: name}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                        contribution.albums75Album?.let { album ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                CoverArt(album.imageUrl, album.name, size = 40)
+                                Column(Modifier.weight(1f)) {
+                                    Text("💿 ALBUMS 75 · ALBUM #1", color = chartColors.getValue("ALBUMS_75"), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                                    Text(album.name, color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("Propriétaire : ${album.creditedArtists ?: name}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 7.dp)) {
             chartColors.forEach { (key, accent) ->
@@ -2790,6 +3140,7 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
             "MOST_RECORDS" -> "$n record${if (n > 1) "s" else ""}"
             "MOST_CERTIFICATIONS" -> "$n certif${if (n > 1) "s" else ""}"
             "MOST_HOF", "MOST_GLOBAL" -> "$n entrée${if (n > 1) "s" else ""}"
+            "MOST_PERFECT_ALL_KILL" -> "$n Perfect All Kill"
             "MOST_SUCCESSIVE_1" -> "$n éléments distincts au #1"
             "MOST_SIMULTANEOUS" -> "$n simultané${if (n > 1) "s" else ""}"
             else -> "$n"

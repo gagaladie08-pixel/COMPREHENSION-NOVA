@@ -31,9 +31,25 @@ class ArtistChartNumberOnesTest {
 
         val counts = ArtistChartNumberOnes.cumulativeDates(snapshots)
         assertEquals(setOf("2026-10-01"), counts.getValue(ArtistChartNumberOnes.HOT_100).getValue(1L))
-        assertEquals(setOf("2026-10-01"), counts.getValue(ArtistChartNumberOnes.ARTIST_50).getValue(1L))
+        assertTrue(ArtistChartNumberOnes.ARTIST_50 !in counts)
         assertEquals(setOf("2026-10-01"), counts.getValue(ArtistChartNumberOnes.ALBUMS_75).getValue(1L))
         assertEquals(setOf("2026-10-01", "2026-10-02"), counts.getValue(ArtistChartNumberOnes.HOT_100).getValue(2L))
         assertTrue(counts.getValue(ArtistChartNumberOnes.ALBUMS_75).getValue(2L).size == 1)
+    }
+
+    @Test
+    fun perfectAllKillDatesAreIdempotentAndCadenceSpecific() {
+        val events = listOf(
+            ArtistChartNumberOnes.PerfectAllKillEvent(7L, "DAILY", "2026-10-01"),
+            ArtistChartNumberOnes.PerfectAllKillEvent(7L, "DAILY", "2026-10-01"),
+            ArtistChartNumberOnes.PerfectAllKillEvent(7L, "DAILY", "2026-10-02"),
+            ArtistChartNumberOnes.PerfectAllKillEvent(7L, "WEEKLY", "2026-10-01"),
+            ArtistChartNumberOnes.PerfectAllKillEvent(8L, "DAILY", "2026-10-01")
+        )
+        val daily = ArtistChartNumberOnes.perfectAllKillDates(events, "DAILY")
+        val weekly = ArtistChartNumberOnes.perfectAllKillDates(events, "WEEKLY")
+        assertEquals(setOf("2026-10-01", "2026-10-02"), daily.getValue(7L))
+        assertEquals(setOf("2026-10-01"), weekly.getValue(7L))
+        assertEquals(setOf("2026-10-01"), daily.getValue(8L))
     }
 }

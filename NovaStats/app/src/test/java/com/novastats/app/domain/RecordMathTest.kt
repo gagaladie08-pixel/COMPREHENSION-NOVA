@@ -12,8 +12,8 @@ class RecordMathTest {
     private fun s(vararg p: Pair<Int, Int>) = p.map { (idx, pos) -> RecordAppearance(idx, "2026-01-%02d".format(idx + 1), pos, 10) }
 
     @Test
-    fun `catalogue expose les 33 records`() {
-        assertEquals(33, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue expose les 34 records`() {
+        assertEquals(34, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertTrue(RecordCatalog.ALL.all { it.categories.isNotEmpty() })
         // sous-sections uniquement pour des catégories proposées
         RecordCatalog.ALL.forEach { d -> d.subs.keys.forEach { c -> assertTrue("${d.id}/$c", c in d.categories) } }

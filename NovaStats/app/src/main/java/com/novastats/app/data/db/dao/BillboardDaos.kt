@@ -257,6 +257,16 @@ interface BillboardDao {
     )
     suspend fun numberOneAlbum(type: String, date: String): Long?
 
+    /** Données de tête et écoutes pour comparer le #1 au dauphin de chaque pilier PAK. */
+    @Query("SELECT st.track_id AS entity_id, st.play_count AS play_count, t.title AS name FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id JOIN tracks t ON t.track_id = st.track_id WHERE s.type = :type AND s.date = :date AND st.position = 1 LIMIT 1")
+    suspend fun numberOneTrackDetails(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.artist_id AS entity_id, sa.play_count AS play_count, a.name AS name FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN artists a ON a.artist_id = sa.artist_id WHERE s.type = :type AND s.date = :date AND sa.position = 1 LIMIT 1")
+    suspend fun numberOneArtistDetails(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.album_id AS entity_id, sa.play_count AS play_count, al.title AS name FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN albums al ON al.album_id = sa.album_id WHERE s.type = :type AND s.date = :date AND sa.position = 1 LIMIT 1")
+    suspend fun numberOneAlbumDetails(type: String, date: String): RunnerUpRow?
+
     /* ===== 🏛️ Premium : dauphin (#2) d'un snapshot + résolution de noms (Antichambre / domination) ===== */
 
     @Query("SELECT st.track_id AS entity_id, st.play_count AS play_count, t.title AS name FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id JOIN tracks t ON t.track_id = st.track_id WHERE s.type = :type AND s.date = :date AND st.position = 2 LIMIT 1")

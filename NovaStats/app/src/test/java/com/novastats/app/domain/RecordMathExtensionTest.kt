@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Règles des records 25-33 + Fastest Rise (exemples du cahier des charges). */
+/** Règles des records 25-34 + Fastest Rise (exemples du cahier des charges). */
 class RecordMathExtensionTest {
 
     private fun a(idx: Int, pos: Int) = RecordAppearance(idx, "d$idx", pos, 1)
@@ -93,8 +93,8 @@ class RecordMathExtensionTest {
     }
 
     @Test
-    fun `catalogue 33 records et groupes`() {
-        assertEquals(33, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue 34 records et groupes`() {
+        assertEquals(34, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertEquals(RecordGroup.DURATION, RecordCatalog.groupOf["MOST_CUMULATIVE_TOP5"])
         assertTrue(RecordCatalog.byId("MOST_CUMULATIVE_TOP5")!!.title.contains("Top 5"))
         val cumulativeNoOne = RecordCatalog.byId("MOST_CUMULATIVE_ARTIST_NO1")!!
@@ -102,9 +102,17 @@ class RecordMathExtensionTest {
         assertEquals(listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY), cumulativeNoOne.periods)
         assertEquals(listOf(RecordCategory.ARTIST), cumulativeNoOne.categories)
         assertEquals(
-            listOf(ArtistChartNumberOnes.HOT_100, ArtistChartNumberOnes.ARTIST_50, ArtistChartNumberOnes.ALBUMS_75),
+            listOf(ArtistChartNumberOnes.HOT_100, ArtistChartNumberOnes.ALBUMS_75),
             cumulativeNoOne.subs.getValue(RecordCategory.ARTIST).map { it.dbName }
         )
+        assertTrue(ArtistChartNumberOnes.ARTIST_50 !in cumulativeNoOne.subs.getValue(RecordCategory.ARTIST).map { it.dbName })
+        val perfectAllKill = RecordCatalog.byId("MOST_PERFECT_ALL_KILL")!!
+        assertEquals(34, perfectAllKill.number)
+        assertEquals(RecordUnit.COUNT, perfectAllKill.unit)
+        assertEquals(listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY), perfectAllKill.periods)
+        assertEquals(listOf(RecordCategory.ARTIST), perfectAllKill.categories)
+        assertEquals(RecordGroup.TOTALS, RecordCatalog.groupOf[perfectAllKill.id])
+        assertTrue(perfectAllKill.id in RecordCatalog.MAJOR)
         assertEquals(RecordGroup.DOMINATION, RecordCatalog.groupOf["MOST_SONGS_TOP5"])
         assertEquals(RecordUnit.COUNT, RecordCatalog.byId("MOST_SONGS_TOP5")!!.unit)
         assertEquals(RecordGroup.PALMARES, RecordCatalog.groupOf["MOST_RECORDS"])

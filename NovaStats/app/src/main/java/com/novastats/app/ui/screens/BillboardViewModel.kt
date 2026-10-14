@@ -13,6 +13,7 @@ import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.domain.ChartHistory
 import com.novastats.app.domain.ChartHistoryStats
 import com.novastats.app.domain.Dates
+import com.novastats.app.domain.HallOfFameRules
 import com.novastats.app.domain.Movement
 import com.novastats.app.domain.Period
 import kotlinx.coroutines.Dispatchers
@@ -247,7 +248,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
             db.artistDao().byIds(listOf(id)).firstOrNull()?.pantheonStatus
                 ?.let { com.novastats.app.domain.PantheonStatus.fromDb(it) }?.let { "${it.emoji} ${it.label}" }
         else null
-        val hofLines = db.hallOfFameDao().ofEntity(id, type).map { e ->
+        val hofEntries = db.hallOfFameDao().ofEntity(id, type)
+        val hofLines = hofEntries.filterNot { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }.map { e ->
             when (e.entryType) {
                 "DIRECT_DEBUT" -> "⚡ Entrée directe"
                 "LONG_RUN" -> "👑 Long règne (${e.weeksAt1} ${BillboardDates.unitLabel(Period.WEEKLY, e.weeksAt1)})"
@@ -255,7 +257,13 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                 "ALL_KILL" -> "💥 All-kill"
                 else -> "🌟 Règne légendaire"
             } + " — ${e.periodType}"
-        }
+        } + hofEntries.filter { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }
+            .groupBy { it.periodType }
+            .toSortedMap()
+            .map { (periodType, events) ->
+                val periodLabel = Period.entries.firstOrNull { it.dbName == periodType }?.frLabel ?: periodType
+                "💠 Perfect All Kill · $periodLabel — ${events.size} événement${if (events.size == 1) "" else "s"}"
+            }
         return EntityExtras(certLines, pantheonLabel, hofLines)
     }
 

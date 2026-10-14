@@ -64,8 +64,12 @@ class BillboardEngine(private val db: NovaDatabase) {
         collectNewInductions: Boolean = false
     ): List<StatsRebuilder.Achievement> {
         val first = db.dailyPlayDao().firstDate()?.let { Dates.parse(it) } ?: return emptyList()
+        fun inductionKey(entry: HallOfFameEntity) = listOf(
+            entry.entityType, entry.entityId.toString(), entry.periodType, entry.entryType,
+            entry.entryDate.takeIf { entry.entryType == HallOfFameRules.PERFECT_ALL_KILL }.orEmpty()
+        )
         val previousHof = if (collectNewInductions) db.hallOfFameDao().all()
-            .mapTo(mutableSetOf()) { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }
+            .mapTo(mutableSetOf(), ::inductionKey)
         else emptySet()
         for (period in listOf(Period.WEEKLY, Period.MONTHLY, Period.YEARLY, Period.GLOBAL, Period.DAILY)) {
             val latest = BillboardDates.latest(period, today)
@@ -84,7 +88,7 @@ class BillboardEngine(private val db: NovaDatabase) {
         if (!collectNewInductions) return emptyList()
         val newInductions = mutableListOf<StatsRebuilder.Achievement>()
         for (entry in db.hallOfFameDao().all()) {
-            val key = listOf(entry.entityType, entry.entityId.toString(), entry.periodType, entry.entryType)
+            val key = inductionKey(entry)
             if (key in previousHof) continue
             val name = when (entry.entityType) {
                 EntityType.ALBUM -> db.albumDao().getById(entry.entityId)?.title
@@ -140,7 +144,7 @@ class BillboardEngine(private val db: NovaDatabase) {
             if (candidates.isNotEmpty()) db.withTransaction {
                 for ((artistId, date) in candidates) {
                     val hofDao = db.hallOfFameDao()
-                    if (hofDao.exists(artistId, EntityType.ARTIST, period.dbName, HallOfFameRules.PERFECT_ALL_KILL) > 0) continue
+                    if (hofDao.existsOnDate(artistId, EntityType.ARTIST, period.dbName, HallOfFameRules.PERFECT_ALL_KILL, date) > 0) continue
                     val hofId = hofDao.insert(
                         HallOfFameEntity(
                             entityId = artistId,
@@ -382,8 +386,12 @@ class BillboardEngine(private val db: NovaDatabase) {
         plays: Int,
         reignEnd: String? = iso
     ) {
-        if (db.hallOfFameDao().exists(id, entityType, periodType, entryType) > 0) return
-        val hofId = db.hallOfFameDao().insert(
+        val hofDao = db.hallOfFameDao()
+        val exists = if (entryType == HallOfFameRules.PERFECT_ALL_KILL)
+            hofDao.existsOnDate(id, entityType, periodType, entryType, iso) > 0
+        else hofDao.exists(id, entityType, periodType, entryType) > 0
+        if (exists) return
+        val hofId = hofDao.insert(
             HallOfFameEntity(
                 entityId = id, entityType = entityType, periodType = periodType, entryType = entryType,
                 entryDate = iso, reignStart = reignStart, reignEnd = reignEnd, weeksAt1 = weeksAt1, playCountAtEntry = plays

@@ -446,7 +446,21 @@ private fun ArtistPopup(artistId: Long, period: Period, onDismiss: () -> Unit) {
         }
         if (hof.isNotEmpty()) {
             PopupSection("🏛️ Hall of Fame", theme.glowSecondary)
-            hof.forEach { e -> PopupInfoRow(hofBadgeLabel(e.entryType) + " · " + e.periodType.lowercase().replaceFirstChar { it.uppercase() }, formatIso(e.entryDate)) }
+            hof.filterNot { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }.forEach { e ->
+                PopupInfoRow(hofBadgeLabel(e.entryType) + " · " + e.periodType.lowercase().replaceFirstChar { it.uppercase() }, formatIso(e.entryDate))
+            }
+            hof.filter { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }
+                .groupBy { it.periodType }
+                .entries
+                .sortedBy { group -> Period.entries.indexOfFirst { it.dbName == group.key }.takeIf { it >= 0 } ?: Int.MAX_VALUE }
+                .forEach { (periodType, events) ->
+                    val periodLabel = Period.entries.firstOrNull { it.dbName == periodType }?.frLabel ?: periodType
+                    val firstDate = events.minOf { it.entryDate }
+                    val lastDate = events.maxOf { it.entryDate }
+                    val datesLabel = if (events.size == 1) formatIso(firstDate)
+                    else "${events.size} dates · ${formatIso(firstDate)} → ${formatIso(lastDate)}"
+                    PopupInfoRow("💠 Perfect All Kill · $periodLabel", datesLabel)
+                }
         }
         PopupSection("📊 Positions par période", theme.glowSecondary)
 PositionsTable(ranks) { per ->
@@ -947,7 +961,7 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
         val byDate = appearances.associateBy { it.date }
         // 🥈 Dauphin (#2) de chaque intronisation — marge de domination
         val runners = entries.associate { e ->
-            e.hofId to runCatching {
+            e.hofId to if (e.entryType == HallOfFameRules.PERFECT_ALL_KILL) null else runCatching {
                 val snap = when (e.entryType) {
                     HallOfFameRules.LEGENDARY_RUN -> Period.WEEKLY.dbName
                     HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL -> Period.DAILY.dbName
@@ -974,7 +988,9 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
         val pantheon = if (entityType == EntityType.ARTIST) db.pantheonDao().forArtist(entityId)?.currentStatus else null
         val numberOnes = runCatching { db.recordDao().heldNumberOnes(entityType, entityId) }.getOrDefault(emptyList())
         val perfectAllKills = mutableMapOf<Long, RecordExplainer.PerfectAllKillVisual>()
-        for (entry in entries.filter { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }) {
+        // La frise du record Most Perfect All Kill garde toutes les dates et charge leur détail à la demande.
+        // Le popup HoF n'instancie que les douze dernières trinités pour rester réactif même sur un long historique.
+        for (entry in entries.filter { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }.takeLast(12)) {
             runCatching { app.recordExplainer.perfectAllKillVisual(entry.periodType, entry.entryDate, entityId) }
                 .getOrNull()?.let { perfectAllKills[entry.hofId] = it }
         }
@@ -1061,6 +1077,10 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
         }
 
         PopupSection("🎊 Historique complet de l'entrée", color)
+        val pakEntryCount = det.entries.count { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }
+        if (pakEntryCount > det.perfectAllKills.size) {
+            Text("${det.perfectAllKills.size} dernières trinités détaillées ici; les ${pakEntryCount - det.perfectAllKills.size} dates plus anciennes restent dans l'historique et se consultent dans le record Most Perfect All Kill.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+        }
         det.entries.sortedBy { it.entryDate }.forEach { e ->
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Text("${hofBadgeLabel(e.entryType)} · ${e.periodType.lowercase().replaceFirstChar { it.uppercase() }}", color = hofBadgeColor(e.entryType), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
@@ -1088,7 +1108,10 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
                                 pakShareError = false
                                 pakShareScope.launch {
                                     try {
-                                        val file = ShareCards.renderPerfectAllKillCard(app, pak, theme)
+                                        val detailedPak = app.recordExplainer.perfectAllKillVisual(
+                                            pak.periodType, pak.dateIso, pak.artistId, includeMargins = true
+                                        ) ?: pak
+                                        val file = ShareCards.renderPerfectAllKillCard(app, detailedPak, theme)
                                         ShareCards.share(app, file, "Partager l'affiche Perfect All Kill")
                                     } catch (cancelled: kotlinx.coroutines.CancellationException) {
                                         throw cancelled
