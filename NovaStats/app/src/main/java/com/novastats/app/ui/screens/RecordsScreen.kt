@@ -1,6 +1,7 @@
 package com.novastats.app.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -523,7 +524,11 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                     SegmentedRows(subs.map { it.label }, subs.indexOf(sub), color) { sub = subs[it] }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text("Appuie sur une ligne pour voir pourquoi l'élément est là.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Text(
+                    if (def.id == "MOST_RECORDS") "Ouvre une ligne pour voir son palmarès détaillé, organisé par famille puis par record."
+                    else "Appuie sur une ligne pour voir pourquoi l'élément est là.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
             }
         }
         if (rows.isEmpty()) item {
@@ -741,6 +746,307 @@ private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Pe
     }
 }
 
+/* ================================ 🏆 Galerie Most Records ================================ */
+
+private data class MostRecordsRecordBundle(
+    val def: RecordDef,
+    val group: RecordGroup,
+    val held: List<RecordExplainer.Held>
+)
+
+private data class MostRecordsFamilyBundle(
+    val group: RecordGroup,
+    val records: List<MostRecordsRecordBundle>,
+    val wins: Int
+)
+
+private fun mostRecordsSubLabel(entry: RecordExplainer.Held): String? =
+    entry.def.subs[entry.category]?.firstOrNull { it.dbName == entry.sub }?.label
+        ?: entry.sub?.takeIf { it.isNotBlank() && it != "ALL" }
+            ?.lowercase(Locale.FRANCE)?.replace('_', ' ')
+            ?.replaceFirstChar { it.uppercase() }
+
+private fun mostRecordsEntrySearchText(entry: RecordExplainer.Held): String = listOfNotNull(
+    entry.def.title,
+    entry.def.description,
+    entry.def.id,
+    entry.period?.frLabel,
+    entry.category.label,
+    mostRecordsSubLabel(entry),
+    entry.row.extraData
+).joinToString(" ")
+
+@Composable
+private fun MostRecordsShowcase(
+    score: Int,
+    rank: Int?,
+    recordCount: Int,
+    familyCount: Int,
+    sharedCount: Int,
+    signature: MostRecordsRecordBundle?,
+    color: Color
+) {
+    val theme = Nova.theme
+    val glow by rememberInfiniteTransition(label = "most-records-glow").animateFloat(
+        initialValue = 0.16f,
+        targetValue = 0.36f,
+        animationSpec = infiniteRepeatable(tween(1800), RepeatMode.Reverse),
+        label = "most-records-rim"
+    )
+    val counter = remember(score) { Animatable(0f) }
+    LaunchedEffect(score) {
+        counter.snapTo(0f)
+        counter.animateTo(score.toFloat(), tween(1050))
+    }
+    val goldRim = Brush.horizontalGradient(
+        listOf(NovaColors.Gold.copy(alpha = 0.40f + glow), color.copy(alpha = 0.30f + glow * 0.55f), NovaColors.Gold.copy(alpha = 0.38f + glow))
+    )
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+        SectionTitle("🏆 La galerie des records", NovaColors.Gold)
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp))
+                .background(Brush.linearGradient(listOf(color.copy(alpha = 0.24f), theme.surface.copy(alpha = 0.97f), NovaColors.Gold.copy(alpha = 0.13f))))
+                .border(1.5.dp, goldRim, RoundedCornerShape(25.dp)).padding(15.dp)
+        ) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 8.dp).size(104.dp).clip(CircleShape)
+                    .background(Brush.radialGradient(listOf(NovaColors.Gold.copy(alpha = glow * 0.50f), color.copy(alpha = 0.06f), Color.Transparent)))
+            )
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("PALMARÈS D'ÉLITE", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.5.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Une collection de premières places", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(3.dp))
+                        Text("Chaque victoire correspond à un classement détenu.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("🏆", fontSize = 39.sp, modifier = Modifier.padding(start = 8.dp))
+                }
+                Spacer(Modifier.height(13.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(counter.value.toInt().toString(), color = NovaColors.Gold, fontWeight = FontWeight.Black, fontSize = 43.sp, lineHeight = 46.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("PREMIÈRES PLACES DÉTENUES", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                        Text("record × période × section × sous-catégorie", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    rank?.let {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(NovaColors.Gold.copy(alpha = 0.12f)).border(1.dp, NovaColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                            Text("RANG", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                            Text("#$it", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    MostRecordsStatPill(recordCount.toString(), "records distincts", color, Modifier.weight(1f))
+                    MostRecordsStatPill(familyCount.toString(), "familles", NovaColors.Gold, Modifier.weight(1f))
+                    MostRecordsStatPill(sharedCount.toString(), "ex æquo", theme.textSecondary, Modifier.weight(1f))
+                }
+                signature?.let { best ->
+                    Spacer(Modifier.height(11.dp))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.background.copy(alpha = 0.32f))
+                            .border(1.dp, NovaColors.Gold.copy(alpha = 0.20f), RoundedCornerShape(14.dp)).padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("✦", color = NovaColors.Gold, fontSize = 21.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("RECORD SIGNATURE", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, letterSpacing = 0.8.sp)
+                            Text("${best.def.emoji} ${best.def.title}", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text("${best.held.size} #1", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            "Une égalité compte comme une première place partagée.",
+            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun MostRecordsStatPill(value: String, label: String, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(13.dp)).background(accent.copy(alpha = 0.09f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(13.dp)).padding(horizontal = 6.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+        Text(label.uppercase(Locale.FRANCE), color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun MostRecordsFilters(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    selectedFamily: RecordGroup?,
+    onFamilySelected: (RecordGroup?) -> Unit,
+    familyCounts: Map<RecordGroup, Int>,
+    visibleWinCount: Int,
+    visibleRecordCount: Int
+) {
+    val theme = Nova.theme
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = theme.textSecondary) },
+            placeholder = { Text("Chercher un record, une période, une zone…", color = theme.textSecondary) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = NovaColors.Gold,
+                unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.35f),
+                focusedTextColor = theme.text,
+                unfocusedTextColor = theme.text,
+                cursorColor = NovaColors.Gold
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            NovaFilterChip(
+                flagKey = "palmares_all", selected = selectedFamily == null, onClick = { onFamilySelected(null) },
+                label = { Text("✨ Tout (${familyCounts.values.sum()})") },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = NovaColors.Gold.copy(alpha = 0.20f), selectedLabelColor = theme.text),
+                border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selectedFamily == null, borderColor = NovaColors.Gold.copy(alpha = 0.4f), selectedBorderColor = NovaColors.Gold)
+            )
+            RecordGroup.entries.filter { (familyCounts[it] ?: 0) > 0 }.forEach { group ->
+                val accent = groupColor(group)
+                NovaFilterChip(
+                    flagKey = group, selected = selectedFamily == group, onClick = { onFamilySelected(if (selectedFamily == group) null else group) },
+                    label = { Text("${group.emoji} ${group.label} (${familyCounts[group] ?: 0})") },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = accent.copy(alpha = 0.22f), selectedLabelColor = theme.text),
+                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selectedFamily == group, borderColor = accent.copy(alpha = 0.35f), selectedBorderColor = accent)
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            "$visibleWinCount victoire${if (visibleWinCount == 1) "" else "s"} affichée${if (visibleWinCount == 1) "" else "s"} · $visibleRecordCount record${if (visibleRecordCount == 1) "" else "s"} distinct${if (visibleRecordCount == 1) "" else "s"}",
+            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+@Composable
+private fun MostRecordsFamilyCard(
+    family: MostRecordsFamilyBundle,
+    totalWins: Int,
+    expanded: Boolean,
+    onClick: () -> Unit
+) {
+    val theme = Nova.theme
+    val accent = groupColor(family.group)
+    val progress = (family.wins.toFloat() / totalWins.coerceAtLeast(1)).coerceIn(0.04f, 1f)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp))
+                .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.17f), theme.surface.copy(alpha = 0.94f), accent.copy(alpha = 0.08f))))
+                .border(1.dp, accent.copy(alpha = if (expanded) 0.48f else 0.22f), RoundedCornerShape(17.dp))
+                .clickable(onClick = onClick).animateContentSize().padding(horizontal = 12.dp, vertical = 11.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(39.dp).clip(RoundedCornerShape(12.dp)).background(accent.copy(alpha = 0.16f)).border(1.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                    Text(family.group.emoji, fontSize = 21.sp)
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(family.group.label, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                    Text("${family.records.size} record${if (family.records.size == 1) "" else "s"} · ${family.wins} classement${if (family.wins == 1) "" else "s"} #1", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Text(family.group.description, color = theme.textSecondary.copy(alpha = 0.82f), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("${family.wins}", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                    Text(if (expanded) "RÉDUIRE" else "EXPLORER", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                }
+                Spacer(Modifier.width(5.dp))
+                Text(if (expanded) "⌃" else "⌄", color = accent, fontWeight = FontWeight.Black, fontSize = 22.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(theme.background.copy(alpha = 0.42f))) {
+                Box(Modifier.fillMaxWidth(progress).height(4.dp).clip(CircleShape).background(accent))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MostRecordsBundleCard(
+    bundle: MostRecordsRecordBundle,
+    expanded: Boolean,
+    onClick: () -> Unit
+) {
+    val theme = Nova.theme
+    val accent = groupColor(bundle.group)
+    Column(
+        Modifier.fillMaxWidth().padding(start = 25.dp, end = 16.dp, top = 4.dp, bottom = 3.dp)
+            .clip(RoundedCornerShape(14.dp)).background(theme.surface.copy(alpha = 0.75f))
+            .border(1.dp, accent.copy(alpha = 0.20f), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick).animateContentSize().padding(horizontal = 10.dp, vertical = 9.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(bundle.def.emoji, fontSize = 22.sp)
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text(bundle.def.title, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${bundle.held.size} classement${if (bundle.held.size == 1) "" else "s"} détenu${if (bundle.held.size == 1) "" else "s"} · voir périodes et zones", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            Text(if (expanded) "⌃" else "＋", color = accent, fontWeight = FontWeight.Black, fontSize = 20.sp)
+        }
+        if (expanded) {
+            Spacer(Modifier.height(6.dp))
+            Text(bundle.def.description, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 15.sp)
+        }
+    }
+}
+
+@Composable
+private fun MostRecordsVictoryRow(
+    entry: RecordExplainer.Held,
+    onEntry: (RecordExplainer.Held) -> Unit
+) {
+    val theme = Nova.theme
+    val accent = groupColor(entry.groupForMostRecords())
+    val subLabel = mostRecordsSubLabel(entry)
+    val context = listOfNotNull(entry.period?.frLabel, entry.category.label, subLabel)
+        .joinToString(" · ").ifBlank { "Toutes périodes" }
+    val dateLabel = entry.row.valueDate?.let { iso -> runCatching { Dates.parse(iso).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)) }.getOrDefault(iso) }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 38.dp, end = 16.dp, top = 3.dp, bottom = 3.dp)
+            .clip(RoundedCornerShape(13.dp)).background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.10f), theme.surface.copy(alpha = 0.92f))))
+            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(13.dp))
+            .clickable { onEntry(entry) }.padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("🏅", fontSize = 15.sp)
+                Text(context, color = theme.textSecondary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            dateLabel?.let { Text("Obtenu le $it", color = theme.textSecondary.copy(alpha = 0.85f), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 21.dp, top = 2.dp)) }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(formatRecordValue(entry.def, entry.period, entry.row.value), color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (entry.tied > 1) {
+                Text("🤝 PARTAGÉ · ${entry.tied}", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            } else Text("#1", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+        }
+        Text("›", color = theme.textSecondary, fontSize = 21.sp, modifier = Modifier.padding(start = 6.dp))
+    }
+}
+
+private fun RecordExplainer.Held.groupForMostRecords(): RecordGroup = RecordCatalog.groupOf[def.id] ?: RecordGroup.TOTALS
+
 /* ================================ 🧐 Page « pourquoi il est là » — spécifique à chaque record ================================ */
 
 @Composable
@@ -761,6 +1067,58 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     }
     val subLabel = def.subs[ref.category]?.firstOrNull { it.dbName == ref.sub }?.label
     val context = listOfNotNull(ref.period?.label, sectionLabel(ref.category), subLabel).joinToString(" · ")
+    var mostRecordsSearch by remember(ref) { mutableStateOf("") }
+    var selectedMostRecordsFamily by remember(ref) { mutableStateOf<RecordGroup?>(null) }
+    var expandedMostRecordsFamilies by remember(ref) { mutableStateOf<Set<RecordGroup>>(emptySet()) }
+    var expandedMostRecordsIds by remember(ref) { mutableStateOf<Set<String>>(emptySet()) }
+    val mostRecordsHeld = story?.held.orEmpty()
+    val mostRecordsBundles = remember(mostRecordsHeld) {
+        mostRecordsHeld.groupBy { it.def.id }.values.mapNotNull { entries ->
+            val first = entries.firstOrNull() ?: return@mapNotNull null
+            val group = RecordCatalog.groupOf[first.def.id] ?: RecordGroup.TOTALS
+            MostRecordsRecordBundle(
+                def = first.def,
+                group = group,
+                held = entries.sortedWith(compareBy<RecordExplainer.Held> { it.period?.ordinal ?: Int.MAX_VALUE }.thenBy { it.sub.orEmpty() })
+            )
+        }.sortedWith(compareByDescending<MostRecordsRecordBundle> { it.held.size }.thenBy { it.def.title })
+    }
+    val mostRecordsFamilies = remember(mostRecordsBundles) {
+        mostRecordsBundles.groupBy { it.group }.map { (group, records) ->
+            val ordered = records.sortedWith(compareByDescending<MostRecordsRecordBundle> { it.held.size }.thenBy { it.def.title })
+            MostRecordsFamilyBundle(group, ordered, ordered.sumOf { it.held.size })
+        }.sortedWith(compareByDescending<MostRecordsFamilyBundle> { it.wins }.thenBy { it.group.ordinal })
+    }
+    LaunchedEffect(mostRecordsFamilies) {
+        if (expandedMostRecordsFamilies.isEmpty() && mostRecordsFamilies.isNotEmpty()) {
+            val firstFamily = mostRecordsFamilies.first()
+            expandedMostRecordsFamilies = setOf(firstFamily.group)
+            firstFamily.records.firstOrNull()?.def?.id?.let { expandedMostRecordsIds = setOf(it) }
+        }
+    }
+    val visibleMostRecordsFamilies = remember(mostRecordsFamilies, selectedMostRecordsFamily, mostRecordsSearch) {
+        val query = mostRecordsSearch.trim()
+        mostRecordsFamilies.mapNotNull { family ->
+            if (selectedMostRecordsFamily != null && family.group != selectedMostRecordsFamily) return@mapNotNull null
+            val familyMatches = query.isNotEmpty() && family.group.label.contains(query, ignoreCase = true)
+            val records = family.records.mapNotNull { bundle ->
+                val recordMatches = query.isEmpty() || familyMatches ||
+                    bundle.def.title.contains(query, ignoreCase = true) ||
+                    bundle.def.description.contains(query, ignoreCase = true) ||
+                    bundle.def.id.contains(query, ignoreCase = true)
+                val matchingEntries = if (recordMatches) bundle.held else bundle.held.filter {
+                    mostRecordsEntrySearchText(it).contains(query, ignoreCase = true)
+                }
+                matchingEntries.takeIf { it.isNotEmpty() }?.let { bundle.copy(held = matchingEntries) }
+            }
+            records.takeIf { it.isNotEmpty() }?.let { matched ->
+                MostRecordsFamilyBundle(family.group, matched, matched.sumOf { it.held.size })
+            }
+        }
+    }
+    val familyWinCounts = mostRecordsFamilies.associate { it.group to it.wins }
+    val visibleMostRecordsWinCount = visibleMostRecordsFamilies.sumOf { it.wins }
+    val visibleMostRecordsRecordCount = visibleMostRecordsFamilies.sumOf { it.records.size }
     val shareScope = rememberCoroutineScope()
     var sharingSongReach by remember(ref) { mutableStateOf(false) }
     var songReachShareError by remember(ref) { mutableStateOf(false) }
@@ -803,7 +1161,15 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     }
 
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
-        item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
+        item {
+            PageHeader(
+                def.title,
+                if (def.id == "MOST_RECORDS") "🏆 Palmarès des records" else "${def.emoji} ${def.title}",
+                color,
+                onBack,
+                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place" else context
+            )
+        }
         item {
             // En-tête : pochette, nom et rang. Les records premium de vitesse, succession et présence ont leur fond dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
@@ -814,8 +1180,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val honorRecord = def.id == "MOST_HOF" || def.id == "MOST_GLOBAL"
             val artistNoOneRecord = def.id == "MOST_CUMULATIVE_ARTIST_NO1"
             val perfectAllKillRecord = def.id == "MOST_PERFECT_ALL_KILL"
+            val mostRecordsRecord = def.id == "MOST_RECORDS"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -843,7 +1210,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                             Text(formatRecordValue(def, ref.period, row.r.value), color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
                         }
                     }
-                    row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
+                    if (!mostRecordsRecord) row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
                 }
             }
         }
@@ -1038,7 +1405,73 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         if (st == null) {
             item { Text("Reconstruction de l'histoire…", color = theme.textSecondary, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
         } else {
-            item {
+            if (def.id == "MOST_RECORDS") {
+                item(key = "most-records-showcase") {
+                    MostRecordsShowcase(
+                        score = row.r.value.toInt().coerceAtLeast(0),
+                        rank = ref.rank,
+                        recordCount = mostRecordsBundles.size,
+                        familyCount = mostRecordsFamilies.size,
+                        sharedCount = mostRecordsHeld.count { it.tied > 1 },
+                        signature = mostRecordsBundles.firstOrNull(),
+                        color = color
+                    )
+                }
+                item(key = "most-records-filters") {
+                    MostRecordsFilters(
+                        query = mostRecordsSearch,
+                        onQueryChange = { mostRecordsSearch = it },
+                        selectedFamily = selectedMostRecordsFamily,
+                        onFamilySelected = { family ->
+                            selectedMostRecordsFamily = family
+                            family?.let { selected ->
+                                expandedMostRecordsFamilies = expandedMostRecordsFamilies + selected
+                                mostRecordsFamilies.firstOrNull { it.group == selected }?.records?.firstOrNull()?.def?.id?.let {
+                                    expandedMostRecordsIds = expandedMostRecordsIds + it
+                                }
+                            }
+                        },
+                        familyCounts = familyWinCounts,
+                        visibleWinCount = visibleMostRecordsWinCount,
+                        visibleRecordCount = visibleMostRecordsRecordCount
+                    )
+                }
+                if (visibleMostRecordsFamilies.isEmpty()) item(key = "most-records-empty") {
+                    Text(
+                        if (mostRecordsHeld.isEmpty()) "Aucun classement #1 détaillé n'est disponible."
+                        else "Aucun trophée ne correspond à cette recherche ou à ce filtre.",
+                        color = theme.textSecondary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(26.dp)
+                    )
+                }
+                visibleMostRecordsFamilies.forEach { family ->
+                    val familyExpanded = mostRecordsSearch.isNotBlank() || family.group in expandedMostRecordsFamilies
+                    item(key = "most-records-family-${family.group.name}") {
+                        MostRecordsFamilyCard(family, mostRecordsHeld.size, familyExpanded) {
+                            val opening = family.group !in expandedMostRecordsFamilies
+                            expandedMostRecordsFamilies = if (opening) expandedMostRecordsFamilies + family.group else expandedMostRecordsFamilies - family.group
+                            if (opening) family.records.firstOrNull()?.def?.id?.let { expandedMostRecordsIds = expandedMostRecordsIds + it }
+                        }
+                    }
+                    if (familyExpanded) family.records.forEach { bundle ->
+                        val bundleExpanded = mostRecordsSearch.isNotBlank() || bundle.def.id in expandedMostRecordsIds
+                        item(key = "most-records-bundle-${family.group.name}-${bundle.def.id}") {
+                            MostRecordsBundleCard(bundle, bundleExpanded) {
+                                expandedMostRecordsIds = if (bundle.def.id in expandedMostRecordsIds) expandedMostRecordsIds - bundle.def.id else expandedMostRecordsIds + bundle.def.id
+                            }
+                        }
+                        if (bundleExpanded) bundle.held.forEachIndexed { index, heldEntry ->
+                            val periodKey = heldEntry.period?.dbName ?: "NONE"
+                            val subKey = heldEntry.sub ?: "ALL"
+                            item(key = "most-records-entry-${bundle.def.id}-${periodKey}-${subKey}-$index") {
+                                MostRecordsVictoryRow(heldEntry) {
+                                    onEntry(RecordEntryRef(heldEntry.def, heldEntry.period, heldEntry.category, heldEntry.sub,
+                                        RecordRow(heldEntry.row, name, row.subtitle, row.imageUrl), rank = 1))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("🧐 Pourquoi il est là", color)
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface).border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(14.dp)) {
@@ -1060,7 +1493,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             st.multiChartVisual?.let { visual ->
                 item { MultiChartConstellation(visual, color) }
             }
-            if (st.facts.isNotEmpty()) item {
+            if (def.id != "MOST_RECORDS" && st.facts.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("📋 Les faits", color)
                     st.facts.forEach { (k, v) ->
@@ -1095,8 +1528,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
                 }
             }
-            if (st.held.isNotEmpty()) {
-                // 🏆 Most Records : tous les classements détenus, groupés par famille, chaque ligne ouvre le classement
+            if (def.id != "MOST_RECORDS" && st.held.isNotEmpty()) {
+                // 🏆 Affichage générique conservé pour les records qui exposent une liste détenue
                 val groups = st.held.groupBy { RecordCatalog.groupOf[it.def.id] ?: RecordGroup.TOTALS }.entries.sortedByDescending { it.value.size }
                 item { Box(Modifier.padding(horizontal = 16.dp)) { SectionTitle("🏆 Tous ses records (${st.held.size})", color) } }
                 groups.forEach { (g, list) ->
@@ -3137,7 +3570,7 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
         RecordUnit.DAYS -> "$n jour${if (n > 1) "s" else ""}"
         RecordUnit.COUNT -> when (def.id) {
             "MOST_REENTRIES" -> "$n retour${if (n > 1) "s" else ""}"
-            "MOST_RECORDS" -> "$n record${if (n > 1) "s" else ""}"
+            "MOST_RECORDS" -> "$n classement${if (n > 1) "s" else ""} remporté${if (n > 1) "s" else ""}"
             "MOST_CERTIFICATIONS" -> "$n certif${if (n > 1) "s" else ""}"
             "MOST_HOF", "MOST_GLOBAL" -> "$n entrée${if (n > 1) "s" else ""}"
             "MOST_PERFECT_ALL_KILL" -> "$n Perfect All Kill"

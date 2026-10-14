@@ -200,7 +200,7 @@ object RecordCatalog {
         RecordDef(28, "LONGEST_LISTENING_STREAK", "🎧", "Longest Listening Streak", "Plus longue série de jours consécutifs avec au moins une écoute (séries en cours comprises)", emptyList(), all3, unit = RecordUnit.DAYS),
         RecordDef(29, "PODIUM_SWEEP", "🧹", "Podium Sweep", "Un même artiste / album occupe TOUTES les places du Top 3 / 5 / 10 des titres en même temps — nombre de périodes", chartPeriods, artistAlbum,
             mapOf(RecordCategory.ARTIST to sweepSubs, RecordCategory.ALBUM to sweepSubs)),
-        RecordDef(30, "MOST_RECORDS", "🏆", "Most Records", "Le plus de #1 détenus dans l'ensemble des classements de records (record × période × zone) — ex æquo compris", emptyList(), all3, unit = RecordUnit.COUNT),
+        RecordDef(30, "MOST_RECORDS", "🏆", "Most Records", "Le plus de classements où l'entité est #1. Chaque combinaison record × période × section × sous-catégorie compte séparément; les ex æquo comptent comme des #1 partagés. Most Records lui-même est exclu.", emptyList(), all3, unit = RecordUnit.COUNT),
         RecordDef(31, "MOST_CUMULATIVE_TOP5", "🏅", "Most Cumulative in Top 5", "Total de périodes passées aux places 1 à 5, consécutives ou non", chartPeriods, all3),
         RecordDef(32, "MOST_SONGS_TOP5", "💜", "Most Songs in Top 5", "Le plus de titres distincts ayant atteint le Top 5", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
         RecordDef(
