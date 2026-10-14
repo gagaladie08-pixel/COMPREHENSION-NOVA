@@ -2136,7 +2136,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 }
             }
             if (biggestPeriodRecord) {
-                item(key = "biggest-period-archive-${period?.dbName}-${ref.category.dbName}-${row.r.entityId}-${row.r.valueDate}") {
+                item(key = "biggest-period-archive-${ref.period?.dbName}-${ref.category.dbName}-${row.r.entityId}-${row.r.valueDate}") {
                     BiggestPeriodSpotlight(
                         name = name,
                         subtitle = row.subtitle,
