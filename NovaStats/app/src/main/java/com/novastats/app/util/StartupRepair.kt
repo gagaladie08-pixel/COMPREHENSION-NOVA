@@ -110,6 +110,31 @@ object StartupRepair {
                         RebuildAudit.write(context, "⚠️ Amorçage Most Songs in Top 5 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }
                 }
+
+                // Rattrapage idempotent du Perfect All Kill : ajout uniquement des événements absents.
+                // Les snapshots et les autres distinctions ne sont ni effacés ni réattribués.
+                if (!prefs.getBoolean("perfect_all_kill_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "💎 Amorçage ciblé Perfect All Kill depuis les snapshots Daily/Weekly/Monthly/Yearly")
+                        app.rebuilder.rebuildPerfectAllKillsOnly()
+                        RebuildAudit.write(context, "✅ Perfect All Kill historique et caches HoF dépendants recalculés")
+                        prefs.edit().putBoolean("perfect_all_kill_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Amorçage Perfect All Kill en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
+
+                // Le nouveau record démarre depuis l'historique déjà stocké, sans mélanger les cadences.
+                if (!prefs.getBoolean("artist_cumulative_no1_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "👑 Amorçage ciblé Most Cumulative #1 par artiste et par chart")
+                        app.rebuilder.rebuildArtistCumulativeNo1Only()
+                        RebuildAudit.write(context, "✅ Cache Most Cumulative #1 recalculé pour Daily/Weekly/Monthly et ses trois charts")
+                        prefs.edit().putBoolean("artist_cumulative_no1_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Amorçage Most Cumulative #1 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
             }
         }
     }

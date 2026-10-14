@@ -6,6 +6,7 @@ import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.RecordCacheEntity
 import com.novastats.app.data.db.entity.CertificationHistoryEntity
+import com.novastats.app.domain.ArtistChartNumberOnes
 import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.Period
@@ -16,7 +17,7 @@ import com.novastats.app.domain.RecordResult
 import java.time.LocalDate
 
 /**
- * 🏅 Moteur des 32 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
+ * 🏅 Moteur des 33 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
  * et écrit le Top 10 de chaque record dans `records_cache`.
  * Tous les records se créent automatiquement (import JSON compris) — aucune saisie manuelle.
  */
@@ -25,7 +26,13 @@ class RecordsEngine(private val db: NovaDatabase) {
     private val chartPeriods = listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY)
 
     /** Owner map : track → artistes (main + featured), track → album, album → artiste. */
-    private class Links(val trackArtists: Map<Long, Set<Long>>, val trackAlbum: Map<Long, Long>, val albumArtist: Map<Long, Long?>, val trackMainArtist: Map<Long, Long>) {
+    private class Links(
+        val trackArtists: Map<Long, Set<Long>>,
+        val trackAlbum: Map<Long, Long>,
+        val albumArtist: Map<Long, Long?>,
+        val trackMainArtist: Map<Long, Long>,
+        val activeArtistIds: Set<Long>
+    ) {
         /** Titre « solo » : un seul artiste (pas de featuring). */
         fun isSolo(trackId: Long) = (trackArtists[trackId]?.size ?: 1) <= 1
     }
@@ -163,6 +170,46 @@ class RecordsEngine(private val db: NovaDatabase) {
         }
     }
 
+    /** Amorçage du nouveau cumulatif #1 depuis les snapshots, sans toucher aux autres caches source. */
+    suspend fun rebuildArtistCumulativeNo1Only() {
+        val links = loadLinks()
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        for (p in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY)) {
+            val perCat = mapOf(
+                RecordCategory.TRACK to toSeries(db.billboardDao().allTrackRows(p.dbName), p),
+                RecordCategory.ARTIST to toSeries(db.billboardDao().allArtistRows(p.dbName), p),
+                RecordCategory.ALBUM to toSeries(db.billboardDao().allAlbumRows(p.dbName), p)
+            )
+            artistCumulativeNo1Records(p, perCat, links, out, now)
+        }
+        replaceRecordFamiliesAndRefreshPalmares(setOf("MOST_CUMULATIVE_ARTIST_NO1"), out, now)
+    }
+
+    /** Actualise uniquement les records Hall of Fame/Global après l'amorçage ciblé de nouvelles distinctions. */
+    suspend fun rebuildHallOfFameRecordsOnly() {
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        hallOfFameRecords(out, now)
+        replaceRecordFamiliesAndRefreshPalmares(setOf("MOST_HOF", "MOST_GLOBAL"), out, now)
+    }
+
+    /** Remplace les seules familles visées, puis leur agrégat dépendant Most Records. */
+    private suspend fun replaceRecordFamiliesAndRefreshPalmares(
+        replacedTypes: Set<String>,
+        replacementRows: List<RecordCacheEntity>,
+        now: Long
+    ) {
+        val sourceRows = db.recordDao().rowsForMostRecords().filterNot { it.recordType in replacedTypes } + replacementRows
+        val palmares = ArrayList<RecordCacheEntity>()
+        mostRecords(palmares, now, sourceRows)
+        db.withTransaction {
+            replacedTypes.forEach { db.recordDao().clearType(it) }
+            db.recordDao().clearType("MOST_RECORDS")
+            (replacementRows + palmares).chunked(500).forEach { db.recordDao().insertAll(it) }
+        }
+    }
+
     suspend fun rebuildAll(onProgress: (String) -> Unit = {}) {
         onProgress("Records…")
         val links = loadLinks()
@@ -180,6 +227,7 @@ class RecordsEngine(private val db: NovaDatabase) {
             )
             seriesByPeriod[p] = perCat
             for ((cat, series) in perCat) chartRecords(p, cat, series, out, now)
+            artistCumulativeNo1Records(p, perCat, links, out, now)
             ownerRecords(p, perCat, links, out, now)
             podiumSweep(p, perCat.getValue(RecordCategory.TRACK), links, out, now)
         }
@@ -200,6 +248,55 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     /* ------------------------------------------------------------------ */
 
+    /** Cumuls #1 d'artiste par chart — chaque sous-section garde ses propres ancres et son unité. */
+    private fun artistCumulativeNo1Records(
+        period: Period,
+        seriesByCategory: Map<RecordCategory, Map<Long, List<RecordAppearance>>>,
+        links: Links,
+        out: MutableList<RecordCacheEntity>,
+        now: Long
+    ) {
+        if (period !in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY)) return
+        val snapshots = artistNumberOneSnapshots(seriesByCategory, links)
+        val datesByChart = ArtistChartNumberOnes.cumulativeDates(snapshots)
+        for (chart in ArtistChartNumberOnes.charts) {
+            val results = datesByChart[chart].orEmpty().map { (artistId, dates) ->
+                RecordResult(artistId, dates.size.toDouble(), dates.maxOrNull())
+            }
+            emit(out, "MOST_CUMULATIVE_ARTIST_NO1", period, RecordCategory.ARTIST, chart, results, now)
+        }
+    }
+
+    /** Transforme les #1 bruts en snapshots d'artistes crédités/propriétaires identifiables. */
+    private fun artistNumberOneSnapshots(
+        seriesByCategory: Map<RecordCategory, Map<Long, List<RecordAppearance>>>,
+        links: Links
+    ): List<ArtistChartNumberOnes.Snapshot> {
+        fun leaders(category: RecordCategory): Map<String, Long> = buildMap {
+            seriesByCategory[category].orEmpty().forEach { (entityId, appearances) ->
+                appearances.filter { it.position == 1 }.forEach { appearance ->
+                    if (appearance.date !in this) put(appearance.date, entityId)
+                }
+            }
+        }
+        val hot100 = leaders(RecordCategory.TRACK)
+        val artist50 = leaders(RecordCategory.ARTIST)
+        val albums75 = leaders(RecordCategory.ALBUM)
+        val dates = (hot100.keys + artist50.keys + albums75.keys).toSortedSet()
+        return dates.map { date ->
+            val hot100Artists = hot100[date]?.let { trackId ->
+                val credited = links.trackArtists[trackId].orEmpty().ifEmpty {
+                    links.trackMainArtist[trackId]?.let(::setOf).orEmpty()
+                }
+                credited.filterTo(linkedSetOf()) { it in links.activeArtistIds }
+            }.orEmpty()
+            val artist50Leader = artist50[date]?.takeIf { it in links.activeArtistIds }
+            val albumOwners = albums75[date]?.let { albumId -> links.albumArtist[albumId] }
+                ?.takeIf { it in links.activeArtistIds }?.let(::setOf).orEmpty()
+            ArtistChartNumberOnes.Snapshot(date, hot100Artists, artist50Leader, albumOwners)
+        }
+    }
+
     private suspend fun loadLinks(): Links {
         val ta = HashMap<Long, MutableSet<Long>>()
         db.trackLinkDao().allTrackArtists().forEach { ta.getOrPut(it.trackId) { HashSet() }.add(it.artistId) }
@@ -207,7 +304,8 @@ class RecordsEngine(private val db: NovaDatabase) {
         tracks.forEach { t -> ta.getOrPut(t.trackId) { HashSet() }.add(t.artistId) }
         val trackAlbum = tracks.mapNotNull { t -> t.albumId?.let { t.trackId to it } }.toMap()
         val albumArtist = db.albumDao().all().associate { it.albumId to it.artistId }
-        return Links(ta, trackAlbum, albumArtist, tracks.associate { it.trackId to it.artistId })
+        val activeArtistIds = db.artistDao().allPlayedList().mapTo(HashSet()) { it.artistId }
+        return Links(ta, trackAlbum, albumArtist, tracks.associate { it.trackId to it.artistId }, activeArtistIds)
     }
 
     private fun periodIndex(date: LocalDate, p: Period): Int = when (p) {

@@ -65,6 +65,17 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         RecordsEngine(db).rebuildSongsTop5Only()
     }
 
+    /** Reconstitue les Perfect All Kill manquants depuis les snapshots et rafraîchit uniquement les caches HoF liés. */
+    suspend fun rebuildPerfectAllKillsOnly() = rebuildMutex.withLock {
+        BillboardEngine(db).reconcilePerfectAllKillsFromSnapshots()
+        RecordsEngine(db).rebuildHallOfFameRecordsOnly()
+    }
+
+    /** Amorçage du nouveau record cumulatif #1, sans recalcul global. */
+    suspend fun rebuildArtistCumulativeNo1Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildArtistCumulativeNo1Only()
+    }
+
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
     private suspend fun recomputeRootAggregatesFromScrobbles() {
         val totals = db.trackDao().rootAggregatesFromScrobbles()

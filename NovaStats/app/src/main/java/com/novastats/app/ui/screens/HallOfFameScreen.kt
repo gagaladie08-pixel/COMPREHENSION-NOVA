@@ -75,6 +75,7 @@ import java.util.Locale
 private val DirectDebutColor = Color(0xFF7B2FBE)
 private val LongRunColor = NovaColors.Gold
 private val AllKillColor = Color(0xFFDC2626)
+private val PerfectAllKillColor = Color(0xFF9B7BFF)
 private val GlobalColor = Color(0xFF0D1BFF)
 
 private val ceremonyFmt = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.FRANCE)
@@ -96,20 +97,24 @@ private data class HofCard(
 }
 
 private fun badgePrestige(type: String) = when (type) {
+    HallOfFameRules.PERFECT_ALL_KILL -> 5
     HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 4; HallOfFameRules.ALL_KILL -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
 }
 private fun badgeLabel(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "🚀 DIRECT DEBUT"; HallOfFameRules.LONG_RUN -> "👑 LONG RUN"
-    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.ALL_KILL -> "💥 ALL KILL"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
+    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.ALL_KILL -> "💥 ALL KILL"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"
+    HallOfFameRules.PERFECT_ALL_KILL -> "💎 PERFECT ALL KILL"; else -> type
 }
 private fun badgeColor(type: String) = when (type) {
-    HallOfFameRules.DIRECT_DEBUT -> DirectDebutColor; HallOfFameRules.LONG_RUN -> LongRunColor; HallOfFameRules.ALL_KILL -> AllKillColor; else -> GlobalColor
+    HallOfFameRules.DIRECT_DEBUT -> DirectDebutColor; HallOfFameRules.LONG_RUN -> LongRunColor
+    HallOfFameRules.ALL_KILL -> AllKillColor; HallOfFameRules.PERFECT_ALL_KILL -> PerfectAllKillColor; else -> GlobalColor
 }
 private fun badgeRule(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "Règle : entrer directement #1 d'un chart hebdo ou mensuel, pour la toute première fois."
     HallOfFameRules.LONG_RUN -> "Règle : ${HallOfFameRules.LONG_RUN_WEEKS} semaines consécutives #1 hebdo, ou ${HallOfFameRules.LONG_RUN_MONTHS} mois consécutifs #1 mensuel."
     HallOfFameRules.TRIPLE_DEBUT -> "Règle : #1 des charts Daily, Weekly et Monthly le même jour, qui est aussi sa toute première apparition (jour, semaine, mois) dans les charts."
     HallOfFameRules.ALL_KILL -> "Règle : #1 des charts Daily, Weekly et Monthly le même jour, sans condition de début."
+    HallOfFameRules.PERFECT_ALL_KILL -> "Règle : dans le même snapshot Daily, Weekly, Monthly ou Yearly, l'artiste est crédité du titre n°1 Hot 100, est lui-même n°1 de l'Artist 50 et est propriétaire identifiable de l'album n°1 des Albums 75. Distinction différente de l'All Kill."
     HallOfFameRules.LEGENDARY_RUN -> "Règle : ${HallOfFameRules.LEGENDARY_WEEKS_AT_1} semaines #1 hebdo au total."
     else -> type
 }
@@ -142,6 +147,9 @@ fun HallOfFameScreen() {
             HofCard(id, f.h.entityType, f.name ?: "Inconnu", f.subtitle, f.imageUrl, list)
         }.sortedWith(compareByDescending<HofCard> { it.prestige }.thenByDescending { it.reignDays }.thenByDescending { it.weeksAt1 }.thenByDescending { it.firstDate })
     }
+    androidx.compose.runtime.LaunchedEffect(category) {
+        if (category != EntityType.ARTIST && period in setOf(Period.DAILY.dbName, Period.YEARLY.dbName)) period = Period.WEEKLY.dbName
+    }
     val isGlobal = period == Period.GLOBAL.dbName
 
     // 🏛️ Premium (2) : compteurs par badge + plus long règne, sur tout le temple
@@ -149,7 +157,7 @@ fun HallOfFameScreen() {
         value = runCatching { db.hallOfFameDao().all() }.getOrDefault(emptyList())
     }
     val counters = remember(allHof) {
-        listOf(HallOfFameRules.DIRECT_DEBUT, HallOfFameRules.LONG_RUN, HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL, HallOfFameRules.LEGENDARY_RUN)
+        listOf(HallOfFameRules.DIRECT_DEBUT, HallOfFameRules.LONG_RUN, HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL, HallOfFameRules.LEGENDARY_RUN, HallOfFameRules.PERFECT_ALL_KILL)
             .map { t -> t to allHof.count { it.entryType == t } }
     }
     val longest = remember(allHof) {
@@ -197,11 +205,14 @@ fun HallOfFameScreen() {
                 Text("🏛️ Hall of Fame", style = MaterialTheme.typography.headlineSmall, color = theme.text, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
                 Text("$total intronisation${if (total > 1) "s" else ""}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
-            // Ligne 2 : contrôle segmenté période (pleine largeur, segments égaux)
+            // Cadences PAK consultables séparément; Global garde ses trois distinctions historiques.
+            val hofPeriods = if (category == EntityType.ARTIST) {
+                listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY, Period.GLOBAL)
+            } else listOf(Period.WEEKLY, Period.MONTHLY, Period.GLOBAL)
             SegmentedControl(
-                listOf(Period.WEEKLY.label, Period.MONTHLY.label, Period.GLOBAL.label),
-                listOf(Period.WEEKLY.dbName, Period.MONTHLY.dbName, Period.GLOBAL.dbName).indexOf(period)
-            ) { period = listOf(Period.WEEKLY.dbName, Period.MONTHLY.dbName, Period.GLOBAL.dbName)[it] }
+                hofPeriods.map { it.frLabel },
+                hofPeriods.indexOfFirst { it.dbName == period }.coerceAtLeast(0)
+            ) { period = hofPeriods[it].dbName }
             Spacer(Modifier.height(6.dp))
             // Ligne 3 : contrôle segmenté type (pleine largeur, segments égaux)
             SegmentedControl(
@@ -218,9 +229,11 @@ fun HallOfFameScreen() {
             if (showRules) {
                 Text(
                     when (period) {
-                        Period.WEEKLY.dbName -> "🚀 Direct Debut : entrée directe au #1 hebdo · 👑 Long Run : 3 semaines consécutives au #1"
-                        Period.MONTHLY.dbName -> "🚀 Direct Debut : entrée directe au #1 mensuel · 👑 Long Run : 2 mois consécutifs au #1"
-                        else -> "🌍 Triple Debut : triple #1 au 1ᵉʳ jour / 1ʳᵉ semaine / 1ᵉʳ mois · 💥 All-Kill : #1 Daily + Weekly + Monthly le même jour · 🏅 Legendary Run : 10× #1 hebdo"
+                        Period.DAILY.dbName -> "💎 Perfect All Kill Daily : #1 Artist 50, crédit du titre #1 Hot 100 et propriétaire de l'album #1 Albums 75, même snapshot."
+                        Period.WEEKLY.dbName -> "🚀 Direct Debut : entrée directe au #1 hebdo · 👑 Long Run : 3 semaines consécutives au #1 · 💎 Perfect All Kill inter-charts."
+                        Period.MONTHLY.dbName -> "🚀 Direct Debut : entrée directe au #1 mensuel · 👑 Long Run : 2 mois consécutifs au #1 · 💎 Perfect All Kill inter-charts."
+                        Period.YEARLY.dbName -> "💎 Perfect All Kill Yearly : les trois n°1 appartiennent au même artiste identifiable, dans le snapshot annuel."
+                        else -> "🌍 Triple Debut : triple #1 au 1ᵉʳ jour / 1ʳᵉ semaine / 1ʳᵉ mois · 💥 All-Kill : #1 Daily + Weekly + Monthly le même jour · 🏅 Legendary Run : 10× #1 hebdo"
                     },
                     color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )
@@ -404,7 +417,8 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
     )
     val coverSize = if (global) 96 else 72
     // 🎤 Invités décisifs : sans les écoutes de leur version, cette consécration n'existerait pas
-    val hofDb = (LocalContext.current.applicationContext as NovaStatsApp).database
+    val hofApp = LocalContext.current.applicationContext as NovaStatsApp
+    val hofDb = hofApp.database
     val decisiveGuests by produceState(initialValue = emptyList<HonorGuest>(), key1 = card.entityId) {
         if (card.entityType != EntityType.TRACK) return@produceState
         value = runCatching {
@@ -417,8 +431,17 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
             }.distinctBy { it.artistId }
         }.getOrDefault(emptyList())
     }
+    val latestPerfectAllKillEntry = card.entries.filter { it.h.entryType == HallOfFameRules.PERFECT_ALL_KILL }.maxByOrNull { it.h.entryDate }
+    val perfectAllKill by produceState<com.novastats.app.data.repository.RecordExplainer.PerfectAllKillVisual?>(
+        initialValue = null, key1 = latestPerfectAllKillEntry?.h?.hofId
+    ) {
+        value = latestPerfectAllKillEntry?.let { entry ->
+            runCatching { hofApp.recordExplainer.perfectAllKillVisual(entry.h.periodType, entry.h.entryDate, card.entityId) }.getOrNull()
+        }
+    }
     // 🏛️ Premium (5) : dauphin (#2) du snapshot de l'entrée principale — marge de domination
     val runner by produceState<RunnerUpRow?>(initialValue = null, key1 = "${card.entityId}|${mainEntry.h.entryType}|${mainEntry.h.entryDate}") {
+        if (mainEntry.h.entryType == HallOfFameRules.PERFECT_ALL_KILL) return@produceState
         val snapPeriod = when (mainEntry.h.entryType) {
             HallOfFameRules.LEGENDARY_RUN -> Period.WEEKLY.dbName
             HallOfFameRules.TRIPLE_DEBUT, HallOfFameRules.ALL_KILL -> Period.DAILY.dbName
@@ -498,9 +521,12 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
             else -> null
         }
         reignText?.let { Text("👑 $it", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall) }
-        Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("▶ ${formatCount(card.playsAtEntry)} écoutes à l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-            certificationLabel(cert)?.let { Text(it, color = theme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold) }
+        val showEntryPlays = mainEntry.h.entryType != HallOfFameRules.PERFECT_ALL_KILL && card.playsAtEntry > 0
+        if (showEntryPlays || cert != null) {
+            Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (showEntryPlays) Text("▶ ${formatCount(card.playsAtEntry)} écoutes à l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                certificationLabel(cert)?.let { Text(it, color = theme.primary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold) }
+            }
         }
         // 🏛️ Premium (5) : contexte de domination — dauphin battu et marge
         runner?.let { r ->
@@ -511,6 +537,7 @@ private fun HofCardView(card: HofCard, global: Boolean, cert: CertificationEntit
                 color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
             )
         }
+        perfectAllKill?.let { PerfectAllKillTriadPanel(it, compact = true, accent = color) }
         decisiveGuests.forEach { g ->
             Text("🎤 ${g.artistName} (via « ${g.viaTitle} ») — cette consécration n'existerait pas sans ses écoutes", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
         }

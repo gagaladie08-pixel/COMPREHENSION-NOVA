@@ -88,6 +88,8 @@ import com.novastats.app.data.db.dao.DayCount
 import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.data.db.dao.RunnerUpRow
 import com.novastats.app.data.db.entity.RecordCacheEntity
+import com.novastats.app.data.repository.RecordExplainer
+import com.novastats.app.ui.share.ShareCards
 import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
@@ -869,22 +871,26 @@ private fun CertLine(c: ArtistCertRow) {
 
 private val HofDirectDebut = Color(0xFF7B2FBE)
 private val HofAllKill = Color(0xFFDC2626)
+private val HofPerfectAllKill = Color(0xFF9B7BFF)
 private val HofGlobal = Color(0xFF0D1BFF)
 
 fun hofBadgeLabel(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "🚀 DIRECT DEBUT"; HallOfFameRules.LONG_RUN -> "👑 LONG RUN"
-    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.ALL_KILL -> "💥 ALL KILL"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"; else -> type
+    HallOfFameRules.TRIPLE_DEBUT -> "🌍 TRIPLE DEBUT"; HallOfFameRules.ALL_KILL -> "💥 ALL KILL"; HallOfFameRules.LEGENDARY_RUN -> "🏅 LEGENDARY RUN"
+    HallOfFameRules.PERFECT_ALL_KILL -> "💎 PERFECT ALL KILL"; else -> type
 }
 fun hofBadgeColor(type: String): Color = when (type) {
-    HallOfFameRules.DIRECT_DEBUT -> HofDirectDebut; HallOfFameRules.LONG_RUN -> NovaColors.Gold; HallOfFameRules.ALL_KILL -> HofAllKill; else -> HofGlobal
+    HallOfFameRules.DIRECT_DEBUT -> HofDirectDebut; HallOfFameRules.LONG_RUN -> NovaColors.Gold
+    HallOfFameRules.ALL_KILL -> HofAllKill; HallOfFameRules.PERFECT_ALL_KILL -> HofPerfectAllKill; else -> HofGlobal
 }
 fun hofBadgePrestige(type: String) = when (type) {
+    HallOfFameRules.PERFECT_ALL_KILL -> 5
     HallOfFameRules.LEGENDARY_RUN -> 4; HallOfFameRules.TRIPLE_DEBUT -> 4; HallOfFameRules.ALL_KILL -> 3; HallOfFameRules.LONG_RUN -> 2; else -> 1
 }
 
 private fun hofBadgeEmoji(type: String) = when (type) {
     HallOfFameRules.DIRECT_DEBUT -> "🚀"; HallOfFameRules.LONG_RUN -> "👑"; HallOfFameRules.TRIPLE_DEBUT -> "🌍"
-    HallOfFameRules.ALL_KILL -> "💥"; else -> "🏅"
+    HallOfFameRules.ALL_KILL -> "💥"; HallOfFameRules.PERFECT_ALL_KILL -> "💎"; else -> "🏅"
 }
 
 /** 🧐 Récit de l'intronisation la plus prestigieuse (section « Pourquoi il est là »). */
@@ -898,6 +904,7 @@ private fun hofNarrative(e: HallOfFameEntity, runner: RunnerUpRow?): String {
         HallOfFameRules.LONG_RUN -> "${if (e.weeksAt1 > 0) "${e.weeksAt1} semaines consécutives" else "Des périodes consécutives"} au #1 — un règne que personne n'a contesté.${e.reignStart?.let { " Du ${formatIso(it)} au ${formatIso(e.reignEnd ?: it)}." } ?: ""}$r"
         HallOfFameRules.ALL_KILL -> "Le ${formatIso(e.entryDate)}, #1 du jour, de la semaine et du mois en même temps : domination totale des trois charts.$r"
         HallOfFameRules.TRIPLE_DEBUT -> "Le ${formatIso(e.entryDate)}, #1 du jour, de la semaine et du mois — et c'était sa toute première apparition dans les trois charts. Un début de légende.$r"
+        HallOfFameRules.PERFECT_ALL_KILL -> "Le ${formatIso(e.entryDate)}, sur le même snapshot ${e.periodType.lowercase().replaceFirstChar { it.uppercase() }}, il est crédité du titre n°1 Hot 100, lui-même n°1 Artist 50 et propriétaire de l'album n°1 Albums 75. Ce Perfect All Kill inter-charts est distinct de l'All Kill."
         else -> "${e.weeksAt1} semaines #1 hebdo au total : territoire légendaire.$r"
     }
 }
@@ -908,7 +915,8 @@ private data class HofDetail(
     val positions: List<Int?>, val anchors: List<LocalDate>, val stats: ChartHistoryStats, val chartPeriod: Period,
     val cert: CertificationEntity?, val playCount: Int,
     val runners: Map<Long, RunnerUpRow?> = emptyMap(), val guests: List<HonorGuest> = emptyList(),
-    val pantheon: String? = null, val numberOnes: List<RecordCacheEntity> = emptyList()
+    val pantheon: String? = null, val numberOnes: List<RecordCacheEntity> = emptyList(),
+    val perfectAllKills: Map<Long, RecordExplainer.PerfectAllKillVisual> = emptyMap()
 )
 
 @Composable
@@ -965,14 +973,22 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
         // 🏅 Autres honneurs : Panthéon (artiste) + records actuellement détenus au #1
         val pantheon = if (entityType == EntityType.ARTIST) db.pantheonDao().forArtist(entityId)?.currentStatus else null
         val numberOnes = runCatching { db.recordDao().heldNumberOnes(entityType, entityId) }.getOrDefault(emptyList())
+        val perfectAllKills = mutableMapOf<Long, RecordExplainer.PerfectAllKillVisual>()
+        for (entry in entries.filter { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }) {
+            runCatching { app.recordExplainer.perfectAllKillVisual(entry.periodType, entry.entryDate, entityId) }
+                .getOrNull()?.let { perfectAllKills[entry.hofId] = it }
+        }
         d = HofDetail(
             name ?: "Inconnu", subtitle, image, entries,
             anchors.map { byDate[it]?.position }, anchors, ChartHistory.stats(appearances, anchors), chartPeriod,
             db.certificationDao().current(entityId, entityType), plays,
-            runners, guests, pantheon, numberOnes
+            runners, guests, pantheon, numberOnes, perfectAllKills
         )
     }
     val det = d
+    val pakShareScope = rememberCoroutineScope()
+    var sharingPakCard by remember { mutableStateOf(false) }
+    var pakShareError by remember { mutableStateOf(false) }
     val main = det?.entries?.maxByOrNull { hofBadgePrestige(it.entryType) }?.entryType ?: HallOfFameRules.DIRECT_DEBUT
     val color = hofBadgeColor(main)
     val isGlobal = main == HallOfFameRules.TRIPLE_DEBUT || main == HallOfFameRules.ALL_KILL || main == HallOfFameRules.LEGENDARY_RUN
@@ -1034,7 +1050,8 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
             val peakIdx = s.peak?.let { pk -> det.anchors.indexOf(pk.date).takeIf { it >= 0 } }
             // 🚩 Drapeaux d'intronisation sur la courbe + ligne or du #1
             val entryMarkers = det.entries.sortedBy { hofBadgePrestige(it.entryType) }.mapNotNull { e ->
-                val idx = det.anchors.indexOf(BillboardDates.anchor(Period.WEEKLY, Dates.parse(e.entryDate)))
+                val markerAnchor = BillboardDates.anchor(det.chartPeriod, Dates.parse(e.entryDate))
+                val idx = det.anchors.indexOf(markerAnchor)
                 if (idx >= 0) idx to hofBadgeEmoji(e.entryType) else null
             }.toMap()
             NovaCurveChart(det.positions.map { it?.toFloat() }, Modifier.fillMaxWidth().height(170.dp), color = color, invertY = true, minY = 1f, maxY = maxPos,
@@ -1050,12 +1067,39 @@ private fun HallOfFamePopup(entityId: Long, entityType: String, onDismiss: () ->
                 Text("Consacré le ${formatIso(e.entryDate)}", color = theme.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                 val reign = e.reignStart?.let { rs -> "du ${formatIso(rs)} au ${formatIso(e.reignEnd ?: rs)}" }
                 if (e.weeksAt1 > 0 || reign != null) Text("👑 ${if (e.weeksAt1 > 0) "${e.weeksAt1} semaine${if (e.weeksAt1 > 1) "s" else ""} au #1" else "Règne"}${reign?.let { " · $it" } ?: ""}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                Text("▶ ${formatCount(e.playCountAtEntry)} écoutes au moment de l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                det.runners[e.hofId]?.let { r ->
+                if (e.playCountAtEntry > 0) Text("▶ ${formatCount(e.playCountAtEntry)} écoutes au moment de l'entrée", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                det.runners[e.hofId]?.takeIf { e.entryType != HallOfFameRules.PERFECT_ALL_KILL }?.let { r ->
                     val margin = e.playCountAtEntry - r.playCount
                     Text(
                         if (margin > 0) "🥈 Dauphin battu : ${r.name} · ${formatCount(margin)} écoutes de retard" else "🥈 Dauphin ce jour-là : ${r.name} · ${formatCount(r.playCount)} écoutes",
                         color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                det.perfectAllKills[e.hofId]?.let { pak ->
+                    Spacer(Modifier.height(8.dp))
+                    PerfectAllKillTriadPanel(
+                        visual = pak,
+                        accent = HofPerfectAllKill,
+                        sharing = sharingPakCard,
+                        shareError = pakShareError,
+                        onShare = {
+                            if (!sharingPakCard) {
+                                sharingPakCard = true
+                                pakShareError = false
+                                pakShareScope.launch {
+                                    try {
+                                        val file = ShareCards.renderPerfectAllKillCard(app, pak, theme)
+                                        ShareCards.share(app, file, "Partager l'affiche Perfect All Kill")
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        pakShareError = true
+                                    } finally {
+                                        sharingPakCard = false
+                                    }
+                                }
+                            }
+                        }
                     )
                 }
             }

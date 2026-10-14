@@ -4,6 +4,7 @@ import com.novastats.app.data.db.NovaDatabase
 import com.novastats.app.data.db.dao.PriorRow
 import com.novastats.app.data.db.dao.DayCount
 import com.novastats.app.data.db.entity.EntityType
+import com.novastats.app.domain.ArtistChartNumberOnes
 import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Dates
@@ -235,6 +236,55 @@ class RecordExplainer(private val db: NovaDatabase) {
         val rival: SongReachRival?,
         val featuredTracks: List<SongReachTrack>
     )
+    /** Un pilier du record cumulatif #1 — compte, dernier #1 et élément qui l'a porté. */
+    data class ArtistNoOnePillar(
+        val key: String,
+        val label: String,
+        val emoji: String,
+        val count: Int,
+        val latestNumberOne: String?,
+        val latestImageUrl: String?,
+        val latestDate: String?
+    )
+    data class ArtistNoOneHeatCell(val date: String, val activeCharts: Set<String>)
+    data class ArtistNoOneRival(
+        val id: Long,
+        val name: String,
+        val imageUrl: String?,
+        val rank: Int,
+        val score: Int,
+        val pillarCounts: Map<String, Int>,
+        val tied: Boolean
+    )
+    /** Trio de charts à l'origine du record, comparaison avec le dauphin et bande chronologique. */
+    data class ArtistCumulativeNoOneVisual(
+        val period: Period,
+        val selectedChart: String,
+        val selectedChartLabel: String,
+        val score: Int,
+        val rank: Int,
+        val boardSize: Int,
+        val tiedAtTop: Int,
+        val pillars: List<ArtistNoOnePillar>,
+        val rival: ArtistNoOneRival?,
+        val heatmap: List<ArtistNoOneHeatCell>
+    )
+    /** Les trois #1 simultanés réunis autour du même artiste et de la même cadence. */
+    data class PerfectAllKillVisual(
+        val periodType: String,
+        val cadenceLabel: String,
+        val dateLabel: String,
+        val dateIso: String,
+        val artistId: Long,
+        val artistName: String,
+        val artistImageUrl: String?,
+        val trackId: Long,
+        val trackName: String,
+        val trackImageUrl: String?,
+        val albumId: Long,
+        val albumName: String,
+        val albumImageUrl: String?
+    )
     /** Une distinction HoF/Global et son contexte temporel — données calculées depuis les intronisations existantes. */
     data class HonorEntryVisual(
         val sealKey: String,
@@ -245,7 +295,8 @@ class RecordExplainer(private val db: NovaDatabase) {
         val reign: String?,
         val reignDuration: String?,
         val weeksAtOne: Int,
-        val playsAtEntry: Int
+        val playsAtEntry: Int,
+        val perfectAllKill: PerfectAllKillVisual? = null
     )
     data class HonorSealVisual(
         val key: String,
@@ -315,6 +366,8 @@ class RecordExplainer(private val db: NovaDatabase) {
         val presenceVisual: PresenceVisual? = null,
         /** 🎼 Échelle chart → Top 10 → Top 5 → #1 pour les records de titres/albums distincts. */
         val songReachVisual: SongReachVisual? = null,
+        /** 💎 Trois piliers de Most Cumulative #1, duel et heatmap calés sur une seule cadence. */
+        val artistCumulativeNoOneVisual: ArtistCumulativeNoOneVisual? = null,
         /** 👑 Galerie chronologique HoF et constellation Global, réservées à MOST_HOF/MOST_GLOBAL. */
         val honorVisual: HonorVisual? = null
     )
@@ -348,6 +401,35 @@ class RecordExplainer(private val db: NovaDatabase) {
             Period.YEARLY -> d.year.toString()
             else -> d.format(shortFmt)
         }
+    }
+
+    /** Résout l'affiche d'un événement PAK depuis les trois lignes #1 du même snapshot. */
+    suspend fun perfectAllKillVisual(periodType: String, date: String, artistId: Long): PerfectAllKillVisual? {
+        val period = Period.entries.firstOrNull { it.dbName == periodType } ?: return null
+        if (period !in listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY)) return null
+        val billboard = db.billboardDao()
+        val trackId = billboard.numberOneTrack(periodType, date) ?: return null
+        val topArtistId = billboard.numberOneArtist(periodType, date) ?: return null
+        val albumId = billboard.numberOneAlbum(periodType, date) ?: return null
+        if (topArtistId != artistId) return null
+        val track = db.trackDao().getById(trackId) ?: return null
+        val artist = db.artistDao().getById(artistId) ?: return null
+        val album = db.albumDao().getById(albumId) ?: return null
+        return PerfectAllKillVisual(
+            periodType = periodType,
+            cadenceLabel = period.label,
+            dateLabel = on(period, date),
+            dateIso = date,
+            artistId = artist.artistId,
+            artistName = artist.name,
+            artistImageUrl = artist.photoUrl,
+            trackId = track.trackId,
+            trackName = track.title,
+            trackImageUrl = track.coverUrl,
+            albumId = album.albumId,
+            albumName = album.title,
+            albumImageUrl = album.coverUrl
+        )
     }
 
     private fun unit(p: Period?, n: Int) = RecordCatalog.unitLabel(p, n > 1)
@@ -703,6 +785,7 @@ class RecordExplainer(private val db: NovaDatabase) {
 
     private suspend fun explainCore(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?, id: Long, name: String, value: Double): Story = runCatching {
         when (def.id) {
+            "MOST_CUMULATIVE_ARTIST_NO1" -> artistCumulativeNoOne(period ?: Period.WEEKLY, sub, id, name, value)
             "MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1", "MOST_CONSISTENT", "MOST_BLOCKED_TOP5",
             "BIGGEST_JUMP", "BIGGEST_FALL", "BIGGEST_COMEBACK", "BIGGEST_CLIMBER", "SLEEPER_HIT", "FASTEST_RISE", "LONGEST_ROAD",
             "BIGGEST_PERIOD", "BIGGEST_DEBUT", "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name, value)
@@ -787,7 +870,7 @@ class RecordExplainer(private val db: NovaDatabase) {
         }
 
         // 🧬 Profil dans le chart concerné (records basés sur une trajectoire)
-        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART", "MOST_SUCCESSIVE_1")
+        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART", "MOST_SUCCESSIVE_1", "MOST_CUMULATIVE_ARTIST_NO1")
         if (chartBased) {
             val p = period!!
             val s = series(cat, p, id)
@@ -873,6 +956,120 @@ class RecordExplainer(private val db: NovaDatabase) {
             out += "🏆 Ailleurs dans les records" to "C'est le seul classement de records où $name apparaît pour le moment : ce record est sa signature."
         }
         return out
+    }
+
+    /** Explication dédiée : trois cumuls parallèles, rang, rival et calendrier de présence au #1. */
+    private suspend fun artistCumulativeNoOne(
+        period: Period,
+        sub: String?,
+        id: Long,
+        name: String,
+        cacheValue: Double
+    ): Story {
+        val selectedChart = sub?.takeIf { it in ArtistChartNumberOnes.charts } ?: ArtistChartNumberOnes.HOT_100
+        val activeArtists = db.artistDao().allPlayedList().mapTo(HashSet()) { it.artistId }
+        val creditedByTrack = HashMap<Long, MutableSet<Long>>()
+        db.trackLinkDao().allTrackArtists().forEach { link ->
+            creditedByTrack.getOrPut(link.trackId) { HashSet() }.add(link.artistId)
+        }
+        val tracks = db.trackDao().allPlayed()
+        tracks.forEach { track -> creditedByTrack.getOrPut(track.trackId) { HashSet() }.add(track.artistId) }
+        val albumOwners = db.albumDao().all().associate { it.albumId to it.artistId }
+        val dao = db.billboardDao()
+        val trackRows = dao.allTrackRows(period.dbName)
+        val artistRows = dao.allArtistRows(period.dbName)
+        val albumRows = dao.allAlbumRows(period.dbName)
+        val hot100Leaders = trackRows.filter { it.position == 1 }.associate { it.date to it.entityId }
+        val artist50Leaders = artistRows.filter { it.position == 1 }.associate { it.date to it.entityId }
+        val albums75Leaders = albumRows.filter { it.position == 1 }.associate { it.date to it.entityId }
+        val dates = dao.snapshotDates(period.dbName)
+        val snapshots = dates.map { date ->
+            val hot100Artists = hot100Leaders[date]?.let { trackId ->
+                creditedByTrack[trackId].orEmpty().filterTo(linkedSetOf()) { it in activeArtists }
+            }.orEmpty()
+            val artist50Leader = artist50Leaders[date]?.takeIf { it in activeArtists }
+            val albumOwner = albums75Leaders[date]?.let { albumOwners[it] }?.takeIf { it in activeArtists }
+            ArtistChartNumberOnes.Snapshot(date, hot100Artists, artist50Leader, setOfNotNull(albumOwner))
+        }
+        val cumulative = ArtistChartNumberOnes.cumulativeDates(snapshots)
+
+        val labels = mapOf(
+            ArtistChartNumberOnes.HOT_100 to ("Hot 100" to "🔥"),
+            ArtistChartNumberOnes.ARTIST_50 to ("Artist 50" to "🎤"),
+            ArtistChartNumberOnes.ALBUMS_75 to ("Albums 75" to "💿")
+        )
+        suspend fun pillarsFor(artistId: Long): List<ArtistNoOnePillar> = ArtistChartNumberOnes.charts.map { chart ->
+            val earnedDates = cumulative[chart]?.get(artistId).orEmpty()
+            val latest = earnedDates.maxOrNull()
+            val (latestName, latestImage) = when (chart) {
+                ArtistChartNumberOnes.HOT_100 -> hot100Leaders[latest]?.let { db.trackDao().getById(it) }
+                    ?.let { it.title to it.coverUrl } ?: (null to null)
+                ArtistChartNumberOnes.ARTIST_50 -> db.artistDao().getById(artistId)?.let { it.name to it.photoUrl } ?: (null to null)
+                else -> albums75Leaders[latest]?.let { db.albumDao().getById(it) }
+                    ?.let { it.title to it.coverUrl } ?: (null to null)
+            }
+            val (label, emoji) = labels.getValue(chart)
+            ArtistNoOnePillar(chart, label, emoji, earnedDates.size, latestName, latestImage, latest?.let { on(period, it) })
+        }
+
+        val pillars = pillarsFor(id)
+        val score = pillars.firstOrNull { it.key == selectedChart }?.count ?: cacheValue.toInt()
+        val recordDao = db.recordDao()
+        val rank = recordDao.betterCount("MOST_CUMULATIVE_ARTIST_NO1", period.dbName, RecordCategory.ARTIST.dbName, selectedChart, score.toDouble(), asc = false) + 1
+        val tiedAtTop = recordDao.tiedAt("MOST_CUMULATIVE_ARTIST_NO1", period.dbName, RecordCategory.ARTIST.dbName, selectedChart, score.toDouble())
+        val topRows = recordDao.top10("MOST_CUMULATIVE_ARTIST_NO1", period.dbName, RecordCategory.ARTIST.dbName, selectedChart, asc = false).first()
+        val rivalRow = topRows.filterNot { it.r.entityId == id }.minByOrNull { kotlin.math.abs(it.r.value - score.toDouble()) }
+        val rival = rivalRow?.let { row ->
+            val rivalRank = recordDao.betterCount("MOST_CUMULATIVE_ARTIST_NO1", period.dbName, RecordCategory.ARTIST.dbName, selectedChart, row.r.value, asc = false) + 1
+            ArtistNoOneRival(
+                id = row.r.entityId,
+                name = row.name ?: "Inconnu",
+                imageUrl = row.imageUrl,
+                rank = rivalRank,
+                score = row.r.value.toInt(),
+                pillarCounts = pillarsFor(row.r.entityId).associate { it.key to it.count },
+                tied = row.r.value.toInt() == score
+            )
+        }
+        val heatmap = snapshots.map { snapshot ->
+            val activeCharts = buildSet {
+                if (id in snapshot.hot100ArtistIds) add(ArtistChartNumberOnes.HOT_100)
+                if (snapshot.artist50LeaderId == id) add(ArtistChartNumberOnes.ARTIST_50)
+                if (id in snapshot.albums75ArtistIds) add(ArtistChartNumberOnes.ALBUMS_75)
+            }
+            ArtistNoOneHeatCell(snapshot.date, activeCharts)
+        }
+        val selectedLabel = labels.getValue(selectedChart).first
+        val facts = pillars.map { pillar ->
+            "${pillar.emoji} ${pillar.label}" to "${pillar.count} ${unit(period, pillar.count)}" +
+                (pillar.latestDate?.let { " · dernier #1 : $it" } ?: "")
+        } + listOf(
+            "Rang · ${selectedLabel}" to "#$rank sur ${cumulative[selectedChart].orEmpty().size} artistes avec au moins un #1" +
+                (if (tiedAtTop > 1) " · $tiedAtTop ex æquo" else "")
+        )
+        val separateCounts = pillars.joinToString(" · ") { "${it.label} : ${it.count} ${unit(period, it.count)}" }
+        val narrative = "$name a mené le classement « $selectedLabel » pendant $score ${unit(period, score)}. " +
+            "Les trois piliers restent séparés — $separateCounts : aucun total ne mélange leurs unités ni leurs charts. " +
+            "Chaque ancre de cette cadence compte au plus une fois par artiste et par chart."
+        val visual = ArtistCumulativeNoOneVisual(
+            period = period,
+            selectedChart = selectedChart,
+            selectedChartLabel = selectedLabel,
+            score = score,
+            rank = rank,
+            boardSize = cumulative[selectedChart].orEmpty().size,
+            tiedAtTop = tiedAtTop,
+            pillars = pillars,
+            rival = rival,
+            heatmap = heatmap
+        )
+        return Story(
+            headline = "💎 $score ${unit(period, score)} au #1 · $selectedLabel",
+            narrative = narrative,
+            facts = facts,
+            timelineTitle = "Présence au #1 · ${period.label}",
+            artistCumulativeNoOneVisual = visual
+        )
     }
 
     /* ---------------- records sur la trajectoire de l'élément ---------------- */
@@ -2010,7 +2207,12 @@ class RecordExplainer(private val db: NovaDatabase) {
             SealDefinition("LONG_RUN_WEEKLY", HallOfFameRules.LONG_RUN, "WEEKLY", "Long règne · Hebdo", "🏆", "Règne continu d'au moins ${HallOfFameRules.LONG_RUN_WEEKS} semaines au #1 hebdomadaire."),
             SealDefinition("DIRECT_DEBUT_MONTHLY", HallOfFameRules.DIRECT_DEBUT, "MONTHLY", "Début direct · Mensuel", "🌙", "Première entrée directement à la première place du chart mensuel."),
             SealDefinition("LONG_RUN_MONTHLY", HallOfFameRules.LONG_RUN, "MONTHLY", "Long règne · Mensuel", "✨", "Règne continu d'au moins ${HallOfFameRules.LONG_RUN_MONTHS} mois au #1 mensuel.")
-        )
+        ) + (if (cat == RecordCategory.ARTIST) listOf(
+            SealDefinition("PERFECT_ALL_KILL_DAILY", HallOfFameRules.PERFECT_ALL_KILL, "DAILY", "Perfect All Kill · Daily", "💎", "Même snapshot Daily : artiste crédité du titre n°1 Hot 100, n°1 de l'Artist 50 et propriétaire de l'album n°1 des Albums 75."),
+            SealDefinition("PERFECT_ALL_KILL_WEEKLY", HallOfFameRules.PERFECT_ALL_KILL, "WEEKLY", "Perfect All Kill · Weekly", "💎", "Même snapshot Weekly : artiste crédité du titre n°1 Hot 100, n°1 de l'Artist 50 et propriétaire de l'album n°1 des Albums 75."),
+            SealDefinition("PERFECT_ALL_KILL_MONTHLY", HallOfFameRules.PERFECT_ALL_KILL, "MONTHLY", "Perfect All Kill · Monthly", "💎", "Même snapshot Monthly : artiste crédité du titre n°1 Hot 100, n°1 de l'Artist 50 et propriétaire de l'album n°1 des Albums 75."),
+            SealDefinition("PERFECT_ALL_KILL_YEARLY", HallOfFameRules.PERFECT_ALL_KILL, "YEARLY", "Perfect All Kill · Yearly", "💎", "Même snapshot Yearly : artiste crédité du titre n°1 Hot 100, n°1 de l'Artist 50 et propriétaire de l'album n°1 des Albums 75.")
+        ) else emptyList())
         fun sealKey(entryType: String, periodType: String): String? = sealDefinitions.firstOrNull {
             it.entryType == entryType && it.periodType == periodType
         }?.key
@@ -2018,12 +2220,15 @@ class RecordExplainer(private val db: NovaDatabase) {
             it.entryType == entryType && it.periodType == periodType
         }?.title ?: "${entryType.replace('_', ' ')} · $periodType"
         fun periodLabel(periodType: String): String = when (periodType) {
+            "DAILY" -> "Quotidien"
             "WEEKLY" -> "Hebdomadaire"
             "MONTHLY" -> "Mensuel"
+            "YEARLY" -> "Annuel"
             "GLOBAL" -> "Global"
             else -> periodType
         }
         fun detailFor(entry: com.novastats.app.data.db.entity.HallOfFameEntity): String? = when {
+            entry.entryType == HallOfFameRules.PERFECT_ALL_KILL -> "Même cadence · Hot 100 / Artist 50 / Albums 75 reliés au même artiste"
             entry.entryType == "LEGENDARY_RUN" && entry.weeksAt1 > 0 -> "${entry.weeksAt1} semaines cumulées au #1"
             entry.weeksAt1 > 0 -> "${entry.weeksAt1} semaines au #1 au total"
             entry.reignStart != null && entry.reignEnd != null -> "Règne du ${short(Period.DAILY, entry.reignStart)} au ${short(Period.DAILY, entry.reignEnd)}"
@@ -2080,7 +2285,9 @@ class RecordExplainer(private val db: NovaDatabase) {
                     "${short(Period.DAILY, entry.reignStart)} → ${short(Period.DAILY, entry.reignEnd)}" else null,
                 reignDuration = reignDuration(entry),
                 weeksAtOne = entry.weeksAt1,
-                playsAtEntry = entry.playCountAtEntry
+                playsAtEntry = entry.playCountAtEntry,
+                perfectAllKill = if (entry.entryType == HallOfFameRules.PERFECT_ALL_KILL)
+                    perfectAllKillVisual(entry.periodType, entry.entryDate, id) else null
             )
         }
         val selectedSub = sub?.takeUnless { it == "ALL" }
@@ -2113,6 +2320,7 @@ class RecordExplainer(private val db: NovaDatabase) {
             )
         }
         val maxScore = when {
+            !global && cat == RecordCategory.ARTIST -> 8 // quatre sceaux historiques + quatre cadences Perfect All Kill
             !global -> 4
             selectedSub != null -> 1
             else -> 3
@@ -2128,8 +2336,9 @@ class RecordExplainer(private val db: NovaDatabase) {
                 "La constellation distingue Triple Debut, All Kill et Legendary Run; All Kill correspond au #1 simultané dans Daily, Weekly et Monthly. " +
                 (if (firstDate != null) "Première distinction ${firstDate.lowercase()}${lastDate?.let { ", dernière $it"} ?: ""}." else "Aucune distinction enregistrée pour ce type.")
         } else {
-            "$name compte $totalSelected distinction${if (totalSelected == 1) "" else "s"} au Hall of Fame, issues des débuts directs et des longs règnes en hebdomadaire et mensuel. " +
-                (if (firstDate != null) "Première intronisation ${firstDate.lowercase()}${lastDate?.let { ", dernière $it"} ?: ""}. Le détail des dates et des règnes figure dans la frise." else "Aucune intronisation n'est enregistrée.")
+            val pakCount = timelineRows.count { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }
+            "$name compte $totalSelected distinction${if (totalSelected == 1) "" else "s"} au Hall of Fame, entre débuts directs, longs règnes et Perfect All Kill inter-charts${if (pakCount > 0) " ($pakCount cadence${if (pakCount == 1) "" else "s"})" else ""}. " +
+                (if (firstDate != null) "Première intronisation ${firstDate.lowercase()}${lastDate?.let { ", dernière $it"} ?: ""}. Le détail des dates, des cadences et des règnes figure dans la frise." else "Aucune intronisation n'est enregistrée.")
         }
         val visual = HonorVisual(
             isGlobal = global,

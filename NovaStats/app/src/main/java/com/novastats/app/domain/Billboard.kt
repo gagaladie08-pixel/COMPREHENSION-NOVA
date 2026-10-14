@@ -197,6 +197,8 @@ object HallOfFameRules {
     const val LONG_RUN = "LONG_RUN"
     const val TRIPLE_DEBUT = "TRIPLE_DEBUT"
     const val ALL_KILL = "ALL_KILL"
+    /** Distinction PAK distincte de l'All Kill : une même personne relie trois charts de types différents. */
+    const val PERFECT_ALL_KILL = "PERFECT_ALL_KILL"
     const val LEGENDARY_RUN = "LEGENDARY_RUN"
 
     const val LONG_RUN_WEEKS = 3

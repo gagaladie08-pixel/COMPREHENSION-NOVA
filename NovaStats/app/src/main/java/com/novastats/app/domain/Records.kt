@@ -1,7 +1,7 @@
 package com.novastats.app.domain
 
 /*
- * 🏅 Les 32 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
+ * 🏅 Les 33 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
  * Kotlin pur : définitions + moteur de calcul sur des séries de positions, testable en JVM.
  */
 
@@ -54,6 +54,7 @@ object RecordCatalog {
     val groupOf: Map<String, RecordGroup> = mapOf(
         "MOST_CUMULATIVE" to RecordGroup.DURATION, "MOST_CUMULATIVE_TOP10" to RecordGroup.DURATION,
         "MOST_CUMULATIVE_TOP5" to RecordGroup.DURATION, "MOST_TIME_AT_1" to RecordGroup.DURATION,
+        "MOST_CUMULATIVE_ARTIST_NO1" to RecordGroup.DURATION,
         "MOST_CONSISTENT" to RecordGroup.DURATION, "MOST_BLOCKED_TOP5" to RecordGroup.DURATION,
         "BIGGEST_JUMP" to RecordGroup.MOVEMENT, "BIGGEST_FALL" to RecordGroup.MOVEMENT, "BIGGEST_COMEBACK" to RecordGroup.MOVEMENT, "BIGGEST_CLIMBER" to RecordGroup.MOVEMENT,
         "SLEEPER_HIT" to RecordGroup.MOVEMENT, "FASTEST_RISE" to RecordGroup.MOVEMENT, "LONGEST_ROAD" to RecordGroup.MOVEMENT,
@@ -62,7 +63,7 @@ object RecordCatalog {
         "BIGGEST_PERIOD" to RecordGroup.TOTALS, "MOST_CERTIFICATIONS" to RecordGroup.TOTALS, "MOST_HOF" to RecordGroup.TOTALS, "MOST_GLOBAL" to RecordGroup.TOTALS, "MULTI_CHART" to RecordGroup.TOTALS,
         "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_TOP5" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
         "MOST_SIMULTANEOUS" to RecordGroup.DOMINATION, "MOST_SUCCESSIVE_1" to RecordGroup.DOMINATION,
-        // 25-30 (extension)
+        // 25-33 (extensions)
         "LONGEST_LIFESPAN" to RecordGroup.DURATION,
         "MOST_REENTRIES" to RecordGroup.MOVEMENT, "LONGEST_ABSENCE_RETURN" to RecordGroup.MOVEMENT,
         "LONGEST_LISTENING_STREAK" to RecordGroup.LISTENING,
@@ -73,7 +74,7 @@ object RecordCatalog {
 
     /** Records dont la casse mérite une cérémonie : les plus durs à obtenir et à battre (choix utilisateur). */
     val MAJOR: Set<String> = setOf(
-        "MOST_TIME_AT_1", "MOST_CUMULATIVE", "LONGEST_LIFESPAN", "PODIUM_SWEEP",
+        "MOST_TIME_AT_1", "MOST_CUMULATIVE", "MOST_CUMULATIVE_ARTIST_NO1", "LONGEST_LIFESPAN", "PODIUM_SWEEP",
         "LONGEST_LISTENING_STREAK", "BIGGEST_PERIOD", "BIGGEST_JUMP", "FASTEST_CERT"
     )
 
@@ -169,7 +170,7 @@ object RecordCatalog {
         RecordDef(11, "BIGGEST_DEBUT", "💥", "Biggest Debut", "Le plus d'écoutes lors de la première apparition dans le chart", chartPeriods, all3, unit = RecordUnit.PLAYS),
         RecordDef(12, "MOST_CERTIFICATIONS", "💎", "Most Certifications", "Le plus de certifications obtenues, par niveau", emptyList(), artistAlbum,
             mapOf(RecordCategory.ARTIST to certLevels.flatMap { l -> songsAlbums.map { s -> RecordSub("${s.dbName}_${l.dbName}", "${s.label} · ${l.label}") } }, RecordCategory.ALBUM to certLevels), RecordUnit.COUNT),
-        RecordDef(13, "MOST_HOF", "🏛️", "Most Hall of Fame Entries", "Le plus d'entrées au Hall of Fame (hebdo + mensuel)", emptyList(), all3, unit = RecordUnit.COUNT, screen = "HOF_GLOBAL"),
+        RecordDef(13, "MOST_HOF", "🏛️", "Most Hall of Fame Entries", "Le plus d'intronisations au Hall of Fame, dont Perfect All Kill sur ses cadences Daily, Weekly, Monthly et Yearly", emptyList(), all3, unit = RecordUnit.COUNT, screen = "HOF_GLOBAL"),
         RecordDef(14, "MOST_GLOBAL", "🌍", "Most Global Entries", "Le plus de distinctions Global distinctes : Triple Debut, All Kill et Legendary Run", emptyList(), all3,
             mapOf(RecordCategory.TRACK to globalSubs, RecordCategory.ARTIST to globalSubs, RecordCategory.ALBUM to globalSubs), RecordUnit.COUNT, screen = "HOF_GLOBAL"),
         RecordDef(15, "BIGGEST_COMEBACK", "🔄", "Biggest Comeback", "Plus grande remontée lors d'un retour après absence (5 j / 3 sem. / 2 mois / 1 an)", chartPeriods, all3, unit = RecordUnit.POSITIONS),
@@ -201,7 +202,17 @@ object RecordCatalog {
             mapOf(RecordCategory.ARTIST to sweepSubs, RecordCategory.ALBUM to sweepSubs)),
         RecordDef(30, "MOST_RECORDS", "🏆", "Most Records", "Le plus de #1 détenus dans l'ensemble des classements de records (record × période × zone) — ex æquo compris", emptyList(), all3, unit = RecordUnit.COUNT),
         RecordDef(31, "MOST_CUMULATIVE_TOP5", "🏅", "Most Cumulative in Top 5", "Total de périodes passées aux places 1 à 5, consécutives ou non", chartPeriods, all3),
-        RecordDef(32, "MOST_SONGS_TOP5", "💜", "Most Songs in Top 5", "Le plus de titres distincts ayant atteint le Top 5", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT)
+        RecordDef(32, "MOST_SONGS_TOP5", "💜", "Most Songs in Top 5", "Le plus de titres distincts ayant atteint le Top 5", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
+        RecordDef(
+            33, "MOST_CUMULATIVE_ARTIST_NO1", "💎", "Most Cumulative #1",
+            "Nombre de périodes au n°1 par artiste : artistes crédités du Hot 100, artiste n°1 de l'Artist 50 et propriétaire des Albums 75, sans mélanger les charts.",
+            listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY), listOf(RecordCategory.ARTIST),
+            mapOf(RecordCategory.ARTIST to listOf(
+                RecordSub(ArtistChartNumberOnes.HOT_100, "🔥 Hot 100 · artiste crédité"),
+                RecordSub(ArtistChartNumberOnes.ARTIST_50, "🎤 Artist 50"),
+                RecordSub(ArtistChartNumberOnes.ALBUMS_75, "💿 Albums 75 · propriétaire")
+            ))
+        )
     )
 
     fun byId(id: String): RecordDef? = ALL.firstOrNull { it.id == id }

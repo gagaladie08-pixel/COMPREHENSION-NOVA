@@ -707,6 +707,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     var songReachShareError by remember(ref) { mutableStateOf(false) }
     var sharingHonorCard by remember(ref) { mutableStateOf(false) }
     var honorShareError by remember(ref) { mutableStateOf(false) }
+    var sharingArtistNoOne by remember(ref) { mutableStateOf(false) }
+    var artistNoOneShareError by remember(ref) { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
@@ -718,8 +720,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val presenceRecord = def.id in setOf("MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1")
             val songReachRecord = def.id in setOf("MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1")
             val honorRecord = def.id == "MOST_HOF" || def.id == "MOST_GLOBAL"
+            val artistNoOneRecord = def.id == "MOST_CUMULATIVE_ARTIST_NO1"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -801,6 +804,38 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                                     songReachShareError = true
                                 } finally {
                                     sharingSongReach = false
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        story?.artistCumulativeNoOneVisual?.let { visual ->
+            item {
+                ArtistCumulativeNoOneSpotlight(
+                    name = name,
+                    imageUrl = row.imageUrl,
+                    visual = visual,
+                    color = color,
+                    sharing = sharingArtistNoOne,
+                    shareError = artistNoOneShareError,
+                    onShare = {
+                        if (!sharingArtistNoOne) {
+                            sharingArtistNoOne = true
+                            artistNoOneShareError = false
+                            shareScope.launch {
+                                try {
+                                    val file = ShareCards.renderArtistCumulativeNoOneCard(
+                                        app, row.r.entityId, name, row.subtitle, row.imageUrl, visual, theme
+                                    )
+                                    ShareCards.share(app, file, "Partager ce record de #1")
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    artistNoOneShareError = true
+                                } finally {
+                                    sharingArtistNoOne = false
                                 }
                             }
                         }
@@ -1812,6 +1847,174 @@ private fun SongReachSpotlight(
             }
             Text("Première date de franchissement de chaque palier; les cases « — » indiquent un palier jamais atteint.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
         }
+    }
+}
+
+/** 💎 Trois cumuls indépendants, rival et historique des périodes #1 pour le record artiste. */
+@Composable
+private fun ArtistCumulativeNoOneSpotlight(
+    name: String,
+    imageUrl: String?,
+    visual: RecordExplainer.ArtistCumulativeNoOneVisual,
+    color: Color,
+    sharing: Boolean,
+    shareError: Boolean,
+    onShare: () -> Unit
+) {
+    val theme = Nova.theme
+    val chartColors = mapOf(
+        "HOT_100" to Color(0xFF62C8FF),
+        "ARTIST_50" to Color(0xFFB39AFF),
+        "ALBUMS_75" to Color(0xFFFFC76A)
+    )
+    val unit = when (visual.period) {
+        Period.DAILY -> "jours"
+        Period.WEEKLY -> "semaines"
+        Period.MONTHLY -> "mois"
+        Period.YEARLY -> "années"
+        Period.GLOBAL -> "périodes"
+    }
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(color.copy(alpha = 0.24f), theme.surface.copy(alpha = 0.97f), NovaColors.Gold.copy(alpha = 0.10f))))
+            .border(1.5.dp, Brush.horizontalGradient(listOf(color.copy(alpha = 0.74f), NovaColors.Gold.copy(alpha = 0.42f), color.copy(alpha = 0.50f))), shape)
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CoverArt(imageUrl, name, size = 52, circle = true)
+            Column(Modifier.weight(1f)) {
+                Text("MOST CUMULATIVE #1", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, letterSpacing = 0.8.sp)
+                Text("${visual.selectedChartLabel} · ${visual.period.label}", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text("Rang #${visual.rank} sur ${visual.boardSize}${if (visual.tiedAtTop > 1) " · ${visual.tiedAtTop} ex æquo" else ""}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("${visual.score}", color = color, fontWeight = FontWeight.Black, fontSize = 27.sp, lineHeight = 29.sp)
+                Text(unit, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        SectionTitle("LES TROIS PILIERS · UNITÉS SÉPARÉES", color)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            visual.pillars.forEach { pillar ->
+                val accent = chartColors[pillar.key] ?: color
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(13.dp))
+                        .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.19f), theme.background.copy(alpha = 0.54f))))
+                        .border(1.dp, accent.copy(alpha = 0.36f), RoundedCornerShape(13.dp))
+                        .padding(horizontal = 7.dp, vertical = 9.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("${pillar.emoji} ${pillar.label.uppercase(Locale.FRANCE)}", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(pillar.count.toString(), color = theme.text, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                    Text(unit, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(5.dp))
+                    CoverArt(pillar.latestImageUrl, pillar.latestNumberOne ?: pillar.label, size = 38, circle = pillar.key == "ARTIST_50")
+                    Text(pillar.latestNumberOne ?: "Aucun #1", color = theme.text, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(pillar.latestDate ?: "—", color = accent, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
+                }
+            }
+        }
+        Text("Chaque chart garde son propre compteur : aucun total mixte ne compare des jours, semaines ou mois entre eux.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 7.dp))
+
+        visual.rival?.let { rival ->
+            Spacer(Modifier.height(11.dp))
+            SectionTitle("FACE AU RIVAL LE PLUS PROCHE", NovaColors.Gold)
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp))
+                    .background(theme.background.copy(alpha = 0.44f))
+                    .border(1.dp, NovaColors.Gold.copy(alpha = 0.24f), RoundedCornerShape(15.dp))
+                    .padding(10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        CoverArt(imageUrl, name, size = 39, circle = true)
+                        Column(Modifier.weight(1f)) {
+                            Text("#${visual.rank} · $name", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${visual.score} $unit · ${visual.selectedChartLabel}", color = color, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Text(if (rival.tied) "🤝" else "VS", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                            Text("#${rival.rank} · ${rival.name}", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+                            Text("${rival.score} $unit · ${visual.selectedChartLabel}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End)
+                        }
+                        CoverArt(rival.imageUrl, rival.name, size = 39, circle = true)
+                    }
+                }
+                Spacer(Modifier.height(9.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    visual.pillars.forEach { pillar ->
+                        val accent = chartColors[pillar.key] ?: color
+                        val rivalCount = rival.pillarCounts[pillar.key] ?: 0
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(9.dp)).background(accent.copy(alpha = 0.10f))
+                                .border(1.dp, accent.copy(alpha = 0.24f), RoundedCornerShape(9.dp)).padding(vertical = 6.dp, horizontal = 3.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(pillar.label, color = accent, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${pillar.count} : $rivalCount", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(11.dp))
+        SectionTitle("HISTORIQUE RÉCENT · PÉRIODES AU N°1", color)
+        val recent = visual.heatmap.takeLast(42)
+        if (recent.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                recent.chunked(7).forEach { week ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        week.forEach { cell ->
+                            val activeColors = cell.activeCharts.mapNotNull { chartColors[it] }
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(
+                                    Modifier.fillMaxWidth().height(31.dp).clip(RoundedCornerShape(7.dp))
+                                        .background(Brush.linearGradient(if (activeColors.isEmpty()) listOf(theme.background.copy(alpha = 0.55f), theme.background.copy(alpha = 0.55f)) else activeColors + activeColors.reversed()))
+                                        .border(1.dp, if (cell.activeCharts.contains(visual.selectedChart)) color.copy(alpha = 0.84f) else theme.textSecondary.copy(alpha = 0.12f), RoundedCornerShape(7.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(cell.date.takeLast(2), color = if (activeColors.isEmpty()) theme.textSecondary.copy(alpha = 0.55f) else Color.White, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 2.dp)) {
+                                    chartColors.forEach { (key, accent) ->
+                                        Box(Modifier.size(4.dp).clip(CircleShape).background(if (key in cell.activeCharts) accent else Color.Transparent))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val from = recent.first().date
+            val to = recent.last().date
+            Text("${visual.period.label} · $from → $to · traits = chart où l'artiste était #1", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+        } else {
+            Text("Aucun snapshot historique disponible pour cette cadence.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 7.dp)) {
+            chartColors.forEach { (key, accent) ->
+                val label = visual.pillars.firstOrNull { it.key == key }?.label ?: key
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(accent))
+                    Text(label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.18f))
+                .border(1.dp, color.copy(alpha = 0.40f), RoundedCornerShape(12.dp)).clickable(enabled = !sharing, onClick = onShare)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(if (sharing) "⏳ Préparation de la carte…" else "✦ PARTAGER CE RECORD ✦", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+        }
+        if (shareError) Text("Impossible de préparer la carte. Réessaie.", color = Color(0xFFFF6B6B), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

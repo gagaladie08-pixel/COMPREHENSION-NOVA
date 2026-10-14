@@ -346,6 +346,248 @@ object ShareCards {
         writePng(ctx, bmp, "nova_records_songs_${visual.recordTitle.hashCode()}_$entityId.png")
     }
 
+    /** 📊 Carte de prestige pour le cumul d'artiste : trois compteurs disjoints, duel et périodes récentes. */
+    suspend fun renderArtistCumulativeNoOneCard(
+        ctx: Context,
+        entityId: Long,
+        name: String,
+        subtitle: String?,
+        imageUrl: String?,
+        visual: RecordExplainer.ArtistCumulativeNoOneVisual,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val violet = 0xFFB39AFF.toInt()
+        val cyan = 0xFF62C8FF.toInt()
+        val gold = NovaColors.Gold.toArgb()
+        val chartColors = mapOf("HOT_100" to cyan, "ARTIST_50" to violet, "ALBUMS_75" to 0xFFFFC76A.toInt())
+        val bg = Paint().apply {
+            shader = LinearGradient(0f, 0f, 0f, H.toFloat(), intArrayOf(theme.background.toArgb(), blend(theme.background.toArgb(), violet, 0.30f), AColor.BLACK), floatArrayOf(0f, 0.56f, 1f), Shader.TileMode.CLAMP)
+        }
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bg)
+        halo(c, 180f, 420f, 520f, violet, 0.36f)
+        halo(c, 900f, 1180f, 520f, cyan, 0.20f)
+        halo(c, 540f, 1570f, 440f, gold, 0.16f)
+        c.drawRoundRect(RectF(30f, 30f, W - 30f, H - 30f), 46f, 46f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(violet, 0.64f)
+        })
+        c.drawText("NOVA RECORDS · ÉDITION PRESTIGE", 72f, 120f, textPaint(bold, 27f, withAlpha(theme.accent.toArgb(), 0.98f)).apply { letterSpacing = 0.18f })
+        c.drawText("MOST CUMULATIVE #1", W / 2f, 243f, textPaint(bold, 68f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = -0.01f })
+        c.drawText("${visual.selectedChartLabel.uppercase()}  ·  ${visual.period.label.uppercase()}", W / 2f, 304f, textPaint(bold, 27f, withAlpha(cyan, 0.98f)).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.08f })
+        val avatar = RectF(445f, 354f, 635f, 544f)
+        val artistBitmap = imageUrl?.let { loadBitmap(ctx, it, 320) }
+        if (artistBitmap != null) drawCircleCover(c, artistBitmap, avatar.centerX(), avatar.centerY(), 90f)
+        else {
+            c.drawCircle(avatar.centerX(), avatar.centerY(), 90f, Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(avatar.left, avatar.top, avatar.right, avatar.bottom, violet, cyan, Shader.TileMode.CLAMP) })
+            c.drawText(name.take(1).uppercase(), avatar.centerX(), avatar.centerY() + 31f, textPaint(bold, 80f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER })
+        }
+        c.drawCircle(avatar.centerX(), avatar.centerY(), 96f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 5f; color = withAlpha(gold, 0.90f) })
+        drawWrapped(c, name, 96f, 594f, W - 192f, textPaint(bold, 42f, theme.text.toArgb()), maxLines = 2, lineH = 48f)
+        subtitle?.takeIf { it.isNotBlank() }?.let { c.drawText(ellipsize(it, textPaint(inter, 20f, theme.textSecondary.toArgb()), W - 180f), W / 2f, 680f, textPaint(inter, 20f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER }) }
+
+        val rankRect = RectF(305f, 704f, 775f, 767f)
+        c.drawRoundRect(rankRect, 31f, 31f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(gold, 0.19f) })
+        c.drawRoundRect(rankRect, 31f, 31f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(gold, 0.72f) })
+        val tied = if (visual.tiedAtTop > 1) " · ${visual.tiedAtTop} EX ÆQUO" else ""
+        c.drawText("RANG #${visual.rank} / ${visual.boardSize}$tied", rankRect.centerX(), 745f, textPaint(bold, 24f, gold).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.07f })
+
+        c.drawText("TROIS PILIERS · AUCUN TOTAL MÉLANGÉ", W / 2f, 824f, textPaint(bold, 23f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.06f })
+        val cardTop = 860f
+        val cardBottom = 1242f
+        val gap = 19f
+        val cardWidth = (W - 144f - 2f * gap) / 3f
+        visual.pillars.forEachIndexed { index, pillar ->
+            val accent = chartColors[pillar.key] ?: violet
+            val left = 72f + index * (cardWidth + gap)
+            val rect = RectF(left, cardTop, left + cardWidth, cardBottom)
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.86f) })
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f; color = withAlpha(accent, 0.72f) })
+            c.drawText(pillar.label.uppercase(), rect.centerX(), rect.top + 40f, textPaint(bold, 21f, accent).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.045f })
+            c.drawText(pillar.count.toString(), rect.centerX(), rect.top + 115f, textPaint(bold, 62f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER })
+            val unit = when (visual.period) {
+                com.novastats.app.domain.Period.DAILY -> "JOURS"
+                com.novastats.app.domain.Period.WEEKLY -> "SEMAINES"
+                com.novastats.app.domain.Period.MONTHLY -> "MOIS"
+                com.novastats.app.domain.Period.YEARLY -> "ANNÉES"
+                com.novastats.app.domain.Period.GLOBAL -> "PÉRIODES"
+            }
+            c.drawText(unit, rect.centerX(), rect.top + 150f, textPaint(bold, 17f, withAlpha(accent, 0.95f)).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.10f })
+            val imageRect = RectF(rect.centerX() - 58f, rect.top + 174f, rect.centerX() + 58f, rect.top + 290f)
+            val cover = pillar.latestImageUrl?.let { loadBitmap(ctx, it, 260) }
+            if (cover != null) {
+                if (pillar.key == "ARTIST_50") drawCircleCover(c, cover, imageRect.centerX(), imageRect.centerY(), 55f)
+                else drawCover(c, cover, imageRect, 14f)
+            } else {
+                c.drawRoundRect(imageRect, 14f, 14f, Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(imageRect.left, imageRect.top, imageRect.right, imageRect.bottom, accent, violet, Shader.TileMode.CLAMP) })
+                c.drawText(pillar.label.take(1), imageRect.centerX(), imageRect.centerY() + 17f, textPaint(bold, 45f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER })
+            }
+            drawWrapped(c, pillar.latestNumberOne ?: "Aucun n°1 récent", rect.left + 14f, rect.top + 326f, rect.width() - 28f, textPaint(bold, 17f, theme.text.toArgb()), maxLines = 2, lineH = 21f)
+            c.drawText(pillar.latestDate ?: "—", rect.centerX(), rect.bottom - 17f, textPaint(inter, 15f, withAlpha(accent, 0.95f)).apply { textAlign = Paint.Align.CENTER })
+        }
+        val currentCounts = visual.pillars.joinToString("   ·   ") { "${it.label}: ${it.count}" }
+        c.drawText(currentCounts, W / 2f, 1288f, textPaint(inter, 18f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER })
+
+        visual.rival?.let { rival ->
+            val rivalRect = RectF(72f, 1320f, W - 72f, 1490f)
+            c.drawRoundRect(rivalRect, 23f, 23f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.83f) })
+            c.drawRoundRect(rivalRect, 23f, 23f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(gold, 0.46f) })
+            c.drawText("RIVAL · ${if (rival.tied) "À ÉGALITÉ" else "PROCHAIN AU CLASSEMENT"}", rivalRect.centerX(), rivalRect.top + 37f, textPaint(bold, 18f, gold).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.07f })
+            c.drawText("#${visual.rank}  $name", 110f, rivalRect.top + 83f, textPaint(bold, 24f, theme.text.toArgb()))
+            c.drawText("${visual.score}", 110f, rivalRect.top + 124f, textPaint(bold, 29f, cyan))
+            c.drawText("VS", rivalRect.centerX(), rivalRect.top + 90f, textPaint(bold, 22f, gold).apply { textAlign = Paint.Align.CENTER })
+            c.drawText("#${rival.rank}  ${ellipsize(rival.name, textPaint(bold, 24f, theme.text.toArgb()), 390f)}", rivalRect.right - 110f, rivalRect.top + 83f, textPaint(bold, 24f, theme.text.toArgb()).apply { textAlign = Paint.Align.RIGHT })
+            c.drawText("${rival.score}", rivalRect.right - 110f, rivalRect.top + 124f, textPaint(bold, 29f, violet).apply { textAlign = Paint.Align.RIGHT })
+            val pillarDuel = visual.pillars.joinToString("   ·   ") { pillar ->
+                "${pillar.label}: ${pillar.count}/${rival.pillarCounts[pillar.key] ?: 0}"
+            }
+            c.drawText(ellipsize(pillarDuel, textPaint(inter, 16f, theme.textSecondary.toArgb()), rivalRect.width() - 50f), rivalRect.centerX(), rivalRect.bottom - 13f, textPaint(inter, 16f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER })
+        }
+
+        c.drawText("PÉRIODES RÉCENTES AU N°1", W / 2f, 1520f, textPaint(bold, 24f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.08f })
+        val recent = visual.heatmap.takeLast(28)
+        val cell = 47f
+        val cellGap = 10f
+        val gridWidth = 7f * cell + 6f * cellGap
+        val startX = (W - gridWidth) / 2f
+        val startY = 1563f
+        recent.forEachIndexed { index, period ->
+            val col = index % 7
+            val row = index / 7
+            val left = startX + col * (cell + cellGap)
+            val top = startY + row * (cell + cellGap)
+            val rect = RectF(left, top, left + cell, top + cell)
+            val colors = period.activeCharts.mapNotNull { chartColors[it] }
+            val heatPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                when {
+                    colors.isEmpty() -> color = withAlpha(theme.surface.toArgb(), 0.52f)
+                    colors.size == 1 -> color = colors.first()
+                    else -> shader = LinearGradient(left, top, left + cell, top + cell, colors.toIntArray(), null, Shader.TileMode.CLAMP)
+                }
+            }
+            c.drawRoundRect(rect, 10f, 10f, heatPaint)
+            c.drawRoundRect(rect, 10f, 10f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(if (visual.selectedChart in period.activeCharts) gold else theme.text.toArgb(), if (visual.selectedChart in period.activeCharts) 0.88f else 0.18f) })
+            c.drawText(period.date.takeLast(2), rect.centerX(), rect.centerY() + 6f, textPaint(bold, 16f, if (colors.isEmpty()) theme.textSecondary.toArgb() else AColor.WHITE).apply { textAlign = Paint.Align.CENTER })
+        }
+        if (recent.isNotEmpty()) {
+            val rowCount = (recent.size + 6) / 7
+            c.drawText("${recent.first().date}  →  ${recent.last().date}", W / 2f, startY + rowCount * (cell + cellGap) + 20f, textPaint(inter, 17f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER })
+        }
+        var legendX = 106f
+        visual.pillars.forEach { pillar ->
+            val accent = chartColors[pillar.key] ?: violet
+            c.drawCircle(legendX, 1845f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = accent })
+            val labelPaint = textPaint(inter, 15f, theme.textSecondary.toArgb())
+            c.drawText(pillar.label, legendX + 15f, 1851f, labelPaint)
+            legendX += 15f + labelPaint.measureText(pillar.label) + 32f
+        }
+        c.drawText("NOVASTATS", W - 72f, H - 27f, textPaint(bold, 20f, withAlpha(violet, 0.98f)).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.16f })
+        c.drawRect(0f, H - 8f, W.toFloat(), H.toFloat(), Paint().apply { shader = LinearGradient(0f, 0f, W.toFloat(), 0f, violet, cyan, Shader.TileMode.CLAMP) })
+        writePng(ctx, bmp, "nova_artist_cumulative_no1_${entityId}_${visual.period.dbName}_${visual.selectedChart}.png")
+    }
+
+    /** 💎 Affiche verticale dédiée aux trois #1 Perfect All Kill d'une même cadence. */
+    suspend fun renderPerfectAllKillCard(
+        ctx: Context,
+        visual: RecordExplainer.PerfectAllKillVisual,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val violet = 0xFFA98BFF.toInt()
+        val cyan = 0xFF69D8FF.toInt()
+        val gold = NovaColors.Gold.toArgb()
+        val bg = Paint().apply {
+            shader = LinearGradient(
+                0f, 0f, 0f, H.toFloat(),
+                intArrayOf(theme.background.toArgb(), blend(theme.background.toArgb(), violet, 0.28f), AColor.BLACK),
+                floatArrayOf(0f, 0.56f, 1f), Shader.TileMode.CLAMP
+            )
+        }
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bg)
+        halo(c, 540f, 470f, 560f, violet, 0.42f)
+        halo(c, 145f, 1120f, 500f, cyan, 0.22f)
+        halo(c, 945f, 1120f, 520f, gold, 0.17f)
+        val frame = RectF(30f, 30f, W - 30f, H - 30f)
+        c.drawRoundRect(frame, 46f, 46f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(violet, 0.62f)
+        })
+        c.drawRoundRect(RectF(45f, 45f, W - 45f, H - 45f), 38f, 38f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(theme.text.toArgb(), 0.14f)
+        })
+
+        c.drawText("NOVA HALL OF FAME · ÉDITION PRESTIGE", 72f, 122f, textPaint(bold, 27f, withAlpha(theme.accent.toArgb(), 0.98f)).apply { letterSpacing = 0.18f })
+        c.drawText("PERFECT ALL KILL", W / 2f, 250f, textPaint(bold, 83f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = -0.025f })
+        val cadenceRect = RectF(210f, 292f, W - 210f, 350f)
+        c.drawRoundRect(cadenceRect, 29f, 29f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(violet, 0.22f) })
+        c.drawRoundRect(cadenceRect, 29f, 29f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(violet, 0.72f) })
+        c.drawText("${visual.cadenceLabel.uppercase()}  ·  ${visual.dateLabel.uppercase()}", cadenceRect.centerX(), 330f, textPaint(bold, 23f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.09f })
+
+        val artistRect = RectF(388f, 390f, 692f, 694f)
+        val artist = visual.artistImageUrl?.let { loadBitmap(ctx, it, 500) }
+        if (artist != null) drawCircleCover(c, artist, artistRect.centerX(), artistRect.centerY(), 145f)
+        else {
+            c.drawCircle(artistRect.centerX(), artistRect.centerY(), 145f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(artistRect.left, artistRect.top, artistRect.right, artistRect.bottom, violet, cyan, Shader.TileMode.CLAMP)
+            })
+            c.drawText(visual.artistName.take(1).uppercase(), artistRect.centerX(), artistRect.centerY() + 45f, textPaint(bold, 120f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER })
+        }
+        c.drawCircle(artistRect.centerX(), artistRect.centerY(), 151f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 7f; color = withAlpha(gold, 0.90f)
+        })
+        c.drawCircle(artistRect.centerX(), artistRect.centerY(), 163f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(violet, 0.70f)
+        })
+        drawWrapped(c, visual.artistName, 100f, 735f, W - 200f, textPaint(bold, 52f, theme.text.toArgb()), maxLines = 2, lineH = 59f)
+        c.drawText("UN ARTISTE · TROIS CHARTS · UNE MÊME PÉRIODE", W / 2f, 865f, textPaint(bold, 22f, withAlpha(cyan, 0.96f)).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.08f })
+
+        val cardTop = 930f
+        val cardBottom = 1475f
+        val gap = 21f
+        val cardWidth = (W - 144f - gap * 2f) / 3f
+        val pillars = listOf(
+            Triple("HOT 100", visual.trackName, visual.trackImageUrl) to Color(0xFF65C7FF).toArgb(),
+            Triple("ARTIST 50", visual.artistName, visual.artistImageUrl) to violet,
+            Triple("ALBUMS 75", visual.albumName, visual.albumImageUrl) to 0xFFFFC86B.toInt()
+        )
+        pillars.forEachIndexed { index, (pillar, color) ->
+            val left = 72f + index * (cardWidth + gap)
+            val rect = RectF(left, cardTop, left + cardWidth, cardBottom)
+            c.drawRoundRect(rect, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.82f) })
+            c.drawRoundRect(rect, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f; this.color = withAlpha(color, 0.74f) })
+            c.drawText(pillar.first, rect.centerX(), rect.top + 54f, textPaint(bold, 23f, color).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.08f })
+            val imageRect = RectF(rect.left + 35f, rect.top + 82f, rect.right - 35f, rect.top + 322f)
+            val cover = pillar.third?.let { loadBitmap(ctx, it, 420) }
+            if (cover != null) {
+                if (index == 1) drawCircleCover(c, cover, imageRect.centerX(), imageRect.centerY(), imageRect.width() * 0.5f)
+                else drawCover(c, cover, imageRect, 22f)
+            } else {
+                val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(imageRect.left, imageRect.top, imageRect.right, imageRect.bottom, color, violet, Shader.TileMode.CLAMP) }
+                if (index == 1) c.drawCircle(imageRect.centerX(), imageRect.centerY(), imageRect.width() * 0.5f, placeholder)
+                else c.drawRoundRect(imageRect, 22f, 22f, placeholder)
+                c.drawText(pillar.second.take(1).uppercase(), imageRect.centerX(), imageRect.centerY() + 32f, textPaint(bold, 92f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER })
+            }
+            val coverBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f; this.color = withAlpha(color, 0.70f) }
+            if (index == 1) c.drawCircle(imageRect.centerX(), imageRect.centerY(), imageRect.width() * 0.5f, coverBorder)
+            else c.drawRoundRect(imageRect, 22f, 22f, coverBorder)
+            drawWrapped(c, pillar.second, rect.left + 18f, rect.top + 354f, rect.width() - 36f, textPaint(bold, 24f, theme.text.toArgb()), maxLines = 3, lineH = 31f)
+            c.drawText("#1", rect.centerX(), rect.bottom - 30f, textPaint(bold, 31f, color).apply { textAlign = Paint.Align.CENTER })
+        }
+        listOf(72f + cardWidth + gap / 2f, 72f + 2f * (cardWidth + gap) - gap / 2f).forEach { x ->
+            c.drawCircle(x, (cardTop + cardBottom) / 2f, 25f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(violet, 0.94f) })
+            c.drawText("→", x, (cardTop + cardBottom) / 2f + 10f, textPaint(bold, 25f, AColor.WHITE).apply { textAlign = Paint.Align.CENTER })
+        }
+        c.drawText("N°1 TITRE CRÉDITÉ  →  N°1 ARTISTE  →  ALBUM DU MÊME ARTISTE", W / 2f, 1555f, textPaint(bold, 21f, withAlpha(gold, 0.96f)).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.035f })
+        c.drawText("PERFECT ALL KILL · DISTINCTION INTER-CHARTS", W / 2f, 1650f, textPaint(inter, 23f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.10f })
+        c.drawText("NOVASTATS", W - 72f, H - 75f, textPaint(bold, 30f, withAlpha(violet, 0.98f)).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.25f })
+        c.drawRect(0f, H - 9f, W.toFloat(), H.toFloat(), Paint().apply { shader = LinearGradient(0f, 0f, W.toFloat(), 0f, violet, cyan, Shader.TileMode.CLAMP) })
+        writePng(ctx, bmp, "nova_perfect_all_kill_${visual.periodType.lowercase()}_${visual.artistId}_${visual.dateIso}.png")
+    }
+
     /** 👑 Carte de prestige dédiée au Hall of Fame (galerie) et aux distinctions Global (constellation). */
     suspend fun renderHonorCard(
         ctx: Context,
