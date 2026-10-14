@@ -1628,6 +1628,20 @@ class RecordExplainer(private val db: NovaDatabase) {
                     val debut = appearances.first()
                     item(iid, "entré ${pos(debut.position)} ${on(p, debut.date)} · ${debut.plays} ▶", true, debut)
                 }
+                val featured = items.firstOrNull()
+                val trajectory = featured?.let { entry ->
+                    val appearances = mine[entry.id].orEmpty()
+                    val firstDate = appearances.firstOrNull()?.date
+                    appearances.map { appearance ->
+                        Point(
+                            appearance.date,
+                            short(p, appearance.date),
+                            appearance.position,
+                            appearance.plays,
+                            highlight = appearance.date == firstDate
+                        )
+                    }
+                }.orEmpty()
                 val featuredNames = items.take(3).joinToString(", ") { it.name }
                 val remaining = items.size - minOf(items.size, 3)
                 val examples = when {
@@ -1644,6 +1658,8 @@ class RecordExplainer(private val db: NovaDatabase) {
                         "Éléments suivis dans ce chart" to "${mine.size}",
                         "Entrées hors zone" to "${mine.size - hits.size}"
                     ),
+                    timelineTitle = featured?.let { "Trajectoire de ${it.name} après son entrée" },
+                    timeline = trajectory,
                     itemsTitle = "Le registre des premières entrées", items = items
                 )
             }

@@ -349,6 +349,163 @@ object ShareCards {
         writePng(ctx, bmp, "nova_movement_${recordId.lowercase(java.util.Locale.ROOT)}_${entityId}_${period?.dbName ?: "chart"}.png")
     }
 
+    /** 🎟️ Affiche verticale « La Nuit des Premières », avec la première entrée comme preuve de l'exploit. */
+    suspend fun renderDebutCard(
+        ctx: Context,
+        recordId: String,
+        entityId: Long,
+        name: String,
+        subtitle: String?,
+        imageUrl: String?,
+        isArtist: Boolean,
+        recordTitle: String,
+        metric: String,
+        rank: Int?,
+        context: String,
+        headline: String,
+        narrative: String,
+        facts: List<Pair<String, String>>,
+        items: List<RecordExplainer.Item>,
+        timeline: List<RecordExplainer.Point>,
+        accent: Color,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val accentArgb = accent.toArgb()
+        val gold = NovaColors.Gold.toArgb()
+        val deep = 0xFF080911.toInt()
+
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(0f, 0f, W.toFloat(), H.toFloat(), intArrayOf(deep, blend(deep, accentArgb, 0.16f), 0xFF07080D.toInt()), floatArrayOf(0f, 0.54f, 1f), Shader.TileMode.CLAMP)
+        })
+        halo(c, 170f, 240f, 630f, accentArgb, 0.34f)
+        halo(c, 900f, 970f, 680f, gold, 0.15f)
+        halo(c, 510f, 1770f, 540f, accentArgb, 0.12f)
+        val stageBeam = Path().apply {
+            moveTo(350f, 0f); lineTo(730f, 0f); lineTo(1020f, 960f); lineTo(70f, 960f); close()
+        }
+        c.drawPath(stageBeam, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(360f, 0f, 730f, 960f, intArrayOf(withAlpha(accentArgb, 0f), withAlpha(accentArgb, 0.07f), withAlpha(accentArgb, 0f)), null, Shader.TileMode.CLAMP)
+        })
+        c.drawRoundRect(RectF(28f, 28f, W - 28f, H - 28f), 44f, 44f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(accentArgb, 0.48f)
+        })
+        c.drawRoundRect(RectF(43f, 43f, W - 43f, H - 43f), 36f, 36f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(AColor.WHITE, 0.13f)
+        })
+
+        c.drawText("NOVA  ·  LA NUIT DES PREMIÈRES", 72f, 112f, textPaint(bold, 27f, withAlpha(accentArgb, 0.98f)).apply { letterSpacing = 0.12f })
+        c.drawText(ellipsize(context.uppercase(java.util.Locale.FRANCE), textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)), W - 144f), 72f, 154f, textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)))
+        rank?.let {
+            val badgeColor = if (it == 1) gold else accentArgb
+            val rect = RectF(72f, 180f, W - 72f, 232f)
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(badgeColor, 0.15f) })
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.7f; color = withAlpha(badgeColor, 0.48f) })
+            c.drawText(
+                if (it == 1) "✦ DÉTENTEUR N°1 ✦" else "ARCHIVE CLASSÉE N°$it",
+                rect.centerX(), 214f,
+                textPaint(bold, 21f, badgeColor).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.10f }
+            )
+        }
+
+        val coverRect = RectF(374f, 265f, 706f, 597f)
+        halo(c, coverRect.centerX(), coverRect.centerY(), 300f, accentArgb, 0.29f)
+        val cover = imageUrl?.let { loadBitmap(ctx, it, 620) }
+        if (cover != null) {
+            if (isArtist) drawCircleCover(c, cover, coverRect.centerX(), coverRect.centerY(), 158f)
+            else drawCover(c, cover, coverRect, 36f)
+        } else {
+            val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(coverRect.left, coverRect.top, coverRect.right, coverRect.bottom, accentArgb, theme.secondary.toArgb(), Shader.TileMode.CLAMP) }
+            if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), 158f, placeholder) else c.drawRoundRect(coverRect, 36f, 36f, placeholder)
+            c.drawText(name.take(1).uppercase(java.util.Locale.FRANCE), coverRect.centerX(), coverRect.centerY() + 40f, textPaint(bold, 142f, withAlpha(AColor.WHITE, 0.92f)).apply { textAlign = Paint.Align.CENTER })
+        }
+        val coverFrame = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 5f; color = withAlpha(accentArgb, 0.88f)
+        }
+        if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), 161f, coverFrame)
+        else c.drawRoundRect(coverRect, 36f, 36f, coverFrame)
+
+        drawWrapped(c, name, 72f, 665f, W - 144f, textPaint(bold, 58f, AColor.WHITE), maxLines = 2, lineH = 68f)
+        subtitle?.takeIf { it.isNotBlank() }?.let { c.drawText(ellipsize(it, textPaint(inter, 25f, withAlpha(AColor.WHITE, 0.72f)), W - 144f), 72f, 805f, textPaint(inter, 25f, withAlpha(AColor.WHITE, 0.72f))) }
+        c.drawText(ellipsize(recordTitle.uppercase(java.util.Locale.FRANCE), textPaint(bold, 23f, accentArgb), W - 144f), 72f, 866f, textPaint(bold, 23f, accentArgb).apply { letterSpacing = 0.12f })
+        drawWrapped(c, headline, 72f, 926f, W - 144f, textPaint(bold, 48f, AColor.WHITE), maxLines = 2, lineH = 57f)
+        c.drawText("SCORE D'ARCHIVE  ·  ${ellipsize(metric, textPaint(bold, 28f, gold), W - 144f)}", 72f, 1063f, textPaint(bold, 28f, gold))
+        drawWrapped(c, narrative, 72f, 1108f, W - 144f, textPaint(inter, 20f, withAlpha(AColor.WHITE, 0.76f)), maxLines = 2, lineH = 25f)
+
+        if (items.isNotEmpty()) {
+            c.drawText("LE REGISTRE DES PREMIÈRES ENTRÉES", 72f, 1213f, textPaint(bold, 21f, accentArgb).apply { letterSpacing = 0.09f })
+            val shown = items.take(3)
+            val gap = 18f
+            val cardWidth = (W - 144f - gap * (shown.size - 1)) / shown.size
+            shown.forEachIndexed { index, entry ->
+                val left = 72f + index * (cardWidth + gap)
+                val top = 1234f
+                val rect = RectF(left, top, left + cardWidth, 1590f)
+                c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF171A23.toInt(), 0.94f) })
+                c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.8f; color = withAlpha(accentArgb, 0.29f) })
+                val art = entry.imageUrl?.let { loadBitmap(ctx, it, 260) }
+                val artRect = RectF(left + (cardWidth - 142f) / 2f, top + 20f, left + (cardWidth + 142f) / 2f, top + 162f)
+                if (art != null) drawCover(c, art, artRect, 19f) else {
+                    c.drawRoundRect(artRect, 19f, 19f, Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(artRect.left, artRect.top, artRect.right, artRect.bottom, accentArgb, blend(accentArgb, 0xFF080911.toInt(), 0.65f), Shader.TileMode.CLAMP) })
+                    c.drawText(entry.name.take(1).uppercase(java.util.Locale.FRANCE), artRect.centerX(), artRect.centerY() + 24f, textPaint(bold, 76f, AColor.WHITE).apply { textAlign = Paint.Align.CENTER })
+                }
+                c.drawText("ARCHIVE  ${index + 1}", left + 17f, top + 189f, textPaint(bold, 15f, withAlpha(AColor.WHITE, 0.64f)))
+                drawWrapped(c, entry.name, left + 17f, top + 222f, cardWidth - 34f, textPaint(bold, 21f, AColor.WHITE), maxLines = 2, lineH = 25f)
+                val entryRank = entry.entryPosition?.let { "DÉBUT  ·  #$it" } ?: "PREMIÈRE ENTRÉE"
+                c.drawText(ellipsize(entryRank, textPaint(bold, 16f, accentArgb), cardWidth - 34f), left + 17f, top + 286f, textPaint(bold, 16f, accentArgb))
+                entry.entryDateLabel?.let { c.drawText(ellipsize(it, textPaint(inter, 15f, withAlpha(AColor.WHITE, 0.64f)), cardWidth - 34f), left + 17f, top + 313f, textPaint(inter, 15f, withAlpha(AColor.WHITE, 0.64f))) }
+                entry.entryPlays?.let { c.drawText("${formatCount(it)} écoutes", left + 17f, top + 338f, textPaint(bold, 17f, gold)) }
+            }
+        } else if (timeline.isNotEmpty()) {
+            c.drawText("LE PREMIER IMPACT  ·  TRAJECTOIRE DU CHART", 72f, 1213f, textPaint(bold, 21f, accentArgb).apply { letterSpacing = 0.07f })
+            val rect = RectF(72f, 1234f, W - 72f, 1590f)
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF171A23.toInt(), 0.94f) })
+            c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.8f; color = withAlpha(accentArgb, 0.29f) })
+            val plot = RectF(rect.left + 50f, rect.top + 36f, rect.right - 25f, rect.bottom - 46f)
+            val nodes = timeline.mapIndexedNotNull { index, point -> point.position?.let { Triple(index, point, it) } }
+            if (nodes.isEmpty()) {
+                c.drawText("Aucune trajectoire détaillée", rect.centerX(), rect.centerY(), textPaint(inter, 21f, AColor.WHITE).apply { textAlign = Paint.Align.CENTER })
+            } else {
+                val maxRank = maxOf(10, nodes.maxOf { it.third })
+                fun x(index: Int) = if (timeline.size < 2) plot.centerX() else plot.left + plot.width() * index / (timeline.size - 1).toFloat()
+                fun y(position: Int) = plot.top + (position - 1).toFloat() / (maxRank - 1).coerceAtLeast(1) * plot.height()
+                nodes.zipWithNext().forEach { (from, to) ->
+                    c.drawLine(x(from.first), y(from.third), x(to.first), y(to.third), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accentArgb, 0.72f); strokeWidth = 5f; strokeCap = Paint.Cap.ROUND })
+                }
+                nodes.forEach { (index, point, position) ->
+                    val marker = if (point.highlight) gold else accentArgb
+                    c.drawCircle(x(index), y(position), if (point.highlight) 13f else 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(marker, 0.28f) })
+                    c.drawCircle(x(index), y(position), if (point.highlight) 7f else 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = marker })
+                }
+                val first = nodes.first().second
+                val last = nodes.last().second
+                c.drawText(ellipsize("${first.label}  ·  ${nodes.first().third.let { "#$it" }}", textPaint(inter, 16f, withAlpha(AColor.WHITE, 0.68f)), 400f), plot.left, rect.bottom - 16f, textPaint(inter, 16f, withAlpha(AColor.WHITE, 0.68f)))
+                c.drawText(ellipsize("${last.label}  ·  ${nodes.last().third.let { "#$it" }}", textPaint(inter, 16f, withAlpha(AColor.WHITE, 0.68f)), 400f), plot.right, rect.bottom - 16f, textPaint(inter, 16f, withAlpha(AColor.WHITE, 0.68f)).apply { textAlign = Paint.Align.RIGHT })
+            }
+        } else {
+            drawWrapped(c, recordTitle, 72f, 1320f, W - 144f, textPaint(bold, 30f, accentArgb), maxLines = 2, lineH = 36f)
+        }
+
+        c.drawText("REPÈRES DE L'ARCHIVE", 72f, 1630f, textPaint(bold, 20f, withAlpha(AColor.WHITE, 0.84f)).apply { letterSpacing = 0.08f })
+        facts.take(4).forEachIndexed { index, (label, value) ->
+            val column = index % 2
+            val row = index / 2
+            val left = 72f + column * 478f
+            val top = 1650f + row * 99f
+            val rect = RectF(left, top, left + 458f, top + 86f)
+            c.drawRoundRect(rect, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF171A23.toInt(), 0.92f) })
+            c.drawRoundRect(rect, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(accentArgb, 0.22f) })
+            c.drawText(ellipsize(label.uppercase(java.util.Locale.FRANCE), textPaint(bold, 13f, withAlpha(AColor.WHITE, 0.62f)), rect.width() - 30f), left + 15f, top + 24f, textPaint(bold, 13f, withAlpha(AColor.WHITE, 0.62f)))
+            drawWrapped(c, value, left + 15f, top + 51f, rect.width() - 30f, textPaint(bold, 18f, AColor.WHITE), maxLines = 2, lineH = 20f)
+        }
+        c.drawText("NOVASTATS  ·  PREMIÈRES QUI RESTENT", W - 72f, 1865f, textPaint(bold, 23f, accentArgb).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.10f })
+        c.drawRect(0f, H - 10f, W.toFloat(), H.toFloat(), Paint().apply { shader = LinearGradient(0f, 0f, W.toFloat(), 0f, accentArgb, gold, Shader.TileMode.CLAMP) })
+        writePng(ctx, bmp, "nova_debut_${recordId.lowercase(java.util.Locale.ROOT)}_${entityId}.png")
+    }
+
     private data class MovementCardNode(val sourceIndex: Int, val point: RecordExplainer.Point, val position: Int, val periodIndex: Int)
 
     /** 🎼 Carte verticale partageable dédiée aux records de titres distincts (Chart → Top 10 → Top 5 → #1). */

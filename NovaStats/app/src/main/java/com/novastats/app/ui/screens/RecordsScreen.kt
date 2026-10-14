@@ -210,9 +210,13 @@ fun RecordsScreen() {
                 val groups = if (group == null) RecordGroup.entries.toList() else listOf(group!!)
                 groups.forEach { g ->
                     item(key = "h_${g.name}") {
-                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            Text("${g.emoji} ${g.label}", color = groupColor(g), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                            Text(g.description, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        if (g == RecordGroup.DEBUT) {
+                            DebutFamilyBanner(groupColor(g))
+                        } else {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                Text("${g.emoji} ${g.label}", color = groupColor(g), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                Text(g.description, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                     items(RecordCatalog.inGroup(g), key = { it.id }) { def -> RecordCard(def, groupColor(g)) { page = def } }
@@ -367,6 +371,10 @@ private fun groupColor(g: RecordGroup): Color {
 private fun RecordCard(def: RecordDef, color: Color, onClick: () -> Unit) {
     if (def.id in MOVEMENT_RECORD_IDS) {
         MovementRecordCard(def, color, onClick)
+        return
+    }
+    if (def.id in DEBUT_RECORD_IDS) {
+        DebutRecordCard(def, color, onClick)
         return
     }
     val theme = Nova.theme
@@ -540,6 +548,27 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                 Text("🕳️", fontSize = 40.sp)
                 Text("Pas encore de record ici", color = theme.text, fontWeight = FontWeight.SemiBold)
                 Text("Il faut plus d'historique pour cette combinaison (période · section).", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+            }
+        } else if (def.id in DEBUT_RECORD_IDS) {
+            val podiumCount = minOf(3, rows.size)
+            item(key = "debut-leader-stage-${def.id}") {
+                DebutLeaderboardStage(
+                    def = def,
+                    period = period,
+                    category = category,
+                    subLabel = def.subs[category]?.firstOrNull { it.dbName == sub?.dbName }?.label,
+                    rows = rows.take(podiumCount),
+                    color = color
+                ) { row, rank -> onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, rank)) }
+            }
+            items(rows.size - podiumCount) { offset ->
+                val i = offset + podiumCount
+                val row = rows[i]
+                Box(Modifier.padding(horizontal = 14.dp)) {
+                    RecordEntryRow(i + 1, row, def, period, category, maxValue, color, rows.getOrNull(i + 1)?.r?.value) {
+                        onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, i + 1))
+                    }
+                }
             }
         } else if (def.id == "MOST_PERFECT_ALL_KILL") {
             item {
@@ -1497,6 +1526,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val color = groupColor(RecordCatalog.groupOf[def.id] ?: RecordGroup.DURATION)
     val name = row.name ?: "Inconnu"
     val movementRecord = def.id in MOVEMENT_RECORD_IDS
+    val debutRecord = def.id in DEBUT_RECORD_IDS
     var story by remember(ref) { mutableStateOf<RecordExplainer.Story?>(null) }
     LaunchedEffect(ref) {
         story = app.recordExplainer.explain(def, ref.period, ref.category, ref.sub, row.r.entityId, name, row.r.value)
@@ -1509,6 +1539,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val subLabel = def.subs[ref.category]?.firstOrNull { it.dbName == ref.sub }?.label
     val context = listOfNotNull(ref.period?.label, sectionLabel(ref.category), subLabel).joinToString(" · ")
     val movementContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
+    val debutContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
     var mostRecordsSearch by remember(ref) { mutableStateOf("") }
     var selectedMostRecordsFamily by remember(ref) { mutableStateOf<RecordGroup?>(null) }
     var expandedMostRecordsFamilies by remember(ref) { mutableStateOf<Set<RecordGroup>>(emptySet()) }
@@ -1566,6 +1597,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     var songReachShareError by remember(ref) { mutableStateOf(false) }
     var sharingMovement by remember(ref) { mutableStateOf(false) }
     var movementShareError by remember(ref) { mutableStateOf(false) }
+    var sharingDebut by remember(ref) { mutableStateOf(false) }
+    var debutShareError by remember(ref) { mutableStateOf(false) }
     var sharingHonorCard by remember(ref) { mutableStateOf(false) }
     var honorShareError by remember(ref) { mutableStateOf(false) }
     var sharingArtistNoOne by remember(ref) { mutableStateOf(false) }
@@ -1611,10 +1644,10 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 if (def.id == "MOST_RECORDS") "🏆 Palmarès des records" else "${def.emoji} ${def.title}",
                 color,
                 onBack,
-                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place" else if (movementRecord) movementContext else context
+                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place" else if (movementRecord) movementContext else if (debutRecord) debutContext else context
             )
         }
-        if (!movementRecord) item {
+        if (!movementRecord && !debutRecord) item {
             // En-tête : pochette, nom et rang. Les records premium de vitesse, succession et présence ont leur fond dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
             val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
@@ -1913,6 +1946,70 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     )
                 }
             }
+            if (debutRecord) {
+                item(key = "debut-archive-${def.id}-${row.r.entityId}") {
+                    DebutArchiveSpotlight(
+                        def = def,
+                        name = name,
+                        subtitle = row.subtitle,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        metric = formatRecordValue(def, ref.period, row.r.value),
+                        rank = ref.rank,
+                        period = ref.period,
+                        context = debutContext,
+                        story = st,
+                        color = color,
+                        sharing = sharingDebut,
+                        shareError = debutShareError,
+                        onShare = {
+                            if (!sharingDebut) {
+                                sharingDebut = true
+                                debutShareError = false
+                                shareScope.launch {
+                                    try {
+                                        val file = ShareCards.renderDebutCard(
+                                            ctx = app,
+                                            recordId = def.id,
+                                            entityId = row.r.entityId,
+                                            name = name,
+                                            subtitle = row.subtitle,
+                                            imageUrl = row.imageUrl,
+                                            isArtist = ref.category == RecordCategory.ARTIST,
+                                            recordTitle = def.title,
+                                            metric = formatRecordValue(def, ref.period, row.r.value),
+                                            rank = ref.rank,
+                                            context = debutContext,
+                                            headline = st.headline,
+                                            narrative = st.narrative,
+                                            facts = st.facts,
+                                            items = st.items,
+                                            timeline = st.timeline,
+                                            accent = debutAccent(def.id, color),
+                                            theme = theme
+                                        )
+                                        ShareCards.share(app, file, "Partager cette première")
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        debutShareError = true
+                                    } finally {
+                                        sharingDebut = false
+                                    }
+                                }
+                            }
+                        },
+                        onItemClick = { item ->
+                            val itemTarget = when (item.type) {
+                                EntityType.TRACK -> DetailTarget.Track(item.id)
+                                EntityType.ALBUM -> DetailTarget.Album(item.id)
+                                else -> DetailTarget.Artist(item.id)
+                            }
+                            onEntity(itemTarget)
+                        }
+                    )
+                }
+            }
             if (def.id == "MOST_CONSISTENT") {
                 item(key = "most-consistent-showcase") {
                     MostConsistentSpotlight(
@@ -2042,7 +2139,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                         }
                     }
                 }
-            } else item {
+            } else if (!debutRecord) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle(
                         when {
@@ -2076,7 +2173,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             st.multiChartVisual?.let { visual ->
                 item { MultiChartConstellation(visual, color) }
             }
-            if (def.id != "MOST_RECORDS" && !movementRecord && st.facts.isNotEmpty()) item {
+            if (def.id != "MOST_RECORDS" && !movementRecord && !debutRecord && st.facts.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("📋 Les faits", color)
                     st.facts.forEach { (k, v) ->
@@ -2105,13 +2202,13 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty() && st.presenceVisual == null && !movementRecord && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null && !movementRecord && !debutRecord && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
                 }
             }
-            if (def.id != "MOST_RECORDS" && st.held.isNotEmpty()) {
+            if (def.id != "MOST_RECORDS" && !debutRecord && st.held.isNotEmpty()) {
                 // 🏆 Affichage générique conservé pour les records qui exposent une liste détenue
                 val groups = st.held.groupBy { RecordCatalog.groupOf[it.def.id] ?: RecordGroup.TOTALS }.entries.sortedByDescending { it.value.size }
                 item { Box(Modifier.padding(horizontal = 16.dp)) { SectionTitle("🏆 Tous ses records (${st.held.size})", color) } }
@@ -2150,7 +2247,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.items.isNotEmpty() && def.id != "MOST_BLOCKED_TOP5") {
+            if (st.items.isNotEmpty() && !debutRecord && def.id != "MOST_BLOCKED_TOP5") {
                 item { Box(Modifier.padding(horizontal = 16.dp)) { SectionTitle("🎵 " + (st.itemsTitle ?: "Éléments"), color) } }
                 items(st.items.size) { i ->
                     val ent = st.items[i]
