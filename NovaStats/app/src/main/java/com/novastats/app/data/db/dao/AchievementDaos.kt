@@ -184,6 +184,14 @@ interface HallOfFameDao {
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
     @Query("SELECT * FROM hall_of_fame") suspend fun all(): List<HallOfFameEntity>
     @Query("SELECT * FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType ORDER BY entry_date") suspend fun ofEntity(entityId: Long, entityType: String): List<HallOfFameEntity>
+    /** Nombre réel d'entités distinguées, sans extrapolation depuis le seul Top 10 en cache. */
+    @Query("""
+        SELECT COUNT(DISTINCT entity_id) FROM hall_of_fame
+        WHERE entity_type = :entityType
+          AND ((:globalOnly AND period_type = 'GLOBAL') OR (NOT :globalOnly AND period_type != 'GLOBAL'))
+          AND (:entryType IS NULL OR entry_type = :entryType)
+          AND (:periodType IS NULL OR period_type = :periodType)
+    """) suspend fun distinctEntityCount(entityType: String, globalOnly: Boolean, entryType: String?, periodType: String?): Int
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name, CASE h.entity_type WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = h.entity_id) ELSE NULL END AS subtitle, CASE h.entity_type WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = h.entity_id) ELSE (SELECT photo_url FROM artists WHERE artist_id = h.entity_id) END AS image_url FROM hall_of_fame h WHERE h.period_type = :period AND h.entity_type = :entityType ORDER BY h.entry_date DESC")
     fun rows(period: String, entityType: String): Flow<List<HallOfFameRow>>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM hall_of_fame h ORDER BY h.created_at DESC LIMIT :limit")

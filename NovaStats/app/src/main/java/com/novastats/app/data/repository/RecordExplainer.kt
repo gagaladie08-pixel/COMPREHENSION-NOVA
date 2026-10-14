@@ -7,6 +7,7 @@ import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.domain.CertLevel
 import com.novastats.app.domain.Dates
+import com.novastats.app.domain.HallOfFameRules
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.PantheonRoute
 import com.novastats.app.domain.Period
@@ -234,6 +235,49 @@ class RecordExplainer(private val db: NovaDatabase) {
         val rival: SongReachRival?,
         val featuredTracks: List<SongReachTrack>
     )
+    /** Une distinction HoF/Global et son contexte temporel — données calculées depuis les intronisations existantes. */
+    data class HonorEntryVisual(
+        val sealKey: String,
+        val title: String,
+        val category: String,
+        val date: String,
+        val periodLabel: String,
+        val reign: String?,
+        val reignDuration: String?,
+        val weeksAtOne: Int,
+        val playsAtEntry: Int
+    )
+    data class HonorSealVisual(
+        val key: String,
+        val title: String,
+        val emoji: String,
+        val description: String,
+        val earnedDate: String?,
+        val detail: String?,
+        val distinctAwardees: Int
+    )
+    data class HonorRivalVisual(
+        val id: Long,
+        val name: String,
+        val imageUrl: String?,
+        val rank: Int,
+        val score: Int,
+        val earnedKeys: List<String>,
+        val tied: Boolean
+    )
+    /** Présentation premium dédiée au Hall of Fame et aux distinctions Global. */
+    data class HonorVisual(
+        val isGlobal: Boolean,
+        val selectedSub: String?,
+        val score: Int,
+        val maxScore: Int,
+        val rank: Int,
+        val boardSize: Int,
+        val tiedAtTop: Int,
+        val rival: HonorRivalVisual?,
+        val seals: List<HonorSealVisual>,
+        val entries: List<HonorEntryVisual>
+    )
     private data class SpeedStageSource(
         val key: String,
         val label: String,
@@ -270,7 +314,9 @@ class RecordExplainer(private val db: NovaDatabase) {
         /** 👑 Funnel, comparaison, statut, jalons et frise des rangs pour les quatre records de présence. */
         val presenceVisual: PresenceVisual? = null,
         /** 🎼 Échelle chart → Top 10 → Top 5 → #1 pour les records de titres/albums distincts. */
-        val songReachVisual: SongReachVisual? = null
+        val songReachVisual: SongReachVisual? = null,
+        /** 👑 Galerie chronologique HoF et constellation Global, réservées à MOST_HOF/MOST_GLOBAL. */
+        val honorVisual: HonorVisual? = null
     )
 
     /** 🪑 Sièges d'une zone : [total] places, [occupied] = positions occupées par le propriétaire. */
@@ -1939,20 +1985,173 @@ class RecordExplainer(private val db: NovaDatabase) {
     }
 
     private suspend fun hallOfFame(def: RecordDef, cat: RecordCategory, sub: String?, id: Long, name: String): Story {
-        val all = db.hallOfFameDao().ofEntity(id, cat.dbName)
         val global = def.id == "MOST_GLOBAL"
-        val rows = all.filter { (it.periodType == "GLOBAL") == global }.filter { !global || sub == null || sub == "ALL" || it.entryType == sub }.sortedBy { it.entryDate }
-        val label = { t: String -> t.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() } }
-        val items = rows.map { h ->
-            Item(cat.dbName, id, "${label(h.entryType)} · ${h.periodType.lowercase().replaceFirstChar { it.uppercase() }}", on(Period.DAILY, h.entryDate) + (if (h.weeksAt1 > 0) " · ${h.weeksAt1} sem. au #1" else "") + (if (h.playCountAtEntry > 0) " · ${h.playCountAtEntry} ▶" else ""), null, true)
+        val dao = db.hallOfFameDao()
+        val own = dao.ofEntity(id, cat.dbName)
+        val inRecordScope = own.filter { (it.periodType == "GLOBAL") == global }
+        val selected = if (global && !sub.isNullOrBlank() && sub != "ALL") inRecordScope.filter { it.entryType == sub } else inRecordScope
+        val sortedSelected = selected.sortedBy { it.entryDate }
+        val timelineRows = inRecordScope.sortedBy { it.entryDate }
+
+        data class SealDefinition(
+            val key: String,
+            val entryType: String,
+            val periodType: String,
+            val title: String,
+            val emoji: String,
+            val description: String
+        )
+        val sealDefinitions = if (global) listOf(
+            SealDefinition("TRIPLE_DEBUT", "TRIPLE_DEBUT", "GLOBAL", "Triple Debut", "🌟", "Première apparition simultanée au #1 Daily, Weekly et Monthly."),
+            SealDefinition("ALL_KILL", "ALL_KILL", "GLOBAL", "All Kill", "💥", "#1 simultané dans les trois charts : Daily, Weekly et Monthly."),
+            SealDefinition("LEGENDARY_RUN", HallOfFameRules.LEGENDARY_RUN, "GLOBAL", "Legendary Run", "👑", "Au moins ${HallOfFameRules.LEGENDARY_WEEKS_AT_1} semaines cumulées au #1 hebdomadaire.")
+        ) else listOf(
+            SealDefinition("DIRECT_DEBUT_WEEKLY", HallOfFameRules.DIRECT_DEBUT, "WEEKLY", "Début direct · Hebdo", "🚀", "Première entrée directement à la première place du chart hebdomadaire."),
+            SealDefinition("LONG_RUN_WEEKLY", HallOfFameRules.LONG_RUN, "WEEKLY", "Long règne · Hebdo", "🏆", "Règne continu d'au moins ${HallOfFameRules.LONG_RUN_WEEKS} semaines au #1 hebdomadaire."),
+            SealDefinition("DIRECT_DEBUT_MONTHLY", HallOfFameRules.DIRECT_DEBUT, "MONTHLY", "Début direct · Mensuel", "🌙", "Première entrée directement à la première place du chart mensuel."),
+            SealDefinition("LONG_RUN_MONTHLY", HallOfFameRules.LONG_RUN, "MONTHLY", "Long règne · Mensuel", "✨", "Règne continu d'au moins ${HallOfFameRules.LONG_RUN_MONTHS} mois au #1 mensuel.")
+        )
+        fun sealKey(entryType: String, periodType: String): String? = sealDefinitions.firstOrNull {
+            it.entryType == entryType && it.periodType == periodType
+        }?.key
+        fun entryTitle(entryType: String, periodType: String): String = sealDefinitions.firstOrNull {
+            it.entryType == entryType && it.periodType == periodType
+        }?.title ?: "${entryType.replace('_', ' ')} · $periodType"
+        fun periodLabel(periodType: String): String = when (periodType) {
+            "WEEKLY" -> "Hebdomadaire"
+            "MONTHLY" -> "Mensuel"
+            "GLOBAL" -> "Global"
+            else -> periodType
         }
-        val byType = rows.groupBy { it.entryType }.map { (t, l) -> "${l.size}× ${label(t)}" }.joinToString(", ")
+        fun detailFor(entry: com.novastats.app.data.db.entity.HallOfFameEntity): String? = when {
+            entry.entryType == "LEGENDARY_RUN" && entry.weeksAt1 > 0 -> "${entry.weeksAt1} semaines cumulées au #1"
+            entry.weeksAt1 > 0 -> "${entry.weeksAt1} semaines au #1 au total"
+            entry.reignStart != null && entry.reignEnd != null -> "Règne du ${short(Period.DAILY, entry.reignStart)} au ${short(Period.DAILY, entry.reignEnd)}"
+            entry.entryType == "TRIPLE_DEBUT" -> "#1 simultané · Daily / Weekly / Monthly"
+            entry.entryType == "ALL_KILL" -> "#1 dans les trois charts · Daily / Weekly / Monthly"
+            else -> null
+        }
+        fun reignDuration(entry: com.novastats.app.data.db.entity.HallOfFameEntity): String? {
+            val startIso = entry.reignStart ?: return null
+            val endIso = entry.reignEnd ?: return null
+            val start = runCatching { Dates.parse(startIso) }.getOrNull() ?: return null
+            val end = runCatching { Dates.parse(endIso) }.getOrNull() ?: return null
+            val periods = when (entry.periodType) {
+                "WEEKLY" -> (java.time.temporal.ChronoUnit.DAYS.between(start, end) / 7L + 1L).toInt()
+                "MONTHLY" -> (java.time.temporal.ChronoUnit.MONTHS.between(
+                    java.time.YearMonth.from(start), java.time.YearMonth.from(end)
+                ) + 1L).toInt()
+                else -> return null
+            }.coerceAtLeast(1)
+            val weekly = entry.periodType == "WEEKLY"
+            val unit = if (weekly) plural(periods, "semaine") else plural(periods, "mois", "mois")
+            val adjective = if (weekly) "consécutive" else "consécutif"
+            return "$periods $unit $adjective${if (periods == 1) "" else "s"}"
+        }
+        val seals = sealDefinitions.map { definition ->
+            val earned = own.firstOrNull {
+                it.entryType == definition.entryType && it.periodType == definition.periodType
+            }
+            val awardees = dao.distinctEntityCount(
+                entityType = cat.dbName,
+                globalOnly = global,
+                entryType = definition.entryType,
+                periodType = definition.periodType
+            )
+            HonorSealVisual(
+                key = definition.key,
+                title = definition.title,
+                emoji = definition.emoji,
+                description = definition.description,
+                earnedDate = earned?.let { on(Period.DAILY, it.entryDate) },
+                detail = earned?.let(::detailFor),
+                distinctAwardees = awardees
+            )
+        }
+        val entries = timelineRows.mapNotNull { entry ->
+            val key = sealKey(entry.entryType, entry.periodType) ?: return@mapNotNull null
+            HonorEntryVisual(
+                sealKey = key,
+                title = entryTitle(entry.entryType, entry.periodType),
+                category = entry.entryType,
+                date = on(Period.DAILY, entry.entryDate),
+                periodLabel = periodLabel(entry.periodType),
+                reign = if (entry.reignStart != null && entry.reignEnd != null)
+                    "${short(Period.DAILY, entry.reignStart)} → ${short(Period.DAILY, entry.reignEnd)}" else null,
+                reignDuration = reignDuration(entry),
+                weeksAtOne = entry.weeksAt1,
+                playsAtEntry = entry.playCountAtEntry
+            )
+        }
+        val selectedSub = sub?.takeUnless { it == "ALL" }
+        val boardSize = dao.distinctEntityCount(
+            entityType = cat.dbName,
+            globalOnly = global,
+            entryType = if (global) selectedSub else null,
+            periodType = if (global) "GLOBAL" else null
+        )
+        val recordDao = db.recordDao()
+        val rank = recordDao.betterCount(def.id, null, cat.dbName, sub, selected.size.toDouble(), asc = false) + 1
+        val tiedAtTop = recordDao.tiedAt(def.id, null, cat.dbName, sub, selected.size.toDouble())
+        val topRows = recordDao.top10(def.id, null, cat.dbName, sub, asc = false).first()
+        val sameScore = topRows.firstOrNull { it.r.entityId != id && it.r.value.toInt() == selected.size }
+        val nearestAhead = topRows.lastOrNull { it.r.value > selected.size.toDouble() }
+        val nearestBelow = topRows.firstOrNull { it.r.entityId != id && it.r.value < selected.size.toDouble() }
+        val rivalRow = sameScore ?: nearestAhead ?: nearestBelow
+        val rival = rivalRow?.let { row ->
+            val rivalHof = dao.ofEntity(row.r.entityId, cat.dbName)
+            val rivalKeys = rivalHof.mapNotNull { sealKey(it.entryType, it.periodType) }.distinct()
+            val rivalRank = recordDao.betterCount(def.id, null, cat.dbName, sub, row.r.value, asc = false) + 1
+            HonorRivalVisual(
+                id = row.r.entityId,
+                name = row.name ?: "Inconnu",
+                imageUrl = row.imageUrl,
+                rank = rivalRank,
+                score = row.r.value.toInt(),
+                earnedKeys = rivalKeys,
+                tied = row.r.value.toInt() == selected.size
+            )
+        }
+        val maxScore = when {
+            !global -> 4
+            selectedSub != null -> 1
+            else -> 3
+        }
+        val totalSelected = sortedSelected.size
+        val byType = sortedSelected.groupBy { it.entryType to it.periodType }.map { (typePeriod, rows) ->
+            "${rows.size}× ${entryTitle(typePeriod.first, typePeriod.second)}"
+        }.joinToString(", ")
+        val firstDate = timelineRows.firstOrNull()?.entryDate?.let { on(Period.DAILY, it) }
+        val lastDate = timelineRows.lastOrNull()?.takeIf { timelineRows.size > 1 }?.entryDate?.let { on(Period.DAILY, it) }
+        val narrative = if (global) {
+            "$name a décroché $totalSelected distinction${if (totalSelected == 1) "" else "s"} Global${if (selectedSub == null) " distincte${if (totalSelected == 1) "" else "s"}" else " de type ${selectedSub.replace('_', ' ')}"}. " +
+                "La constellation distingue Triple Debut, All Kill et Legendary Run; All Kill correspond au #1 simultané dans Daily, Weekly et Monthly. " +
+                (if (firstDate != null) "Première distinction ${firstDate.lowercase()}${lastDate?.let { ", dernière $it"} ?: ""}." else "Aucune distinction enregistrée pour ce type.")
+        } else {
+            "$name compte $totalSelected distinction${if (totalSelected == 1) "" else "s"} au Hall of Fame, issues des débuts directs et des longs règnes en hebdomadaire et mensuel. " +
+                (if (firstDate != null) "Première intronisation ${firstDate.lowercase()}${lastDate?.let { ", dernière $it"} ?: ""}. Le détail des dates et des règnes figure dans la frise." else "Aucune intronisation n'est enregistrée.")
+        }
+        val visual = HonorVisual(
+            isGlobal = global,
+            selectedSub = selectedSub,
+            score = totalSelected,
+            maxScore = maxScore,
+            rank = rank,
+            boardSize = boardSize,
+            tiedAtTop = tiedAtTop,
+            rival = rival,
+            seals = seals,
+            entries = entries
+        )
         return Story(
-            "${def.emoji} ${rows.size} ${plural(rows.size, "entrée")} ${if (global) "Global" else "au Hall of Fame"}",
-            "$name a été intronisé ${rows.size} fois ${if (global) "au niveau Global (toutes périodes confondues)" else "au Hall of Fame (hebdo + mensuel)"} : $byType. " +
-                (rows.firstOrNull()?.let { "Première entrée ${on(Period.DAILY, it.entryDate)}" } ?: "") + (rows.lastOrNull()?.takeIf { rows.size > 1 }?.let { ", dernière ${on(Period.DAILY, it.entryDate)}." } ?: "."),
-            listOf("Entrées" to "${rows.size}", "Détail" to byType.ifBlank { "—" }),
-            itemsTitle = "Chaque intronisation", items = items
+            headline = if (global) "🌌 $totalSelected distinction${if (totalSelected == 1) "" else "s"} Global" else "🏛️ $totalSelected ${plural(totalSelected, "entrée")} au Hall of Fame",
+            narrative = narrative,
+            facts = listOf(
+                "Distinctions" to "$totalSelected / $maxScore",
+                "Rang" to "#$rank sur $boardSize détenteurs${if (tiedAtTop > 1) " · $tiedAtTop ex æquo" else ""}",
+                "Répartition" to byType.ifBlank { "—" }
+            ),
+            honorVisual = visual
         )
     }
 

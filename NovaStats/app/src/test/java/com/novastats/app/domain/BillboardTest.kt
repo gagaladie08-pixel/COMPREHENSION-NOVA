@@ -92,6 +92,14 @@ class BillboardTest {
     }
 
     @Test
+    fun `description Global enumere les trois distinctions`() {
+        val description = RecordCatalog.byId("MOST_GLOBAL")!!.description
+        assertTrue(description.contains("Triple Debut"))
+        assertTrue(description.contains("All Kill"))
+        assertTrue(description.contains("Legendary Run"))
+    }
+
+    @Test
     fun `règles hall of fame`() {
         assertTrue(HallOfFameRules.isDirectDebut(Period.WEEKLY, 1, true))
         assertFalse(HallOfFameRules.isDirectDebut(Period.DAILY, 1, true))

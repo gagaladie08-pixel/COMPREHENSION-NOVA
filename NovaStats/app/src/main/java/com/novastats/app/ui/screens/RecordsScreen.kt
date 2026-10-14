@@ -705,6 +705,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val shareScope = rememberCoroutineScope()
     var sharingSongReach by remember(ref) { mutableStateOf(false) }
     var songReachShareError by remember(ref) { mutableStateOf(false) }
+    var sharingHonorCard by remember(ref) { mutableStateOf(false) }
+    var honorShareError by remember(ref) { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().background(theme.background)) {
         item { PageHeader(def.title, "${def.emoji} ${def.title}", color, onBack, context) }
@@ -715,8 +717,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val successiveRecord = def.id == "MOST_SUCCESSIVE_1"
             val presenceRecord = def.id in setOf("MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1")
             val songReachRecord = def.id in setOf("MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1")
+            val honorRecord = def.id == "MOST_HOF" || def.id == "MOST_GLOBAL"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -798,6 +801,42 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                                     songReachShareError = true
                                 } finally {
                                     sharingSongReach = false
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+        story?.honorVisual?.let { visual ->
+            item {
+                HonorRecordSpotlight(
+                    name = name,
+                    subtitle = row.subtitle,
+                    imageUrl = row.imageUrl,
+                    isArtist = ref.category == RecordCategory.ARTIST,
+                    recordTitle = def.title,
+                    contextLabel = context,
+                    visual = visual,
+                    sharing = sharingHonorCard,
+                    shareError = honorShareError,
+                    onShare = {
+                        if (!sharingHonorCard) {
+                            sharingHonorCard = true
+                            honorShareError = false
+                            shareScope.launch {
+                                try {
+                                    val file = ShareCards.renderHonorCard(
+                                        app, row.r.entityId, ref.category.dbName, name, row.subtitle, row.imageUrl,
+                                        ref.category == RecordCategory.ARTIST, def.title, context, visual, theme
+                                    )
+                                    ShareCards.share(app, file, "Partager cette distinction")
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    honorShareError = true
+                                } finally {
+                                    sharingHonorCard = false
                                 }
                             }
                         }
@@ -933,6 +972,260 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             )
             Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+/** 🏛️ Fiche d'honneur exclusive aux deux classements HoF/Global. */
+@Composable
+private fun HonorRecordSpotlight(
+    name: String,
+    subtitle: String?,
+    imageUrl: String?,
+    isArtist: Boolean,
+    recordTitle: String,
+    contextLabel: String,
+    visual: RecordExplainer.HonorVisual,
+    sharing: Boolean,
+    shareError: Boolean,
+    onShare: () -> Unit
+) {
+    val theme = Nova.theme
+    val global = visual.isGlobal
+    val accent = if (global) Color(0xFF63DDF5) else NovaColors.Gold
+    val deepAccent = if (global) Color(0xFF6558E8) else Color(0xFFB97525)
+    val transition = rememberInfiniteTransition(label = if (global) "global-constellation" else "hof-hall")
+    val glow by transition.animateFloat(
+        initialValue = 0.20f,
+        targetValue = 0.56f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+        label = "honor-glow"
+    )
+    val scoreCounter = remember(visual.score, visual.maxScore, visual.isGlobal) { Animatable(0f) }
+    LaunchedEffect(visual.score, visual.maxScore, visual.isGlobal) {
+        scoreCounter.snapTo(0f)
+        scoreCounter.animateTo(visual.score.toFloat(), tween(1150))
+    }
+    val rim = Brush.horizontalGradient(
+        listOf(accent.copy(alpha = 0.45f + glow * 0.45f), deepAccent.copy(alpha = 0.34f + glow * 0.30f), accent.copy(alpha = 0.34f + glow * 0.44f))
+    )
+    val panel = Brush.linearGradient(
+        listOf(deepAccent.copy(alpha = if (global) 0.24f else 0.18f), theme.surface.copy(alpha = 0.98f), accent.copy(alpha = 0.12f))
+    )
+    val medal = if (global) "🌌" else "🏛️"
+    val winnerLabel = when {
+        visual.rank == 1 && visual.tiedAtTop > 1 -> "✦ SOMMET PARTAGÉ · ${visual.tiedAtTop} EX ÆQUO ✦"
+        visual.rank == 1 && global -> "✦ AU SOMMET DE LA CONSTELLATION ✦"
+        visual.rank == 1 -> "✦ AU PANTHÉON DES INTRONISÉS ✦"
+        global -> "✧ CONSTELLATION · RANG #${visual.rank} ✧"
+        else -> "✧ GALERIE D'HONNEUR · RANG #${visual.rank} ✧"
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        SectionTitle(if (global) "🌌 Constellation Global" else "🏛️ Galerie d'honneur", accent)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(panel)
+                .border(1.5.dp, rim, RoundedCornerShape(24.dp)).padding(15.dp)
+        ) {
+            Box(
+                Modifier.align(Alignment.CenterHorizontally).clip(CircleShape)
+                    .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.18f), deepAccent.copy(alpha = 0.20f))))
+                    .border(1.dp, accent.copy(alpha = 0.55f), CircleShape).padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text(winnerLabel, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(13.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                Box(
+                    Modifier.size(64.dp).shadow(12.dp, if (isArtist) CircleShape else RoundedCornerShape(15.dp), ambientColor = accent, spotColor = accent)
+                        .border(1.5.dp, accent.copy(alpha = 0.82f), if (isArtist) CircleShape else RoundedCornerShape(15.dp))
+                ) { CoverArt(imageUrl, name, size = 64, circle = isArtist) }
+                Column(Modifier.weight(1f)) {
+                    Text(contextLabel.ifBlank { if (global) "RECORD GLOBAL" else "RECORD HALL OF FAME" }.uppercase(Locale.FRANCE), color = accent.copy(alpha = 0.90f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(name, color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    subtitle?.takeIf { it.isNotBlank() }?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("RANG", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text("#${visual.rank}", color = accent, fontWeight = FontWeight.Black, fontSize = 26.sp)
+                    Text("sur ${visual.boardSize.coerceAtLeast(1)}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier.size(61.dp).clip(CircleShape)
+                        .background(Brush.radialGradient(listOf(accent.copy(alpha = 0.30f), deepAccent.copy(alpha = 0.16f), Color.Transparent)))
+                        .border(1.2.dp, rim, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) { Text(if (visual.rank == 1) "👑" else medal, fontSize = 30.sp) }
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(scoreCounter.value.toInt().toString(), color = accent, fontSize = 50.sp, lineHeight = 52.sp, fontWeight = FontWeight.Black)
+                        Text("/ ${visual.maxScore}", color = theme.textSecondary, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 5.dp))
+                    }
+                    Text(if (global) "distinctions Global" else "intronisations HoF", color = theme.text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(if (global) "Triple Debut · All Kill · Legendary Run" else "Débuts directs · longs règnes · hebdo · mensuel", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HonorStatPill("${visual.entries.size}", if (global) "sceaux obtenus" else "intronisations datées", accent, Modifier.weight(1f))
+                HonorStatPill("${visual.boardSize.coerceAtLeast(1)}", "entités distinguées", deepAccent, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp))
+                    .background(if (sharing) Brush.horizontalGradient(listOf(accent.copy(alpha = 0.12f), theme.surface.copy(alpha = 0.76f))) else Brush.horizontalGradient(listOf(accent.copy(alpha = 0.90f), if (global) Color(0xFFB6F6FF) else Color(0xFFFFE7A0))))
+                    .border(1.dp, rim, RoundedCornerShape(14.dp)).clickable(enabled = !sharing, onClick = onShare),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (sharing) "⏳ Préparation de la carte…" else if (global) "✦ PARTAGER MA CONSTELLATION ✦" else "✦ PARTAGER MON INTRONISATION ✦",
+                    color = if (sharing) accent else Color(0xFF171321), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge
+                )
+            }
+            if (shareError) Text("La carte n'a pas pu être préparée. Réessaie dans un instant.", color = Color(0xFFFF6B6B), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 5.dp))
+        }
+
+        visual.rival?.let { rival ->
+            Spacer(Modifier.height(10.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(19.dp))
+                    .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.13f), theme.surface.copy(alpha = 0.97f), deepAccent.copy(alpha = 0.14f))))
+                    .border(1.1.dp, accent.copy(alpha = 0.36f), RoundedCornerShape(19.dp)).padding(14.dp)
+            ) {
+                Text("⚔ DUEL DES DISTINCTIONS", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                Text("Comparaison du total et de chaque distinction avec le détenteur voisin", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    CoverArt(imageUrl, name, size = 46, circle = isArtist)
+                    Column(Modifier.weight(1f)) {
+                        Text("#${visual.rank} · $name", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${visual.score} au total", color = accent, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    }
+                    Text("VS", color = NovaColors.Gold, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(1f)) {
+                        Text("#${rival.rank} · ${rival.name}", color = theme.text, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+                        Text("${rival.score} au total", color = theme.textSecondary, fontSize = 18.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.End)
+                    }
+                    CoverArt(rival.imageUrl, rival.name, size = 46, circle = isArtist)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    when {
+                        rival.tied -> "🤝 ÉGALITÉ · le total de distinctions est partagé"
+                        visual.score > rival.score -> "👑 ${visual.score - rival.score} distinction${if (visual.score - rival.score == 1) "" else "s"} d'avance sur ce rival"
+                        else -> "🎯 ${rival.score - visual.score} distinction${if (rival.score - visual.score == 1) "" else "s"} à combler"
+                    },
+                    color = if (rival.tied) NovaColors.Gold else theme.text, fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(9.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    visual.seals.forEach { seal ->
+                        val currentEarned = visual.entries.any { it.sealKey == seal.key }
+                        val rivalEarned = seal.key in rival.earnedKeys
+                        Column(
+                            Modifier.width(98.dp).clip(RoundedCornerShape(12.dp)).background(theme.background.copy(alpha = 0.50f))
+                                .border(1.dp, if (currentEarned || rivalEarned) accent.copy(alpha = 0.42f) else theme.textSecondary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)).padding(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(seal.title, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                            Text("${if (currentEarned) "✦" else "—"}  /  ${if (rivalEarned) "✦" else "—"}", color = accent, fontSize = 17.sp, fontWeight = FontWeight.Black)
+                            Text("toi / rival", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(2.dp))
+        if (global) {
+            SectionTitle("✧ Les trois sceaux de la constellation", accent)
+            Text("Lumière = distinction obtenue · silhouette = distinction encore à conquérir. Les nombres indiquent combien d'entités l'ont réellement obtenue; aucun pourcentage n'est extrapolé.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 16.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                visual.seals.forEach { seal -> GlobalSealCard(seal, accent, deepAccent) }
+            }
+        } else {
+            SectionTitle("🕰️ Frise des intronisations", accent)
+            Text("Chaque étape conserve son type, sa cadence, sa date et, lorsqu'il est enregistré, le détail du règne.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 16.sp)
+            Spacer(Modifier.height(7.dp))
+            visual.entries.forEachIndexed { index, entry ->
+                val seal = visual.seals.firstOrNull { it.key == entry.sealKey }
+                Row(verticalAlignment = Alignment.Top) {
+                    Column(Modifier.width(25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.padding(top = 12.dp).size(13.dp).shadow(6.dp, CircleShape, ambientColor = accent, spotColor = accent).clip(CircleShape).background(accent))
+                        if (index < visual.entries.lastIndex) Box(Modifier.width(2.dp).height(99.dp).background(accent.copy(alpha = 0.32f)))
+                    }
+                    Column(
+                        Modifier.weight(1f).padding(bottom = 8.dp).clip(RoundedCornerShape(15.dp))
+                            .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.13f), theme.surface.copy(alpha = 0.92f))))
+                            .border(1.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(15.dp)).padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${seal?.emoji ?: "🏅"} ${entry.title}", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(entry.periodLabel.uppercase(Locale.FRANCE), color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Text(entry.date, color = theme.text, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        val reignOrDetail = entry.reignDuration?.let { duration ->
+                            "Règne continu : $duration${entry.reign?.let { " · $it" }.orEmpty()}"
+                        } ?: when {
+                            entry.weeksAtOne > 0 -> "${entry.weeksAtOne} semaines au #1 au total"
+                            else -> seal?.detail
+                        }
+                        reignOrDetail?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        val subDetails = listOfNotNull(
+                            entry.weeksAtOne.takeIf { it > 0 && entry.reignDuration != null }?.let { "$it sem. au #1 au total" },
+                            entry.playsAtEntry.takeIf { it > 0 }?.let { "$it écoutes à l'intronisation" },
+                            seal?.takeIf { it.distinctAwardees > 0 }?.let { "${it.distinctAwardees} entités ont obtenu ce sceau" }
+                        ).joinToString(" · ")
+                        if (subDetails.isNotBlank()) Text(subDetails, color = theme.textSecondary.copy(alpha = 0.9f), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HonorStatPill(value: String, label: String, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(accent.copy(alpha = 0.09f))
+            .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+        Text(label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun GlobalSealCard(seal: RecordExplainer.HonorSealVisual, accent: Color, deepAccent: Color) {
+    val theme = Nova.theme
+    val earned = seal.earnedDate != null
+    val border = if (earned) accent.copy(alpha = 0.58f) else theme.textSecondary.copy(alpha = 0.20f)
+    Column(
+        Modifier.width(228.dp).height(221.dp).clip(RoundedCornerShape(19.dp))
+            .background(if (earned) Brush.linearGradient(listOf(accent.copy(alpha = 0.16f), theme.surface.copy(alpha = 0.96f), deepAccent.copy(alpha = 0.15f))) else Brush.linearGradient(listOf(theme.surface.copy(alpha = 0.62f), theme.surface.copy(alpha = 0.62f))))
+            .border(if (earned) 1.5.dp else 1.dp, border, RoundedCornerShape(19.dp)).padding(13.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(53.dp).clip(CircleShape)
+                .background(if (earned) Brush.radialGradient(listOf(accent.copy(alpha = 0.48f), deepAccent.copy(alpha = 0.20f), Color.Transparent)) else Brush.radialGradient(listOf(theme.background.copy(alpha = 0.68f), theme.background.copy(alpha = 0.68f))))
+                .border(1.dp, border, CircleShape),
+            contentAlignment = Alignment.Center
+        ) { Text(if (earned) seal.emoji else "◇", color = if (earned) Color.Unspecified else theme.textSecondary.copy(alpha = 0.42f), fontSize = if (earned) 25.sp else 30.sp, fontWeight = FontWeight.Black) }
+        Spacer(Modifier.height(7.dp))
+        Text(seal.title, color = if (earned) accent else theme.textSecondary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(if (earned) "✦ OBTENU · ${seal.earnedDate}" else "◇ À CONQUÉRIR", color = if (earned) accent else theme.textSecondary.copy(alpha = 0.65f), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(5.dp))
+        Text(seal.description, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 14.sp, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.weight(1f))
+        Text("${seal.distinctAwardees} entités distinguées", color = if (earned) theme.text else theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
     }
 }
 

@@ -346,6 +346,207 @@ object ShareCards {
         writePng(ctx, bmp, "nova_records_songs_${visual.recordTitle.hashCode()}_$entityId.png")
     }
 
+    /** 👑 Carte de prestige dédiée au Hall of Fame (galerie) et aux distinctions Global (constellation). */
+    suspend fun renderHonorCard(
+        ctx: Context,
+        entityId: Long,
+        entityType: String,
+        name: String,
+        subtitle: String?,
+        imageUrl: String?,
+        isArtist: Boolean,
+        recordTitle: String,
+        contextLabel: String,
+        visual: RecordExplainer.HonorVisual,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val global = visual.isGlobal
+        val accent = if (global) 0xFF67DFF5.toInt() else NovaColors.Gold.toArgb()
+        val secondary = if (global) 0xFF7769FF.toInt() else 0xFFC87737.toInt()
+        val bg = Paint().apply {
+            shader = LinearGradient(
+                0f, 0f, 0f, H.toFloat(),
+                intArrayOf(theme.background.toArgb(), blend(theme.background.toArgb(), secondary, if (global) 0.24f else 0.18f), AColor.BLACK),
+                floatArrayOf(0f, 0.58f, 1f), Shader.TileMode.CLAMP
+            )
+        }
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bg)
+        halo(c, 210f, 330f, 590f, accent, 0.31f)
+        halo(c, 930f, 1010f, 550f, secondary, 0.25f)
+        if (global) {
+            // Quelques points reliés en constellation, en arrière-plan du contenu.
+            val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accent, 0.24f); strokeWidth = 2f }
+            val stars = listOf(830f to 300f, 1000f to 440f, 870f to 610f, 980f to 890f, 840f to 1070f)
+            stars.zipWithNext().forEach { (a, b) -> c.drawLine(a.first, a.second, b.first, b.second, starPaint) }
+            stars.forEach { (x, y) -> c.drawCircle(x, y, 5f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accent, 0.56f) }) }
+        } else {
+            // Ornement de galerie : double filet et points de lumière façon cadre cérémoniel.
+            val ornament = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accent, 0.58f) }
+            listOf(90f, W - 90f).forEach { x ->
+                c.drawCircle(x, 286f, 5f, ornament)
+                c.drawCircle(x, 750f, 5f, ornament)
+            }
+        }
+        val frame = RectF(28f, 28f, W - 28f, H - 28f)
+        c.drawRoundRect(frame, 44f, 44f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(accent, 0.55f)
+        })
+        c.drawRoundRect(RectF(43f, 43f, W - 43f, H - 43f), 38f, 38f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(theme.text.toArgb(), 0.13f)
+        })
+
+        val brand = textPaint(bold, 28f, withAlpha(theme.accent.toArgb(), 0.98f)).apply { letterSpacing = 0.24f }
+        c.drawText(if (global) "NOVA GLOBAL · CONSTELLATION" else "NOVA HALL OF FAME · GALERIE D'HONNEUR", 72f, 120f, brand)
+        val contextPaint = textPaint(inter, 23f, theme.textSecondary.toArgb())
+        c.drawText(ellipsize(contextLabel.uppercase(java.util.Locale.FRANCE), contextPaint, W - 144f), 72f, 165f, contextPaint)
+        val medalRect = RectF(72f, 190f, W - 72f, 239f)
+        c.drawRoundRect(medalRect, 25f, 25f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accent, 0.14f) })
+        c.drawRoundRect(medalRect, 25f, 25f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.7f; color = withAlpha(accent, 0.52f) })
+        val ceremony = when {
+            visual.rank == 1 && visual.tiedAtTop > 1 -> "✦ SOMMET PARTAGÉ · ${visual.tiedAtTop} EX ÆQUO ✦"
+            visual.rank == 1 && global -> "✦ AU SOMMET DE LA CONSTELLATION ✦"
+            visual.rank == 1 -> "✦ INTRONISÉ AU SOMMET ✦"
+            global -> "✧ CONSTELLATION · RANG #${visual.rank} ✧"
+            else -> "✧ GALERIE D'HONNEUR · RANG #${visual.rank} ✧"
+        }
+        c.drawText(ceremony, medalRect.centerX(), 222f, textPaint(bold, 21f, accent).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.12f })
+
+        var titleBottom = drawWrapped(c, name, 72f, 280f, W - 144f, textPaint(bold, 65f, theme.text.toArgb()), maxLines = 2, lineH = 74f)
+        subtitle?.takeIf { it.isNotBlank() }?.let {
+            titleBottom = drawWrapped(c, it, 72f, titleBottom + 2f, W - 144f, textPaint(inter, 28f, theme.textSecondary.toArgb()), maxLines = 1, lineH = 35f)
+        }
+        val coverTop = maxOf(378f, titleBottom + 22f)
+        val coverRect = RectF(72f, coverTop, 390f, coverTop + 318f)
+        val cover = imageUrl?.let { loadBitmap(ctx, it, 540) }
+        if (cover != null) {
+            if (isArtist) drawCircleCover(c, cover, coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.48f)
+            else drawCover(c, cover, coverRect, 30f)
+        } else {
+            val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(coverRect.left, coverRect.top, coverRect.right, coverRect.bottom, secondary, accent, Shader.TileMode.CLAMP)
+            }
+            if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.48f, placeholder)
+            else c.drawRoundRect(coverRect, 30f, 30f, placeholder)
+            c.drawText(name.take(1).uppercase(), coverRect.centerX(), coverRect.centerY() + 50f, textPaint(bold, 150f, theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER })
+        }
+        val coverFrame = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 4f; color = withAlpha(accent, 0.88f) }
+        if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.48f, coverFrame)
+        else c.drawRoundRect(coverRect, 30f, 30f, coverFrame)
+
+        val rightX = 432f
+        val rightW = W - rightX - 72f
+        c.drawText("DISTINCTION", rightX, coverTop + 42f, textPaint(bold, 25f, withAlpha(accent, 0.95f)).apply { letterSpacing = 0.16f })
+        val titleEnd = drawWrapped(c, recordTitle, rightX, coverTop + 91f, rightW, textPaint(bold, 39f, theme.text.toArgb()), maxLines = 2, lineH = 46f)
+        c.drawText(if (global) "SCEAUX GLOBAL OBTENUS" else "INTRONISATIONS DISTINCTES", rightX, titleEnd + 38f, textPaint(bold, 20f, theme.textSecondary.toArgb()))
+        val scoreCenterY = titleEnd + 111f
+        c.drawCircle(rightX + 85f, scoreCenterY - 17f, 91f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(rightX + 85f, scoreCenterY - 17f, 91f, intArrayOf(withAlpha(accent, 0.32f), withAlpha(accent, 0f)), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
+        })
+        c.drawText("${visual.score}", rightX, scoreCenterY + 7f, textPaint(bold, 82f, accent))
+        c.drawText("/ ${visual.maxScore}", rightX + 140f, scoreCenterY + 1f, textPaint(bold, 32f, theme.textSecondary.toArgb()))
+        c.drawText("RANG #${visual.rank}  ·  ${visual.boardSize.coerceAtLeast(1)} ENTITÉS DISTINGUÉES", rightX, scoreCenterY + 59f, textPaint(bold, 18f, theme.textSecondary.toArgb()))
+
+        val sectionTop = coverRect.bottom + 54f
+        val sectionLabel = if (global) "LES TROIS SCEAUX · LUMINEUX SI OBTENUS" else "FRISE DES INTRONISATIONS"
+        c.drawText(sectionLabel, 72f, sectionTop, textPaint(bold, 25f, withAlpha(accent, 0.95f)).apply { letterSpacing = 0.10f })
+        var sectionBottom: Float
+        if (global) {
+            val gap = 15f
+            val cardW = (W - 144f - gap * 2f) / 3f
+            val cardTop = sectionTop + 27f
+            val cardH = 279f
+            visual.seals.take(3).forEachIndexed { index, seal ->
+                val left = 72f + index * (cardW + gap)
+                val rect = RectF(left, cardTop, left + cardW, cardTop + cardH)
+                val earned = seal.earnedDate != null
+                c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(if (earned) accent else theme.surface.toArgb(), if (earned) 0.14f else 0.55f) })
+                c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = if (earned) 2.5f else 1.5f; color = withAlpha(if (earned) accent else theme.textSecondary.toArgb(), if (earned) 0.64f else 0.22f) })
+                val cx = rect.centerX()
+                val cy = rect.top + 50f
+                c.drawCircle(cx, cy, 35f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    shader = RadialGradient(cx, cy, 35f, intArrayOf(withAlpha(accent, if (earned) 0.46f else 0.08f), withAlpha(accent, 0f)), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
+                })
+                val glyph = if (earned) seal.emoji else "◇"
+                c.drawText(glyph, cx, cy + 14f, textPaint(bold, if (earned) 38f else 42f, if (earned) theme.text.toArgb() else withAlpha(theme.textSecondary.toArgb(), 0.43f)).apply { textAlign = Paint.Align.CENTER })
+                drawWrapped(c, seal.title.uppercase(java.util.Locale.FRANCE), rect.left + 12f, rect.top + 105f, rect.width() - 24f, textPaint(bold, 21f, if (earned) accent else theme.textSecondary.toArgb()), maxLines = 2, lineH = 25f)
+                val status = if (earned) "OBTENU · ${seal.earnedDate}" else "À CONQUÉRIR"
+                c.drawText(ellipsize(status, textPaint(bold, 18f, if (earned) accent else theme.textSecondary.toArgb()), rect.width() - 22f), rect.centerX(), rect.top + 177f, textPaint(bold, 18f, if (earned) accent else theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER })
+                drawWrapped(c, seal.description, rect.left + 13f, rect.top + 207f, rect.width() - 26f, textPaint(inter, 15f, theme.textSecondary.toArgb()), maxLines = 2, lineH = 19f)
+                c.drawText("${seal.distinctAwardees} ENTITÉS", rect.centerX(), rect.bottom - 14f, textPaint(bold, 17f, if (earned) theme.text.toArgb() else theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.CENTER })
+            }
+            sectionBottom = cardTop + cardH
+        } else {
+            var rowTop = sectionTop + 22f
+            val rows = visual.entries.take(4)
+            rows.forEach { entry ->
+                val rect = RectF(72f, rowTop, W - 72f, rowTop + 99f)
+                c.drawRoundRect(rect, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.80f) })
+                c.drawRoundRect(rect, 18f, 18f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(accent, 0.30f) })
+                c.drawCircle(rect.left + 42f, rect.centerY(), 25f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accent, 0.17f) })
+                val seal = visual.seals.firstOrNull { it.key == entry.sealKey }
+                c.drawText(seal?.emoji ?: "🏅", rect.left + 42f, rect.centerY() + 9f, textPaint(bold, 25f, accent).apply { textAlign = Paint.Align.CENTER })
+                val tx = rect.left + 83f
+                val maxW = rect.right - tx - 18f
+                c.drawText(ellipsize(entry.title, textPaint(bold, 21f, theme.text.toArgb()), maxW - 185f), tx, rect.top + 29f, textPaint(bold, 21f, theme.text.toArgb()))
+                c.drawText("${entry.periodLabel.uppercase(java.util.Locale.FRANCE)} · ${entry.date}", tx, rect.top + 60f, textPaint(bold, 17f, accent))
+                val details = buildList {
+                    entry.reignDuration?.let { add("Règne continu : $it") }
+                    entry.reign?.let { add(it) }
+                    if (entry.weeksAtOne > 0) add("${entry.weeksAtOne} semaines cumulées au #1")
+                    if (isEmpty()) seal?.detail?.let { add(it) }
+                    entry.playsAtEntry.takeIf { it > 0 }?.let { add("$it ▶ à l'entrée") }
+                    seal?.takeIf { it.distinctAwardees > 0 }?.let { add("${it.distinctAwardees} distingués") }
+                }.joinToString(" · ")
+                c.drawText(ellipsize(details, textPaint(inter, 16f, theme.textSecondary.toArgb()), maxW), tx, rect.bottom - 12f, textPaint(inter, 16f, theme.textSecondary.toArgb()))
+                rowTop += 110f
+            }
+            if (rows.isEmpty()) {
+                c.drawText("Aucune intronisation détaillée.", 72f, sectionTop + 62f, textPaint(inter, 21f, theme.textSecondary.toArgb()))
+                rowTop = sectionTop + 92f
+            }
+            sectionBottom = rowTop - 11f
+        }
+
+        val contentBottom = sectionBottom
+        visual.rival?.let { rival ->
+            val top = contentBottom + 33f
+            c.drawText("⚔ DUEL DES DISTINCTIONS", 72f, top, textPaint(bold, 24f, withAlpha(accent, 0.96f)))
+            val rect = RectF(72f, top + 18f, W - 72f, top + 226f)
+            c.drawRoundRect(rect, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.82f) })
+            c.drawRoundRect(rect, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(accent, 0.31f) })
+            val leftName = ellipsize("#${visual.rank} · $name", textPaint(bold, 22f, theme.text.toArgb()), 385f)
+            val rightName = ellipsize("#${rival.rank} · ${rival.name}", textPaint(bold, 22f, theme.text.toArgb()), 385f)
+            c.drawText(leftName, rect.left + 22f, rect.top + 43f, textPaint(bold, 22f, theme.text.toArgb()))
+            c.drawText("${visual.score}", rect.left + 22f, rect.top + 87f, textPaint(bold, 36f, accent))
+            c.drawText("VS", rect.centerX(), rect.top + 65f, textPaint(bold, 20f, NovaColors.Gold.toArgb()).apply { textAlign = Paint.Align.CENTER })
+            c.drawText(rightName, rect.right - 22f, rect.top + 43f, textPaint(bold, 22f, theme.text.toArgb()).apply { textAlign = Paint.Align.RIGHT })
+            c.drawText("${rival.score}", rect.right - 22f, rect.top + 87f, textPaint(bold, 36f, theme.textSecondary.toArgb()).apply { textAlign = Paint.Align.RIGHT })
+            val marksY = rect.top + 118f
+            val seals = visual.seals
+            val cellW = (rect.width() - 36f) / seals.size.coerceAtLeast(1)
+            seals.forEachIndexed { index, seal ->
+                val x = rect.left + 18f + index * cellW
+                val ours = visual.entries.any { it.sealKey == seal.key }
+                val theirs = seal.key in rival.earnedKeys
+                val p = textPaint(inter, 15f, theme.textSecondary.toArgb())
+                c.drawText(ellipsize(seal.title, p, cellW - 8f), x, marksY + 16f, p)
+                c.drawText("${if (ours) "✦" else "—"} / ${if (theirs) "✦" else "—"}", x, marksY + 42f, textPaint(bold, 19f, accent))
+            }
+            c.drawText(if (rival.tied) "ÉGALITÉ · même total de distinctions" else "TOTAL · toi ${visual.score}  /  rival ${rival.score}", rect.centerX(), rect.bottom - 14f, textPaint(bold, 18f, accent).apply { textAlign = Paint.Align.CENTER })
+        }
+
+        c.drawText("Données de distinctions distinctes · classement #${visual.rank} sur ${visual.boardSize.coerceAtLeast(1)} entités", 72f, H - 118f, textPaint(inter, 18f, theme.textSecondary.toArgb()))
+        c.drawText("NOVASTATS", W - 72f, H - 72f, textPaint(bold, 30f, withAlpha(accent, 0.96f)).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.28f })
+        c.drawRect(0f, H - 9f, W.toFloat(), H.toFloat(), Paint().apply {
+            shader = LinearGradient(0f, 0f, W.toFloat(), 0f, accent, secondary, Shader.TileMode.CLAMP)
+        })
+        writePng(ctx, bmp, "nova_honor_${if (global) "global" else "hof"}_${entityType.lowercase()}_${visual.selectedSub ?: "all"}_${entityId}.png")
+    }
+
     /** 📤 Carte du parcours d'une entité dans son chart (+ face-à-face éventuel), 1080×1920, aux couleurs du thème. */
     suspend fun renderChartStory(ctx: Context, h: EntityHistory, compare: EntityHistory? = null, theme: NovaTheme): File = withContext(Dispatchers.Default) {
         val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)

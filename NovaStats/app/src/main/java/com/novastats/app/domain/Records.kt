@@ -170,7 +170,7 @@ object RecordCatalog {
         RecordDef(12, "MOST_CERTIFICATIONS", "💎", "Most Certifications", "Le plus de certifications obtenues, par niveau", emptyList(), artistAlbum,
             mapOf(RecordCategory.ARTIST to certLevels.flatMap { l -> songsAlbums.map { s -> RecordSub("${s.dbName}_${l.dbName}", "${s.label} · ${l.label}") } }, RecordCategory.ALBUM to certLevels), RecordUnit.COUNT),
         RecordDef(13, "MOST_HOF", "🏛️", "Most Hall of Fame Entries", "Le plus d'entrées au Hall of Fame (hebdo + mensuel)", emptyList(), all3, unit = RecordUnit.COUNT, screen = "HOF_GLOBAL"),
-        RecordDef(14, "MOST_GLOBAL", "🌍", "Most Global Entries", "Le plus d'entrées Global (Triple Debut, Legendary Run)", emptyList(), all3,
+        RecordDef(14, "MOST_GLOBAL", "🌍", "Most Global Entries", "Le plus de distinctions Global distinctes : Triple Debut, All Kill et Legendary Run", emptyList(), all3,
             mapOf(RecordCategory.TRACK to globalSubs, RecordCategory.ARTIST to globalSubs, RecordCategory.ALBUM to globalSubs), RecordUnit.COUNT, screen = "HOF_GLOBAL"),
         RecordDef(15, "BIGGEST_COMEBACK", "🔄", "Biggest Comeback", "Plus grande remontée lors d'un retour après absence (5 j / 3 sem. / 2 mois / 1 an)", chartPeriods, all3, unit = RecordUnit.POSITIONS),
         RecordDef(16, "FASTEST_RISE", "🏎️", "Fastest Rise", "Zone (Top 1 / 3 / 5 / 10 / 20) atteinte le plus vite après l'entrée dans le chart — entrées directes exclues", chartPeriods, all3,
