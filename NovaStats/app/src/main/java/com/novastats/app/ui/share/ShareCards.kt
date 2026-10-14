@@ -212,10 +212,22 @@ object ShareCards {
         c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bg)
         halo(c, 180f, 320f, 560f, if (visual.rank == 1) gold else theme.primary.toArgb(), 0.36f)
         halo(c, 990f, 1240f, 500f, theme.secondary.toArgb(), 0.22f)
+        val frameColor = if (visual.rank == 1) gold else theme.primary.toArgb()
+        c.drawRoundRect(RectF(28f, 28f, W - 28f, H - 28f), 44f, 44f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(frameColor, 0.42f)
+        })
+        c.drawRoundRect(RectF(42f, 42f, W - 42f, H - 42f), 38f, 38f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(theme.text.toArgb(), 0.12f)
+        })
 
         val eyebrow = textPaint(bold, 30f, withAlpha(theme.accent.toArgb(), 0.96f)).apply { letterSpacing = 0.2f }
-        c.drawText("NOVA RECORDS · DOMINATION", 72f, 122f, eyebrow)
+        c.drawText("NOVA RECORDS · ÉDITION PRESTIGE", 72f, 122f, eyebrow)
         c.drawText(ellipsize(visual.contextLabel.uppercase(java.util.Locale.FRANCE), textPaint(inter, 24f, theme.textSecondary.toArgb()), W - 144f), 72f, 172f, textPaint(inter, 24f, theme.textSecondary.toArgb()))
+        val badgeRect = RectF(72f, 197f, W - 72f, 245f)
+        c.drawRoundRect(badgeRect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(frameColor, if (visual.rank == 1) 0.24f else 0.16f) })
+        c.drawRoundRect(badgeRect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(frameColor, 0.52f) })
+        val badge = if (visual.rank == 1 && visual.tiedAtTop > 1) "✦ COURONNE PARTAGÉE · ${visual.tiedAtTop} CO-DÉTENTEURS ✦" else if (visual.rank == 1) "✦ LÉGENDE DU CHART · RECORD DÉTENU ✦" else "✧ TOP ${visual.rank} · À LA CONQUÊTE DU SOMMET ✧"
+        c.drawText(badge, badgeRect.centerX(), 229f, textPaint(bold, 22f, if (visual.rank == 1) gold else theme.text.toArgb()).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.12f })
         var titleBottom = drawWrapped(c, name, 72f, 270f, W - 144f, textPaint(bold, 68f, theme.text.toArgb()), maxLines = 2, lineH = 78f)
         subtitle?.takeIf { it.isNotBlank() }?.let {
             titleBottom = drawWrapped(c, it, 72f, titleBottom + 4f, W - 144f, textPaint(inter, 30f, theme.textSecondary.toArgb()), maxLines = 1, lineH = 38f)
@@ -239,7 +251,7 @@ object ShareCards {
             c.drawText(name.take(1).uppercase(), coverRect.centerX(), coverRect.centerY() + 48f, initial)
         }
         val coverBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 4f; color = withAlpha(theme.text.toArgb(), 0.25f)
+            style = Paint.Style.STROKE; strokeWidth = 4f; color = withAlpha(frameColor, 0.82f)
         }
         if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), coverRect.width() * 0.47f, coverBorder)
         else c.drawRoundRect(coverRect, 34f, 34f, coverBorder)
@@ -249,6 +261,11 @@ object ShareCards {
         c.drawText("RECORD", rightX, coverTop + 38f, textPaint(bold, 26f, withAlpha(theme.accent.toArgb(), 0.95f)).apply { letterSpacing = 0.18f })
         val recordBottom = drawWrapped(c, visual.recordTitle, rightX, coverTop + 88f, rightW, textPaint(bold, 38f, theme.text.toArgb()), maxLines = 2, lineH = 44f)
         c.drawText("SCORE · ${visual.itemLabel.uppercase(java.util.Locale.FRANCE)}S DISTINCTS", rightX, recordBottom + 32f, textPaint(bold, 20f, theme.textSecondary.toArgb()))
+        val scoreCx = rightX + 86f
+        val scoreCy = recordBottom + 78f
+        c.drawCircle(scoreCx, scoreCy, 92f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(scoreCx, scoreCy, 92f, intArrayOf(withAlpha(frameColor, 0.30f), withAlpha(frameColor, 0f)), floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
+        })
         c.drawText(visual.score.toString(), rightX, recordBottom + 102f, textPaint(bold, 82f, if (visual.rank == 1) gold else theme.primary.toArgb()))
         c.drawText(
             if (visual.rank == 1 && visual.tiedAtTop > 1) "🥇 #1 · ${visual.tiedAtTop} ex æquo" else if (visual.rank == 1) "🥇 DÉTENTEUR #1" else "#${visual.rank} DU RECORD",
@@ -302,7 +319,8 @@ object ShareCards {
         var rowY = nextY + 54f
         visual.featuredTracks.take(3).forEachIndexed { index, track ->
             val rect = RectF(72f, rowY, W - 72f, rowY + 164f)
-            c.drawRoundRect(rect, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.72f) })
+            c.drawRoundRect(rect, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.82f) })
+            c.drawRoundRect(rect, 22f, 22f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = withAlpha(frameColor, 0.28f) })
             val trackCoverRect = RectF(rect.left + 16f, rect.top + 22f, rect.left + 124f, rect.top + 130f)
             val trackCover = track.imageUrl?.let { loadBitmap(ctx, it, 220) }
             if (trackCover != null) drawCover(c, trackCover, trackCoverRect, 16f) else {
