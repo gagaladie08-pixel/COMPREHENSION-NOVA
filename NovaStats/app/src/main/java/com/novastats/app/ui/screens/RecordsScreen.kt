@@ -369,6 +369,14 @@ private fun groupColor(g: RecordGroup): Color {
 
 @Composable
 private fun RecordCard(def: RecordDef, color: Color, onClick: () -> Unit) {
+    if (def.id == "MOST_CERTIFICATIONS") {
+        CertificationRecordCard(def, color, onClick)
+        return
+    }
+    if (def.id == "BIGGEST_PERIOD") {
+        BiggestPeriodRecordCard(def, color, onClick)
+        return
+    }
     if (def.id in MOVEMENT_RECORD_IDS) {
         MovementRecordCard(def, color, onClick)
         return
@@ -570,6 +578,45 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                     }
                 }
             }
+        } else if (def.id == "MOST_CERTIFICATIONS") {
+            val podiumCount = minOf(3, rows.size)
+            item(key = "certification-vault-stage-${category.dbName}-${sub?.dbName}") {
+                CertificationLeaderboardStage(
+                    rows = rows.take(podiumCount),
+                    category = category,
+                    subLabel = sub?.label,
+                    color = color
+                ) { row, rank -> onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, rank)) }
+            }
+            items(rows.size - podiumCount) { offset ->
+                val i = offset + podiumCount
+                val row = rows[i]
+                Box(Modifier.padding(horizontal = 14.dp)) {
+                    RecordEntryRow(i + 1, row, def, period, category, maxValue, certificationAccent(sub?.dbName, color), rows.getOrNull(i + 1)?.r?.value) {
+                        onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, i + 1))
+                    }
+                }
+            }
+        } else if (def.id == "BIGGEST_PERIOD") {
+            val podiumCount = minOf(3, rows.size)
+            val periodAccent = biggestPeriodAccent(period, color)
+            item(key = "period-peak-stage-${period?.dbName}-${category.dbName}") {
+                BiggestPeriodLeaderboardStage(
+                    period = period,
+                    category = category,
+                    rows = rows.take(podiumCount),
+                    color = color
+                ) { row, rank -> onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, rank)) }
+            }
+            items(rows.size - podiumCount) { offset ->
+                val i = offset + podiumCount
+                val row = rows[i]
+                Box(Modifier.padding(horizontal = 14.dp)) {
+                    RecordEntryRow(i + 1, row, def, period, category, maxValue, periodAccent, rows.getOrNull(i + 1)?.r?.value) {
+                        onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, i + 1))
+                    }
+                }
+            }
         } else if (def.id == "MOST_PERFECT_ALL_KILL") {
             item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
@@ -713,7 +760,9 @@ private fun RecordEntryRow(rank: Int, row: RecordRow, def: RecordDef, period: Pe
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(row.name ?: "Inconnu", color = if (first) NovaColors.Gold else theme.text, fontWeight = if (first) FontWeight.Black else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val subText = listOfNotNull(row.subtitle, row.r.extraData).joinToString(" · ")
+                val subText = if (def.id == "BIGGEST_PERIOD") {
+                    listOfNotNull(row.subtitle, row.r.valueDate?.let { biggestPeriodDateLabel(period, it) }, biggestPeriodChartRank(row.r.extraData)).joinToString(" · ")
+                } else listOfNotNull(row.subtitle, row.r.extraData).joinToString(" · ")
                 if (subText.isNotBlank()) Text(subText, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // 🔥 Séries d'écoute : puce « EN COURS » pulsante + palier de flamme atteint
                 if (def.id == "LONGEST_LISTENING_STREAK") {
@@ -1527,6 +1576,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val name = row.name ?: "Inconnu"
     val movementRecord = def.id in MOVEMENT_RECORD_IDS
     val debutRecord = def.id in DEBUT_RECORD_IDS
+    val certificationRecord = def.id == "MOST_CERTIFICATIONS"
+    val biggestPeriodRecord = def.id == "BIGGEST_PERIOD"
+    val premiumArchiveRecord = certificationRecord || biggestPeriodRecord
     var story by remember(ref) { mutableStateOf<RecordExplainer.Story?>(null) }
     LaunchedEffect(ref) {
         story = app.recordExplainer.explain(def, ref.period, ref.category, ref.sub, row.r.entityId, name, row.r.value)
@@ -1540,6 +1592,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val context = listOfNotNull(ref.period?.label, sectionLabel(ref.category), subLabel).joinToString(" · ")
     val movementContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
     val debutContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
+    val certificationContext = listOfNotNull(sectionLabel(ref.category), subLabel).joinToString(" · ")
+    val biggestPeriodContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category)).joinToString(" · ")
     var mostRecordsSearch by remember(ref) { mutableStateOf("") }
     var selectedMostRecordsFamily by remember(ref) { mutableStateOf<RecordGroup?>(null) }
     var expandedMostRecordsFamilies by remember(ref) { mutableStateOf<Set<RecordGroup>>(emptySet()) }
@@ -1599,6 +1653,10 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     var movementShareError by remember(ref) { mutableStateOf(false) }
     var sharingDebut by remember(ref) { mutableStateOf(false) }
     var debutShareError by remember(ref) { mutableStateOf(false) }
+    var sharingCertificationArchive by remember(ref) { mutableStateOf(false) }
+    var certificationArchiveShareError by remember(ref) { mutableStateOf(false) }
+    var sharingBiggestPeriod by remember(ref) { mutableStateOf(false) }
+    var biggestPeriodShareError by remember(ref) { mutableStateOf(false) }
     var sharingHonorCard by remember(ref) { mutableStateOf(false) }
     var honorShareError by remember(ref) { mutableStateOf(false) }
     var sharingArtistNoOne by remember(ref) { mutableStateOf(false) }
@@ -1644,10 +1702,15 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 if (def.id == "MOST_RECORDS") "🏆 Palmarès des records" else "${def.emoji} ${def.title}",
                 color,
                 onBack,
-                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place" else if (movementRecord) movementContext else if (debutRecord) debutContext else context
+                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place"
+                else if (movementRecord) movementContext
+                else if (debutRecord) debutContext
+                else if (certificationRecord) certificationContext
+                else if (biggestPeriodRecord) biggestPeriodContext
+                else context
             )
         }
-        if (!movementRecord && !debutRecord) item {
+        if (!movementRecord && !debutRecord && !premiumArchiveRecord) item {
             // En-tête : pochette, nom et rang. Les records premium de vitesse, succession et présence ont leur fond dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
             val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
@@ -2010,6 +2073,125 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     )
                 }
             }
+            if (certificationRecord) {
+                item(key = "certification-archive-${ref.category.dbName}-${ref.sub}-${row.r.entityId}") {
+                    CertificationArchiveSpotlight(
+                        name = name,
+                        subtitle = row.subtitle,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        score = row.r.value.toInt().coerceAtLeast(0),
+                        rank = ref.rank,
+                        category = ref.category,
+                        sub = ref.sub,
+                        context = certificationContext,
+                        story = st,
+                        sharing = sharingCertificationArchive,
+                        shareError = certificationArchiveShareError,
+                        onShare = {
+                            if (!sharingCertificationArchive) {
+                                sharingCertificationArchive = true
+                                certificationArchiveShareError = false
+                                shareScope.launch {
+                                    try {
+                                        val tier = certificationLevel(ref.sub)
+                                        val file = ShareCards.renderCertificationArchiveCard(
+                                            ctx = app,
+                                            entityId = row.r.entityId,
+                                            name = name,
+                                            subtitle = row.subtitle,
+                                            imageUrl = row.imageUrl,
+                                            isArtist = ref.category == RecordCategory.ARTIST,
+                                            categoryLabel = sectionLabel(ref.category),
+                                            scope = certificationContext,
+                                            tierLabel = tier?.label ?: subLabel.orEmpty(),
+                                            tierEmoji = tier?.emoji ?: "💎",
+                                            score = row.r.value.toInt().coerceAtLeast(0),
+                                            rank = ref.rank,
+                                            facts = st.facts,
+                                            items = st.items,
+                                            accent = certificationAccent(ref.sub, color),
+                                            theme = theme
+                                        )
+                                        ShareCards.share(app, file, "Partager la collection certifiée")
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        certificationArchiveShareError = true
+                                    } finally {
+                                        sharingCertificationArchive = false
+                                    }
+                                }
+                            }
+                        },
+                        onItemClick = { item ->
+                            val itemTarget = when (item.type) {
+                                EntityType.TRACK -> DetailTarget.Track(item.id)
+                                EntityType.ALBUM -> DetailTarget.Album(item.id)
+                                else -> DetailTarget.Artist(item.id)
+                            }
+                            onEntity(itemTarget)
+                        }
+                    )
+                }
+            }
+            if (biggestPeriodRecord) {
+                item(key = "biggest-period-archive-${period?.dbName}-${ref.category.dbName}-${row.r.entityId}-${row.r.valueDate}") {
+                    BiggestPeriodSpotlight(
+                        name = name,
+                        subtitle = row.subtitle,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        category = ref.category,
+                        score = row.r.value.toInt().coerceAtLeast(0),
+                        rank = ref.rank,
+                        period = ref.period,
+                        peakDate = row.r.valueDate,
+                        context = biggestPeriodContext,
+                        story = st,
+                        sharing = sharingBiggestPeriod,
+                        shareError = biggestPeriodShareError,
+                        onShare = {
+                            if (!sharingBiggestPeriod) {
+                                sharingBiggestPeriod = true
+                                biggestPeriodShareError = false
+                                shareScope.launch {
+                                    try {
+                                        val selected = st.timeline.firstOrNull { it.date == row.r.valueDate }
+                                            ?: st.timeline.firstOrNull { it.highlight }
+                                        val file = ShareCards.renderBiggestPeriodCard(
+                                            ctx = app,
+                                            entityId = row.r.entityId,
+                                            name = name,
+                                            subtitle = row.subtitle,
+                                            imageUrl = row.imageUrl,
+                                            isArtist = ref.category == RecordCategory.ARTIST,
+                                            period = ref.period ?: Period.DAILY,
+                                            categoryLabel = sectionLabel(ref.category),
+                                            context = biggestPeriodContext,
+                                            score = row.r.value.toInt().coerceAtLeast(0),
+                                            rank = ref.rank,
+                                            peakDate = row.r.valueDate,
+                                            peakPosition = selected?.position,
+                                            facts = st.facts.filterNot { it.first == "Pic" },
+                                            timeline = st.timeline,
+                                            accent = biggestPeriodAccent(ref.period, color),
+                                            theme = theme
+                                        )
+                                        ShareCards.share(app, file, "Partager le pic historique")
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        biggestPeriodShareError = true
+                                    } finally {
+                                        sharingBiggestPeriod = false
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+            }
             if (def.id == "MOST_CONSISTENT") {
                 item(key = "most-consistent-showcase") {
                     MostConsistentSpotlight(
@@ -2139,7 +2321,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                         }
                     }
                 }
-            } else if (!debutRecord) item {
+            } else if (!debutRecord && !premiumArchiveRecord) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle(
                         when {
@@ -2173,7 +2355,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             st.multiChartVisual?.let { visual ->
                 item { MultiChartConstellation(visual, color) }
             }
-            if (def.id != "MOST_RECORDS" && !movementRecord && !debutRecord && st.facts.isNotEmpty()) item {
+            if (def.id != "MOST_RECORDS" && !movementRecord && !debutRecord && !premiumArchiveRecord && st.facts.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("📋 Les faits", color)
                     st.facts.forEach { (k, v) ->
@@ -2202,7 +2384,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty() && st.presenceVisual == null && !movementRecord && !debutRecord && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null && !movementRecord && !debutRecord && !premiumArchiveRecord && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
@@ -2247,7 +2429,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.items.isNotEmpty() && !debutRecord && def.id != "MOST_BLOCKED_TOP5") {
+            if (st.items.isNotEmpty() && !debutRecord && !premiumArchiveRecord && def.id != "MOST_BLOCKED_TOP5") {
                 item { Box(Modifier.padding(horizontal = 16.dp)) { SectionTitle("🎵 " + (st.itemsTitle ?: "Éléments"), color) } }
                 items(st.items.size) { i ->
                     val ent = st.items[i]

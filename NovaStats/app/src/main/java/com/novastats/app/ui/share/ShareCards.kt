@@ -349,6 +349,236 @@ object ShareCards {
         writePng(ctx, bmp, "nova_movement_${recordId.lowercase(java.util.Locale.ROOT)}_${entityId}_${period?.dbName ?: "chart"}.png")
     }
 
+    /** 💎 Affiche « Le Trésor Nova » : une certification mise en scène comme une pièce de collection. */
+    suspend fun renderCertificationArchiveCard(
+        ctx: Context,
+        entityId: Long,
+        name: String,
+        subtitle: String?,
+        imageUrl: String?,
+        isArtist: Boolean,
+        categoryLabel: String,
+        scope: String,
+        tierLabel: String,
+        tierEmoji: String,
+        score: Int,
+        rank: Int?,
+        facts: List<Pair<String, String>>,
+        items: List<RecordExplainer.Item>,
+        accent: Color,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val accentArgb = accent.toArgb()
+        val gold = NovaColors.Gold.toArgb()
+        val deep = 0xFF08070C.toInt()
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(0f, 0f, W.toFloat(), H.toFloat(), intArrayOf(deep, blend(deep, accentArgb, 0.23f), 0xFF07080D.toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        })
+        halo(c, 190f, 360f, 610f, accentArgb, 0.39f)
+        halo(c, 950f, 1250f, 610f, gold, 0.16f)
+        c.drawRoundRect(RectF(28f, 28f, W - 28f, H - 28f), 44f, 44f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(accentArgb, 0.48f) })
+        c.drawRoundRect(RectF(44f, 44f, W - 44f, H - 44f), 36f, 36f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(AColor.WHITE, 0.14f) })
+
+        c.drawText("NOVA  ·  LE TRÉSOR DES CERTIFICATIONS", 72f, 112f, textPaint(bold, 27f, withAlpha(accentArgb, 0.98f)).apply { letterSpacing = 0.12f })
+        c.drawText(ellipsize(scope.uppercase(java.util.Locale.FRANCE), textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)), W - 144f), 72f, 154f, textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)))
+        val tierRect = RectF(72f, 184f, W - 72f, 240f)
+        c.drawRoundRect(tierRect, 25f, 25f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accentArgb, 0.16f) })
+        c.drawRoundRect(tierRect, 25f, 25f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.8f; color = withAlpha(accentArgb, 0.52f) })
+        c.drawText("$tierEmoji  NIVEAU ${tierLabel.uppercase(java.util.Locale.FRANCE)}  ·  ${categoryLabel.uppercase(java.util.Locale.FRANCE)}", tierRect.centerX(), 220f, textPaint(bold, 22f, accentArgb).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.06f })
+        rank?.let {
+            val rankLabel = if (it == 1) "✦ N°1 DE LA COLLECTION ✦" else "COLLECTION CLASSÉE N°$it"
+            c.drawText(rankLabel, W - 72f, 279f, textPaint(bold, 18f, if (it == 1) gold else withAlpha(AColor.WHITE, 0.8f)).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.08f })
+        }
+
+        val coverRect = RectF(367f, 282f, 713f, 628f)
+        halo(c, coverRect.centerX(), coverRect.centerY(), 292f, accentArgb, 0.30f)
+        val cover = imageUrl?.let { loadBitmap(ctx, it, 580) }
+        if (cover != null) {
+            if (isArtist) drawCircleCover(c, cover, coverRect.centerX(), coverRect.centerY(), 160f) else drawCover(c, cover, coverRect, 38f)
+        } else {
+            val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(coverRect.left, coverRect.top, coverRect.right, coverRect.bottom, accentArgb, theme.secondary.toArgb(), Shader.TileMode.CLAMP) }
+            if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), 160f, placeholder) else c.drawRoundRect(coverRect, 38f, 38f, placeholder)
+            c.drawText(name.take(1).uppercase(java.util.Locale.FRANCE), coverRect.centerX(), coverRect.centerY() + 38f, textPaint(bold, 132f, withAlpha(AColor.WHITE, 0.94f)).apply { textAlign = Paint.Align.CENTER })
+        }
+        val frame = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 5f; color = withAlpha(accentArgb, 0.90f) }
+        if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), 164f, frame) else c.drawRoundRect(coverRect, 38f, 38f, frame)
+        c.drawText("✦", coverRect.centerX(), 651f, textPaint(bold, 35f, gold).apply { textAlign = Paint.Align.CENTER })
+
+        val nameBottom = drawWrapped(c, name, 72f, 690f, W - 144f, textPaint(bold, 56f, AColor.WHITE), maxLines = 2, lineH = 60f)
+        var identityBottom = nameBottom
+        subtitle?.takeIf { it.isNotBlank() }?.let {
+            val subtitleY = maxOf(772f, nameBottom + 28f)
+            c.drawText(ellipsize(it, textPaint(inter, 25f, withAlpha(AColor.WHITE, 0.72f)), W - 144f), 72f, subtitleY, textPaint(inter, 25f, withAlpha(AColor.WHITE, 0.72f)))
+            identityBottom = subtitleY
+        }
+        val collectionLabelY = maxOf(850f, identityBottom + 50f)
+        val scoreY = maxOf(938f, collectionLabelY + 88f)
+        val scoreCaptionY = maxOf(980f, scoreY + 42f)
+        c.drawText("LA COLLECTION CERTIFIÉE", 72f, collectionLabelY, textPaint(bold, 23f, accentArgb).apply { letterSpacing = 0.12f })
+        c.drawText(formatCount(score), 72f, scoreY, textPaint(bold, 78f, AColor.WHITE))
+        c.drawText("PIÈCES ATTEINTES AU NIVEAU ${tierLabel.uppercase(java.util.Locale.FRANCE)}", 72f, scoreCaptionY, textPaint(bold, 19f, withAlpha(AColor.WHITE, 0.72f)).apply { letterSpacing = 0.07f })
+
+        val shown = items.take(3)
+        if (shown.isNotEmpty()) {
+            c.drawText("LES PIÈCES QUI COMPOSENT LE TRÉSOR", 72f, 1084f, textPaint(bold, 21f, accentArgb).apply { letterSpacing = 0.06f })
+            val gap = 18f
+            val cardWidth = (W - 144f - gap * (shown.size - 1)) / shown.size
+            shown.forEachIndexed { index, item ->
+                val left = 72f + index * (cardWidth + gap)
+                val rect = RectF(left, 1102f, left + cardWidth, 1516f)
+                c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF171821.toInt(), 0.94f) })
+                c.drawRoundRect(rect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.7f; color = withAlpha(accentArgb, 0.32f) })
+                val art = item.imageUrl?.let { loadBitmap(ctx, it, 260) }
+                val artRect = RectF(left + (cardWidth - 154f) / 2f, 1121f, left + (cardWidth + 154f) / 2f, 1275f)
+                if (art != null) drawCover(c, art, artRect, 19f) else {
+                    c.drawRoundRect(artRect, 19f, 19f, Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(artRect.left, artRect.top, artRect.right, artRect.bottom, accentArgb, blend(accentArgb, deep, 0.65f), Shader.TileMode.CLAMP) })
+                    c.drawText(item.name.take(1).uppercase(java.util.Locale.FRANCE), artRect.centerX(), artRect.centerY() + 23f, textPaint(bold, 72f, AColor.WHITE).apply { textAlign = Paint.Align.CENTER })
+                }
+                c.drawText("PIÈCE  ${index + 1}", left + 17f, 1308f, textPaint(bold, 15f, withAlpha(AColor.WHITE, 0.68f)))
+                drawWrapped(c, item.name, left + 17f, 1342f, cardWidth - 34f, textPaint(bold, 21f, AColor.WHITE), maxLines = 2, lineH = 25f)
+                drawWrapped(c, item.detail, left + 17f, 1410f, cardWidth - 34f, textPaint(inter, 16f, withAlpha(AColor.WHITE, 0.70f)), maxLines = 3, lineH = 20f)
+            }
+        } else {
+            c.drawText("UNE COLLECTION QUI PORTE LA SIGNATURE NOVA", 72f, 1200f, textPaint(bold, 21f, accentArgb))
+        }
+        c.drawText("REPÈRES DU COFFRE", 72f, 1581f, textPaint(bold, 20f, withAlpha(AColor.WHITE, 0.88f)).apply { letterSpacing = 0.08f })
+        facts.take(2).forEachIndexed { index, (label, value) ->
+            val left = 72f + index * 478f
+            val rect = RectF(left, 1600f, left + 458f, 1704f)
+            c.drawRoundRect(rect, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF171821.toInt(), 0.93f) })
+            c.drawRoundRect(rect, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(accentArgb, 0.25f) })
+            c.drawText(ellipsize(label.uppercase(java.util.Locale.FRANCE), textPaint(bold, 14f, withAlpha(AColor.WHITE, 0.64f)), rect.width() - 30f), left + 16f, 1628f, textPaint(bold, 14f, withAlpha(AColor.WHITE, 0.64f)))
+            drawWrapped(c, value, left + 16f, 1664f, rect.width() - 30f, textPaint(bold, 23f, AColor.WHITE), maxLines = 1, lineH = 25f)
+        }
+        c.drawText("NOVASTATS  ·  COLLECTIONS QUI BRILLENT", W - 72f, 1856f, textPaint(bold, 23f, accentArgb).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.10f })
+        c.drawRect(0f, H - 10f, W.toFloat(), H.toFloat(), Paint().apply { shader = LinearGradient(0f, 0f, W.toFloat(), 0f, accentArgb, gold, Shader.TileMode.CLAMP) })
+        writePng(ctx, bmp, "nova_certified_treasure_${categoryLabel.lowercase(java.util.Locale.ROOT)}_${entityId}_${tierLabel.lowercase(java.util.Locale.ROOT)}.png")
+    }
+
+    /** ✹ Affiche « L'Instant Absolu » : un seul pic, à sa cadence, dans la lumière. */
+    suspend fun renderBiggestPeriodCard(
+        ctx: Context,
+        entityId: Long,
+        name: String,
+        subtitle: String?,
+        imageUrl: String?,
+        isArtist: Boolean,
+        period: Period,
+        categoryLabel: String,
+        context: String,
+        score: Int,
+        rank: Int?,
+        peakDate: String?,
+        peakPosition: Int?,
+        facts: List<Pair<String, String>>,
+        timeline: List<RecordExplainer.Point>,
+        accent: Color,
+        theme: NovaTheme
+    ): File = withContext(Dispatchers.Default) {
+        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val inter = ResourcesCompat.getFont(ctx, R.font.inter) ?: Typeface.SANS_SERIF
+        val bold = Typeface.create(inter, Typeface.BOLD)
+        val accentArgb = accent.toArgb()
+        val gold = NovaColors.Gold.toArgb()
+        val deep = 0xFF08090D.toInt()
+        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(0f, 0f, W.toFloat(), H.toFloat(), intArrayOf(deep, blend(deep, accentArgb, 0.22f), AColor.BLACK), floatArrayOf(0f, 0.50f, 1f), Shader.TileMode.CLAMP)
+        })
+        halo(c, 150f, 320f, 670f, accentArgb, 0.40f)
+        halo(c, 980f, 1210f, 590f, gold, 0.15f)
+        val beam = Path().apply { moveTo(340f, 0f); lineTo(740f, 0f); lineTo(1040f, 920f); lineTo(40f, 920f); close() }
+        c.drawPath(beam, Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(360f, 0f, 720f, 920f, intArrayOf(withAlpha(accentArgb, 0f), withAlpha(accentArgb, 0.08f), withAlpha(accentArgb, 0f)), null, Shader.TileMode.CLAMP) })
+        c.drawRoundRect(RectF(28f, 28f, W - 28f, H - 28f), 44f, 44f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f; color = withAlpha(accentArgb, 0.48f) })
+        c.drawRoundRect(RectF(44f, 44f, W - 44f, H - 44f), 36f, 36f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(AColor.WHITE, 0.14f) })
+
+        val periodName = when (period) { Period.DAILY -> "JOUR"; Period.WEEKLY -> "SEMAINE"; Period.MONTHLY -> "MOIS"; else -> period.frLabel.uppercase(java.util.Locale.FRANCE) }
+        val bucketPhrase = when (period) { Period.DAILY -> "UNE JOURNÉE"; Period.WEEKLY -> "UNE SEMAINE"; Period.MONTHLY -> "UN MOIS"; else -> "UNE PÉRIODE" }
+        val parsedPeakDate = peakDate?.let { runCatching { Dates.parse(it) }.getOrNull() }
+        val peakDateLabel = when {
+            parsedPeakDate == null -> "Date d'archive indisponible"
+            period == Period.DAILY -> "Le " + parsedPeakDate.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.FRANCE))
+            period == Period.WEEKLY -> "Semaine du " + parsedPeakDate.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.FRANCE))
+            period == Period.MONTHLY -> parsedPeakDate.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.FRANCE)).replaceFirstChar { it.uppercase(java.util.Locale.FRANCE) }
+            else -> parsedPeakDate.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.FRANCE))
+        }
+        c.drawText("NOVA  ·  L'INSTANT ABSOLU", 72f, 112f, textPaint(bold, 27f, withAlpha(accentArgb, 0.98f)).apply { letterSpacing = 0.12f })
+        val contextLine = context.ifBlank { "$periodName · $categoryLabel" }
+        c.drawText(ellipsize(contextLine.uppercase(java.util.Locale.FRANCE), textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)), W - 144f), 72f, 154f, textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)))
+        val badgeRect = RectF(72f, 184f, W - 72f, 238f)
+        c.drawRoundRect(badgeRect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accentArgb, 0.15f) })
+        c.drawRoundRect(badgeRect, 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.7f; color = withAlpha(accentArgb, 0.48f) })
+        c.drawText("✹  PIC HISTORIQUE · $periodName  ✹", badgeRect.centerX(), 219f, textPaint(bold, 21f, accentArgb).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.10f })
+        rank?.let { c.drawText(if (it == 1) "✦ N°1 DU CLASSEMENT ✦" else "MOMENT CLASSÉ N°$it", W - 72f, 276f, textPaint(bold, 18f, if (it == 1) gold else AColor.WHITE).apply { textAlign = Paint.Align.RIGHT }) }
+
+        val coverRect = RectF(375f, 285f, 705f, 615f)
+        halo(c, coverRect.centerX(), coverRect.centerY(), 285f, accentArgb, 0.29f)
+        val cover = imageUrl?.let { loadBitmap(ctx, it, 560) }
+        if (cover != null) {
+            if (isArtist) drawCircleCover(c, cover, coverRect.centerX(), coverRect.centerY(), 157f) else drawCover(c, cover, coverRect, 38f)
+        } else {
+            val placeholder = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(coverRect.left, coverRect.top, coverRect.right, coverRect.bottom, accentArgb, theme.secondary.toArgb(), Shader.TileMode.CLAMP) }
+            if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), 157f, placeholder) else c.drawRoundRect(coverRect, 38f, 38f, placeholder)
+            c.drawText(name.take(1).uppercase(java.util.Locale.FRANCE), coverRect.centerX(), coverRect.centerY() + 37f, textPaint(bold, 130f, withAlpha(AColor.WHITE, 0.94f)).apply { textAlign = Paint.Align.CENTER })
+        }
+        val imageFrame = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 5f; color = withAlpha(accentArgb, 0.90f) }
+        if (isArtist) c.drawCircle(coverRect.centerX(), coverRect.centerY(), 161f, imageFrame) else c.drawRoundRect(coverRect, 38f, 38f, imageFrame)
+        val nameBottom = drawWrapped(c, name, 72f, 692f, W - 144f, textPaint(bold, 56f, AColor.WHITE), maxLines = 2, lineH = 62f)
+        var identityBottom = nameBottom
+        subtitle?.takeIf { it.isNotBlank() }?.let {
+            val subtitleY = maxOf(779f, nameBottom + 26f)
+            c.drawText(ellipsize(it, textPaint(inter, 24f, withAlpha(AColor.WHITE, 0.70f)), W - 144f), 72f, subtitleY, textPaint(inter, 24f, withAlpha(AColor.WHITE, 0.70f)))
+            identityBottom = subtitleY
+        }
+        val dateY = maxOf(858f, identityBottom + 42f)
+        val scoreY = maxOf(958f, dateY + 96f)
+        val scoreCaptionY = maxOf(1005f, scoreY + 47f)
+        c.drawText(peakDateLabel.uppercase(java.util.Locale.FRANCE), 72f, dateY, textPaint(bold, 23f, accentArgb).apply { letterSpacing = 0.10f })
+        c.drawText(formatCount(score), 72f, scoreY, textPaint(bold, 88f, AColor.WHITE))
+        c.drawText("ÉCOUTES SUR $bucketPhrase", 72f, scoreCaptionY, textPaint(bold, 19f, withAlpha(AColor.WHITE, 0.72f)).apply { letterSpacing = 0.06f })
+        peakPosition?.let { c.drawText("RANG  ·  #$it", 72f, maxOf(1050f, scoreCaptionY + 44f), textPaint(bold, 20f, gold)) }
+
+        val chartRect = RectF(72f, 1120f, W - 72f, 1500f)
+        c.drawRoundRect(chartRect, 27f, 27f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF151821.toInt(), 0.94f) })
+        c.drawRoundRect(chartRect, 27f, 27f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.8f; color = withAlpha(accentArgb, 0.31f) })
+        c.drawText("LA COURBE DU MOMENT  ·  $periodName", chartRect.left + 24f, chartRect.top + 35f, textPaint(bold, 19f, accentArgb).apply { letterSpacing = 0.06f })
+        val nodes = timeline.mapIndexedNotNull { index, point -> point.plays?.let { Triple(index, point, it) } }
+        if (nodes.isEmpty()) {
+            c.drawText("Aucune trajectoire détaillée disponible", chartRect.centerX(), chartRect.centerY(), textPaint(inter, 21f, withAlpha(AColor.WHITE, 0.72f)).apply { textAlign = Paint.Align.CENTER })
+        } else {
+            val plot = RectF(chartRect.left + 35f, chartRect.top + 62f, chartRect.right - 26f, chartRect.bottom - 48f)
+            val maxPlays = maxOf(1, nodes.maxOf { it.third })
+            fun x(index: Int) = if (timeline.size <= 1) plot.centerX() else plot.left + plot.width() * index / timeline.lastIndex.toFloat()
+            fun y(plays: Int) = plot.bottom - (plays.toFloat() / maxPlays) * plot.height()
+            listOf(plot.top, (plot.top + plot.bottom) / 2f, plot.bottom).forEach { yLine -> c.drawLine(plot.left, yLine, plot.right, yLine, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(AColor.WHITE, 0.12f); strokeWidth = 1.5f }) }
+            nodes.zipWithNext().forEach { (from, to) -> c.drawLine(x(from.first), y(from.third), x(to.first), y(to.third), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(accentArgb, 0.88f); strokeWidth = 5f; strokeCap = Paint.Cap.ROUND }) }
+            nodes.forEach { (index, point, plays) ->
+                val selected = point.date == peakDate || point.highlight
+                val marker = if (selected) gold else accentArgb
+                c.drawCircle(x(index), y(plays), if (selected) 15f else 7f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(marker, 0.23f) })
+                c.drawCircle(x(index), y(plays), if (selected) 8f else 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = marker })
+            }
+            c.drawText(ellipsize(nodes.first().second.label, textPaint(inter, 15f, withAlpha(AColor.WHITE, 0.68f)), 280f), plot.left, chartRect.bottom - 18f, textPaint(inter, 15f, withAlpha(AColor.WHITE, 0.68f)))
+            c.drawText(ellipsize(nodes.last().second.label, textPaint(inter, 15f, withAlpha(AColor.WHITE, 0.68f)), 280f), plot.right, chartRect.bottom - 18f, textPaint(inter, 15f, withAlpha(AColor.WHITE, 0.68f)).apply { textAlign = Paint.Align.RIGHT })
+        }
+        c.drawText("REPÈRES DE L'ARCHIVE", 72f, 1570f, textPaint(bold, 20f, withAlpha(AColor.WHITE, 0.87f)).apply { letterSpacing = 0.08f })
+        facts.take(2).forEachIndexed { index, (label, value) ->
+            val left = 72f + index * 478f
+            val rect = RectF(left, 1590f, left + 458f, 1700f)
+            c.drawRoundRect(rect, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF151821.toInt(), 0.93f) })
+            c.drawRoundRect(rect, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = withAlpha(accentArgb, 0.25f) })
+            c.drawText(ellipsize(label.uppercase(java.util.Locale.FRANCE), textPaint(bold, 14f, withAlpha(AColor.WHITE, 0.64f)), rect.width() - 30f), left + 16f, 1620f, textPaint(bold, 14f, withAlpha(AColor.WHITE, 0.64f)))
+            drawWrapped(c, value, left + 16f, 1660f, rect.width() - 30f, textPaint(bold, 21f, AColor.WHITE), maxLines = 1, lineH = 24f)
+        }
+        c.drawText("NOVASTATS  ·  LE SOMMET D'UN INSTANT", W - 72f, 1856f, textPaint(bold, 22f, accentArgb).apply { textAlign = Paint.Align.RIGHT; letterSpacing = 0.08f })
+        c.drawRect(0f, H - 10f, W.toFloat(), H.toFloat(), Paint().apply { shader = LinearGradient(0f, 0f, W.toFloat(), 0f, accentArgb, gold, Shader.TileMode.CLAMP) })
+        writePng(ctx, bmp, "nova_peak_${period.dbName.lowercase(java.util.Locale.ROOT)}_${categoryLabel.lowercase(java.util.Locale.ROOT)}_${entityId}_${peakDate ?: "archive"}.png")
+    }
+
     /** 🎟️ Affiche verticale « La Nuit des Premières », avec la première entrée comme preuve de l'exploit. */
     suspend fun renderDebutCard(
         ctx: Context,
