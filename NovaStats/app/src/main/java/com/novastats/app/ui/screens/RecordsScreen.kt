@@ -1314,6 +1314,172 @@ private fun MostWeeksBlockedRivals(
     }
 }
 
+private fun lifespanDateLabel(period: Period?, iso: String?): String {
+    if (iso == null) return "—"
+    val date = runCatching { Dates.parse(iso) }.getOrNull() ?: return iso
+    val fullDate = date.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE))
+    return when (period) {
+        Period.DAILY -> "le $fullDate"
+        Period.WEEKLY -> "sem. du $fullDate"
+        Period.MONTHLY -> date.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE))
+        Period.YEARLY -> date.year.toString()
+        null -> fullDate
+    }
+}
+
+@Composable
+private fun LongestLifespanSpotlight(
+    def: RecordDef,
+    name: String,
+    imageUrl: String?,
+    isArtist: Boolean,
+    score: Int,
+    rank: Int?,
+    period: Period?,
+    context: String,
+    zoneLabel: String,
+    zoneLimit: Int,
+    points: List<RecordExplainer.Point>,
+    color: Color
+) {
+    val theme = Nova.theme
+    val accent = Color(0xFF78C8D2)
+    val gold = NovaColors.Gold
+    val glow by rememberInfiniteTransition(label = "lifespan-glow").animateFloat(
+        initialValue = 0.10f,
+        targetValue = 0.30f,
+        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
+        label = "lifespan-rim"
+    )
+    val counter = remember(score) { Animatable(0f) }
+    LaunchedEffect(score) {
+        counter.snapTo(0f)
+        counter.animateTo(score.coerceAtLeast(0).toFloat(), tween(1050))
+    }
+    val zonePoints = remember(points, zoneLimit) { points.filter { point -> point.position?.let { it <= zoneLimit } == true } }
+    val firstZonePoint = zonePoints.firstOrNull()
+    val lastZonePoint = zonePoints.lastOrNull()
+    val bestPosition = zonePoints.mapNotNull { it.position }.minOrNull()
+    val appearanceCount = zonePoints.size
+    val coverage = if (score > 0) (100 * appearanceCount / score).coerceIn(0, 100) else 0
+    val returnCount = remember(points) { points.count { !it.note.isNullOrBlank() } }
+    val plainZoneLabel = zoneLabel.substringAfter(' ', zoneLabel).removePrefix("le ")
+    val rankAccent = if (rank == 1) gold else accent
+    val rim = Brush.horizontalGradient(
+        listOf(gold.copy(alpha = 0.26f + glow * 0.35f), accent.copy(alpha = 0.24f + glow), color.copy(alpha = 0.16f + glow * 0.35f), gold.copy(alpha = 0.20f + glow * 0.30f))
+    )
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+        SectionTitle("⏳ L'épopée dans le chart", accent)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(23.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF18353B).copy(alpha = 0.70f), theme.surface.copy(alpha = 0.97f), gold.copy(alpha = 0.11f))))
+                .border(1.5.dp, rim, RoundedCornerShape(23.dp)).padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 50, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("LONGÉVITÉ · ${plainZoneLabel.uppercase(Locale.FRANCE)}", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(name, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(context, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                rank?.let {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(rankAccent.copy(alpha = 0.13f)).border(1.dp, rankAccent.copy(alpha = 0.42f), RoundedCornerShape(12.dp)).padding(horizontal = 9.dp, vertical = 6.dp)) {
+                        Text("RANG", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text("#$it", color = rankAccent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+            Spacer(Modifier.height(13.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(counter.value.toInt().toString(), color = gold, fontWeight = FontWeight.Black, fontSize = 44.sp, lineHeight = 46.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(formatRecordValue(def, period, score.toDouble()).uppercase(Locale.FRANCE), color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                    Text("entre le premier et le dernier passage dans la zone", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(9.dp))
+            Text(
+                "${lifespanDateLabel(period, firstZonePoint?.date)}  →  ${lifespanDateLabel(period, lastZonePoint?.date)}",
+                color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(accent.copy(alpha = 0.09f)).padding(horizontal = 8.dp, vertical = 8.dp)
+            )
+            Spacer(Modifier.height(9.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                RecordSpotlightMetric(appearanceCount.toString(), "APPARITIONS EN ZONE", accent, Modifier.weight(1f))
+                RecordSpotlightMetric("$coverage %", "TAUX DE PRÉSENCE", gold, Modifier.weight(1f))
+                RecordSpotlightMetric(returnCount.toString(), "RETOURS", color, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(9.dp))
+            Box(Modifier.fillMaxWidth().height(5.dp).clip(CircleShape).background(theme.background.copy(alpha = 0.42f))) {
+                Box(Modifier.fillMaxWidth(coverage / 100f).height(5.dp).clip(CircleShape).background(Brush.horizontalGradient(listOf(accent, gold))))
+            }
+            Spacer(Modifier.height(11.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                RecordSpotlightMetric(bestPosition?.let { "#$it" } ?: "—", "MEILLEUR RANG EN ZONE", gold, Modifier.weight(1f))
+                RecordSpotlightMetric(period?.label ?: "—", "CADENCE", accent, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(13.dp))
+            Text("CHRONOLOGIE DE CARRIÈRE", color = theme.textSecondary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            Text("Les passages dans la zone brillent; les retours indiquent la durée de l'absence.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(7.dp))
+            if (points.isEmpty()) {
+                Text("La chronologie détaillée n'est pas disponible.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            } else {
+                LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(points, key = { index, point -> "lifespan-${point.date}-$index" }) { _, point ->
+                        val position = point.position
+                        val inZone = position?.let { it <= zoneLimit } == true
+                        val isStart = point.date == firstZonePoint?.date
+                        val isEnd = point.date == lastZonePoint?.date
+                        val endpoint = isStart || isEnd
+                        val pointAccent = when {
+                            endpoint -> gold
+                            inZone -> accent
+                            else -> theme.textSecondary
+                        }
+                        Column(
+                            Modifier.width(if (point.note != null) 112.dp else 76.dp).clip(RoundedCornerShape(12.dp))
+                                .background(if (endpoint) gold.copy(alpha = 0.15f) else if (inZone) accent.copy(alpha = 0.13f) else theme.surface.copy(alpha = 0.66f))
+                                .border(1.dp, pointAccent.copy(alpha = if (endpoint) 0.62f else if (inZone) 0.38f else 0.16f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 6.dp, vertical = 7.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                when { isStart && isEnd -> "DÉBUT · FIN"; isStart -> "DÉBUT"; isEnd -> "DERNIER PASSAGE"; inZone -> "DANS LA ZONE"; else -> "HORS ZONE" },
+                                color = pointAccent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center
+                            )
+                            Text(point.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(point.position?.let { "#$it" } ?: "—", color = if (point.position == 1) gold else if (inZone) accent else theme.text, fontWeight = FontWeight.Black, fontSize = 19.sp)
+                            point.note?.let { Text(it, color = gold, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "La durée inclut les absences : elle va du premier au dernier passage dans la zone, pas seulement les périodes de présence.",
+                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 15.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordSpotlightMetric(value: String, label: String, accent: Color, modifier: Modifier = Modifier) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(accent.copy(alpha = 0.09f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp)).padding(horizontal = 5.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(label, color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
 private fun RecordExplainer.Held.groupForMostRecords(): RecordGroup = RecordCatalog.groupOf[def.id] ?: RecordGroup.TOTALS
 
 /* ================================ 🧐 Page « pourquoi il est là » — spécifique à chaque record ================================ */
@@ -1452,8 +1618,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val mostRecordsRecord = def.id == "MOST_RECORDS"
             val mostConsistentRecord = def.id == "MOST_CONSISTENT"
             val mostBlockedRecord = def.id == "MOST_BLOCKED_TOP5"
+            val lifespanRecord = def.id == "LONGEST_LIFESPAN"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord || mostConsistentRecord || mostBlockedRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord || mostConsistentRecord || mostBlockedRecord || lifespanRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -1481,7 +1648,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                             Text(formatRecordValue(def, ref.period, row.r.value), color = color, fontWeight = FontWeight.Black, fontSize = 24.sp)
                         }
                     }
-                    if (!mostRecordsRecord) row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
+                    if (!mostRecordsRecord && !lifespanRecord) row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
                 }
             }
         }
@@ -1721,6 +1888,24 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
+            if (def.id == "LONGEST_LIFESPAN") {
+                item(key = "longest-lifespan-showcase") {
+                    LongestLifespanSpotlight(
+                        def = def,
+                        name = name,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        score = row.r.value.toInt().coerceAtLeast(0),
+                        rank = ref.rank,
+                        period = ref.period,
+                        context = context,
+                        zoneLabel = subLabel ?: "Chart",
+                        zoneLimit = RecordCatalog.zoneLimit(ref.sub),
+                        points = st.timeline,
+                        color = color
+                    )
+                }
+            }
             if (def.id == "MOST_RECORDS") {
                 item(key = "most-records-showcase") {
                     MostRecordsShowcase(
@@ -1789,7 +1974,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 }
             } else item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    SectionTitle("🧐 Pourquoi il est là", color)
+                    SectionTitle(if (def.id == "LONGEST_LIFESPAN") "📖 Le récit de sa carrière" else "🧐 Pourquoi il est là", color)
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface).border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(14.dp)) {
                         Text(st.headline, color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(6.dp))
@@ -1838,7 +2023,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty() && st.presenceVisual == null && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5")) item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
