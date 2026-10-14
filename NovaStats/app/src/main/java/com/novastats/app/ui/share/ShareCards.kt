@@ -540,7 +540,7 @@ object ShareCards {
         c.drawText(peakDateLabel.uppercase(java.util.Locale.FRANCE), 72f, dateY, textPaint(bold, 23f, accentArgb).apply { letterSpacing = 0.10f })
         c.drawText(formatCount(score), 72f, scoreY, textPaint(bold, 88f, AColor.WHITE))
         c.drawText("ÉCOUTES SUR $bucketPhrase", 72f, scoreCaptionY, textPaint(bold, 19f, withAlpha(AColor.WHITE, 0.72f)).apply { letterSpacing = 0.06f })
-        peakPosition?.let { c.drawText("RANG  ·  #$it", 72f, maxOf(1050f, scoreCaptionY + 44f), textPaint(bold, 20f, gold)) }
+        peakPosition?.let { c.drawText("POSITION AU CHART  ·  #$it", 72f, maxOf(1050f, scoreCaptionY + 44f), textPaint(bold, 20f, gold)) }
 
         val chartRect = RectF(72f, 1120f, W - 72f, 1500f)
         c.drawRoundRect(chartRect, 27f, 27f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(0xFF151821.toInt(), 0.94f) })

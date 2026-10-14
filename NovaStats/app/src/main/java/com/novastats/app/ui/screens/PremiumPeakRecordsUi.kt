@@ -112,7 +112,7 @@ internal fun biggestPeriodDateLabel(period: Period?, iso: String?): String {
 internal fun biggestPeriodChartRank(extraData: String?): String? = extraData
     ?.substringBefore(' ')
     ?.takeIf { it.startsWith("#") && it.drop(1).toIntOrNull() != null }
-    ?.let { "rang $it" }
+    ?.let { "position $it au chart" }
 
 @Composable
 internal fun CertificationRecordCard(def: RecordDef, color: Color, onClick: () -> Unit) {
@@ -632,7 +632,7 @@ internal fun BiggestPeriodSpotlight(
                         point.highlight -> "PIC PERSONNEL DE L'ENTITÉ"
                         else -> "AUTRE POINT D'ARCHIVE"
                     },
-                    "${point.label}  ·  ${formatCount((point.plays ?: 0).toLong())} écoutes" + (point.position?.let { "  ·  #$it" } ?: ""),
+                    "${point.label}  ·  ${formatCount((point.plays ?: 0).toLong())} écoutes" + (point.position?.let { "  ·  position #$it au chart" } ?: ""),
                     if (selectedEvent || point.highlight) NovaColors.Gold else accent,
                     Modifier.fillMaxWidth().padding(top = 7.dp)
                 )
@@ -680,7 +680,7 @@ private fun PeakTrajectoryPanel(points: List<RecordExplainer.Point>, selectedInd
                     Text(if (point.date == points.getOrNull(selectedIndex)?.date) "✦ PIC SÉLECTIONNÉ" else point.label, color = if (point.highlight) NovaColors.Gold else accent, fontWeight = FontWeight.Black, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(point.label, color = theme.textSecondary, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(formatCount((point.plays ?: 0).toLong()), color = theme.text, fontWeight = FontWeight.Black, style = androidx.compose.material3.MaterialTheme.typography.titleSmall, maxLines = 1)
-                    Text(point.position?.let { "RANG #$it" } ?: "RANG —", color = theme.textSecondary, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
+                    Text(point.position?.let { "POSITION #$it AU CHART" } ?: "POSITION AU CHART —", color = theme.textSecondary, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
                 }
             }
         }
