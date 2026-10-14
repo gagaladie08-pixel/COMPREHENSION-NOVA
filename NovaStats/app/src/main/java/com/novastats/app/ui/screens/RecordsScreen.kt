@@ -1161,6 +1161,159 @@ private fun MostConsistentMetric(value: String, label: String, accent: Color, mo
     }
 }
 
+@Composable
+private fun MostWeeksBlockedSpotlight(
+    def: RecordDef,
+    name: String,
+    imageUrl: String?,
+    isArtist: Boolean,
+    score: Int,
+    rank: Int?,
+    period: Period?,
+    contextLabel: String,
+    zoneLabel: String,
+    bestPosition: Int?,
+    secondPlaceCount: Int,
+    points: List<RecordExplainer.Point>,
+    color: Color
+) {
+    val theme = Nova.theme
+    val accent = Color(0xFFFF9257)
+    val glow by rememberInfiniteTransition(label = "blocked-glow").animateFloat(
+        initialValue = 0.10f,
+        targetValue = 0.30f,
+        animationSpec = infiniteRepeatable(tween(1050), RepeatMode.Reverse),
+        label = "blocked-rim"
+    )
+    val counter = remember(score) { Animatable(0f) }
+    LaunchedEffect(score) {
+        counter.snapTo(0f)
+        counter.animateTo(score.coerceAtLeast(0).toFloat(), tween(1000))
+    }
+    val rim = Brush.horizontalGradient(
+        listOf(accent.copy(alpha = 0.35f + glow), color.copy(alpha = 0.19f + glow * 0.35f), accent.copy(alpha = 0.30f + glow))
+    )
+    val plainZoneLabel = zoneLabel.substringAfter(' ', zoneLabel).removePrefix("le ")
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+        SectionTitle("🚧 Le mur du #1", accent)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF3A2224).copy(alpha = 0.72f), theme.surface.copy(alpha = 0.97f), color.copy(alpha = 0.12f))))
+                .border(1.5.dp, rim, RoundedCornerShape(22.dp)).padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CoverArt(imageUrl, name, size = 48, circle = isArtist)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("BLOQUÉ AU SOMMET", color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, letterSpacing = 0.8.sp)
+                    Text(name, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(contextLabel, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                rank?.let {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background((if (it == 1) NovaColors.Gold else accent).copy(alpha = 0.13f)).border(1.dp, (if (it == 1) NovaColors.Gold else accent).copy(alpha = 0.42f), RoundedCornerShape(12.dp)).padding(horizontal = 9.dp, vertical = 6.dp)) {
+                        Text("RANG", color = theme.textSecondary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text("#$it", color = if (it == 1) NovaColors.Gold else accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+            Spacer(Modifier.height(13.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(counter.value.toInt().toString(), color = accent, fontWeight = FontWeight.Black, fontSize = 43.sp, lineHeight = 46.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(formatRecordValue(def, period, score.toDouble()).uppercase(Locale.FRANCE), color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                    Text("dans le $plainZoneLabel, sans jamais atteindre #1", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                MostConsistentMetric(bestPosition?.let { "#$it" } ?: "—", "MEILLEUR RANG", NovaColors.Gold, Modifier.weight(1f))
+                MostConsistentMetric(secondPlaceCount.toString(), "PASSAGES #2", accent, Modifier.weight(1f))
+                MostConsistentMetric(period?.label ?: "—", "CADENCE", color, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(13.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(30.dp).clip(CircleShape).background(NovaColors.Gold.copy(alpha = 0.14f)).border(1.dp, NovaColors.Gold.copy(alpha = 0.52f), CircleShape), contentAlignment = Alignment.Center) {
+                    Text("1", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("LA BARRIÈRE : LA PREMIÈRE PLACE", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Text("Chaque période lumineuse montre une apparition dans la zone — toujours derrière le #1.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 15.sp)
+                }
+            }
+            Spacer(Modifier.height(13.dp))
+            Text("TENTATIVES DANS LA ZONE", color = theme.textSecondary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(7.dp))
+            if (points.isEmpty()) {
+                Text("La trajectoire détaillée n'est pas disponible.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            } else {
+                LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(points, key = { index, point -> "blocked-${point.date}-$index" }) { _, point ->
+                        val inZone = point.highlight
+                        val pointAccent = if (inZone) accent else theme.textSecondary
+                        Column(
+                            Modifier.width(76.dp).clip(RoundedCornerShape(12.dp))
+                                .background(if (inZone) accent.copy(alpha = 0.16f) else theme.surface.copy(alpha = 0.68f))
+                                .border(1.dp, pointAccent.copy(alpha = if (inZone) 0.55f else 0.18f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 6.dp, vertical = 7.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(if (inZone) "DANS LA ZONE" else "HORS ZONE", color = pointAccent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(point.label, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(point.position?.let { "#$it" } ?: "—", color = if (inZone) accent else theme.text, fontWeight = FontWeight.Black, fontSize = 19.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Le score compte les périodes dans la zone sélectionnée. Il ne s'agit pas d'une série consécutive.",
+                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, lineHeight = 15.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun MostWeeksBlockedRivals(
+    items: List<RecordExplainer.Item>,
+    onOpen: (RecordExplainer.Item) -> Unit
+) {
+    val theme = Nova.theme
+    val accent = Color(0xFFFF9257)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        SectionTitle("🧱 Ceux qui occupaient le #1", accent)
+        if (items.isEmpty()) {
+            Text("Aucun bloqueur n'a pu être identifié pour ces périodes.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text("Les éléments ci-dessous étaient au sommet pendant ses apparitions dans la zone.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.height(6.dp))
+            items.forEachIndexed { index, item ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = if (index == 0) 0.16f else 0.08f), theme.surface.copy(alpha = 0.86f))))
+                        .border(1.dp, accent.copy(alpha = if (index == 0) 0.42f else 0.20f), RoundedCornerShape(14.dp))
+                        .clickable { onOpen(item) }.padding(9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.size(25.dp).clip(CircleShape).background(if (index == 0) NovaColors.Gold.copy(alpha = 0.16f) else theme.background.copy(alpha = 0.62f)), contentAlignment = Alignment.Center) {
+                        Text("${index + 1}", color = if (index == 0) NovaColors.Gold else theme.textSecondary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    CoverArt(item.imageUrl, item.name, size = 43, circle = item.type == EntityType.ARTIST)
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(item.name, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(item.detail, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(if (index == 0) "🥇" else "#1", color = if (index == 0) NovaColors.Gold else accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 4.dp))
+                }
+            }
+        }
+    }
+}
+
 private fun RecordExplainer.Held.groupForMostRecords(): RecordGroup = RecordCatalog.groupOf[def.id] ?: RecordGroup.TOTALS
 
 /* ================================ 🧐 Page « pourquoi il est là » — spécifique à chaque record ================================ */
@@ -1298,8 +1451,9 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             val perfectAllKillRecord = def.id == "MOST_PERFECT_ALL_KILL"
             val mostRecordsRecord = def.id == "MOST_RECORDS"
             val mostConsistentRecord = def.id == "MOST_CONSISTENT"
+            val mostBlockedRecord = def.id == "MOST_BLOCKED_TOP5"
             Box(Modifier.fillMaxWidth()) {
-                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord || mostConsistentRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
+                if (streakRecord || speedRecord || successiveRecord || presenceRecord || songReachRecord || honorRecord || artistNoOneRecord || perfectAllKillRecord || mostRecordsRecord || mostConsistentRecord || mostBlockedRecord) BlurredBackdrop(row.imageUrl, color, Modifier.matchParentSize())
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CoverArt(row.imageUrl, name, size = 110, circle = ref.category == RecordCategory.ARTIST, zoomable = true)
                     Spacer(Modifier.height(10.dp))
@@ -1538,6 +1692,35 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     )
                 }
             }
+            if (def.id == "MOST_BLOCKED_TOP5") {
+                item(key = "most-blocked-showcase") {
+                    MostWeeksBlockedSpotlight(
+                        def = def,
+                        name = name,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        score = row.r.value.toInt().coerceAtLeast(0),
+                        rank = ref.rank,
+                        period = ref.period,
+                        contextLabel = context,
+                        zoneLabel = subLabel ?: "zone",
+                        bestPosition = st.timeline.mapNotNull { it.position }.minOrNull(),
+                        secondPlaceCount = st.timeline.count { it.position == 2 },
+                        points = st.timeline,
+                        color = color
+                    )
+                }
+                item(key = "most-blocked-rivals") {
+                    MostWeeksBlockedRivals(st.items) { rival ->
+                        val target = when (rival.type) {
+                            EntityType.TRACK -> DetailTarget.Track(rival.id)
+                            EntityType.ALBUM -> DetailTarget.Album(rival.id)
+                            else -> DetailTarget.Artist(rival.id)
+                        }
+                        onEntity(target)
+                    }
+                }
+            }
             if (def.id == "MOST_RECORDS") {
                 item(key = "most-records-showcase") {
                     MostRecordsShowcase(
@@ -1655,7 +1838,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty() && st.presenceVisual == null && def.id != "MOST_CONSISTENT") item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5")) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
@@ -1700,7 +1883,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.items.isNotEmpty()) {
+            if (st.items.isNotEmpty() && def.id != "MOST_BLOCKED_TOP5") {
                 item { Box(Modifier.padding(horizontal = 16.dp)) { SectionTitle("🎵 " + (st.itemsTitle ?: "Éléments"), color) } }
                 items(st.items.size) { i ->
                     val ent = st.items[i]
