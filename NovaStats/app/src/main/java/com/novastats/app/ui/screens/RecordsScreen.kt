@@ -365,6 +365,10 @@ private fun groupColor(g: RecordGroup): Color {
 
 @Composable
 private fun RecordCard(def: RecordDef, color: Color, onClick: () -> Unit) {
+    if (def.id in MOVEMENT_RECORD_IDS) {
+        MovementRecordCard(def, color, onClick)
+        return
+    }
     val theme = Nova.theme
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)
@@ -1492,6 +1496,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val def = ref.def; val row = ref.row
     val color = groupColor(RecordCatalog.groupOf[def.id] ?: RecordGroup.DURATION)
     val name = row.name ?: "Inconnu"
+    val movementRecord = def.id in MOVEMENT_RECORD_IDS
     var story by remember(ref) { mutableStateOf<RecordExplainer.Story?>(null) }
     LaunchedEffect(ref) {
         story = app.recordExplainer.explain(def, ref.period, ref.category, ref.sub, row.r.entityId, name, row.r.value)
@@ -1503,6 +1508,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     }
     val subLabel = def.subs[ref.category]?.firstOrNull { it.dbName == ref.sub }?.label
     val context = listOfNotNull(ref.period?.label, sectionLabel(ref.category), subLabel).joinToString(" · ")
+    val movementContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
     var mostRecordsSearch by remember(ref) { mutableStateOf("") }
     var selectedMostRecordsFamily by remember(ref) { mutableStateOf<RecordGroup?>(null) }
     var expandedMostRecordsFamilies by remember(ref) { mutableStateOf<Set<RecordGroup>>(emptySet()) }
@@ -1558,6 +1564,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
     val shareScope = rememberCoroutineScope()
     var sharingSongReach by remember(ref) { mutableStateOf(false) }
     var songReachShareError by remember(ref) { mutableStateOf(false) }
+    var sharingMovement by remember(ref) { mutableStateOf(false) }
+    var movementShareError by remember(ref) { mutableStateOf(false) }
     var sharingHonorCard by remember(ref) { mutableStateOf(false) }
     var honorShareError by remember(ref) { mutableStateOf(false) }
     var sharingArtistNoOne by remember(ref) { mutableStateOf(false) }
@@ -1603,10 +1611,10 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 if (def.id == "MOST_RECORDS") "🏆 Palmarès des records" else "${def.emoji} ${def.title}",
                 color,
                 onBack,
-                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place" else context
+                if (def.id == "MOST_RECORDS") "Les classements où $name est à la première place" else if (movementRecord) movementContext else context
             )
         }
-        item {
+        if (!movementRecord) item {
             // En-tête : pochette, nom et rang. Les records premium de vitesse, succession et présence ont leur fond dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
             val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
@@ -1844,6 +1852,67 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         if (st == null) {
             item { Text("Reconstruction de l'histoire…", color = theme.textSecondary, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
         } else {
+            if (movementRecord) {
+                item(key = "movement-archive-${def.id}") {
+                    val accent = movementAccent(def.id, color)
+                    MovementArchiveSpotlight(
+                        def = def,
+                        name = name,
+                        subtitle = row.subtitle,
+                        imageUrl = row.imageUrl,
+                        isArtist = ref.category == RecordCategory.ARTIST,
+                        metric = formatRecordValue(def, ref.period, row.r.value),
+                        rank = ref.rank,
+                        period = ref.period,
+                        zoneLimit = if (def.id in setOf("FASTEST_RISE", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN")) RecordCatalog.zoneLimit(ref.sub) else null,
+                        zoneLabel = if (def.id in setOf("FASTEST_RISE", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN")) subLabel ?: "Chart" else null,
+                        context = movementContext,
+                        story = st,
+                        color = color,
+                        sharing = sharingMovement,
+                        shareError = movementShareError,
+                        onShare = {
+                            if (!sharingMovement) {
+                                sharingMovement = true
+                                movementShareError = false
+                                shareScope.launch {
+                                    try {
+                                        val file = ShareCards.renderMovementCard(
+                                            ctx = app,
+                                            recordId = def.id,
+                                            entityId = row.r.entityId,
+                                            name = name,
+                                            subtitle = row.subtitle,
+                                            imageUrl = row.imageUrl,
+                                            isArtist = ref.category == RecordCategory.ARTIST,
+                                            recordTitle = def.title,
+                                            metric = formatRecordValue(def, ref.period, row.r.value),
+                                            rank = ref.rank,
+                                            context = movementContext,
+                                            period = ref.period,
+                                            zoneLimit = if (def.id in setOf("FASTEST_RISE", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN")) RecordCatalog.zoneLimit(ref.sub) else null,
+                                            zoneLabel = if (def.id in setOf("FASTEST_RISE", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN")) subLabel ?: "Chart" else null,
+                                            headline = st.headline,
+                                            facts = movementProofFacts(def.id, st.facts),
+                                            timeline = st.timeline,
+                                            rule = movementRuleText(def.id),
+                                            accent = accent,
+                                            theme = theme
+                                        )
+                                        ShareCards.share(app, file, "Partager l'exploit")
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        movementShareError = true
+                                    } finally {
+                                        sharingMovement = false
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+            }
             if (def.id == "MOST_CONSISTENT") {
                 item(key = "most-consistent-showcase") {
                     MostConsistentSpotlight(
@@ -1975,10 +2044,22 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                 }
             } else item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    SectionTitle(if (def.id == "LONGEST_LIFESPAN") "📖 Le récit de sa carrière" else "🧐 Pourquoi il est là", color)
+                    SectionTitle(
+                        when {
+                            def.id == "LONGEST_LIFESPAN" -> "📖 Le récit de sa carrière"
+                            movementRecord -> "🎞️ Le récit du mouvement"
+                            else -> "🧐 Pourquoi il est là"
+                        },
+                        color
+                    )
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface).border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).padding(14.dp)) {
-                        Text(st.headline, color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(6.dp))
+                        if (!movementRecord) {
+                            Text(st.headline, color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(6.dp))
+                        } else {
+                            Text("LECTURE DE LA TRAJECTOIRE", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, letterSpacing = 0.9.sp)
+                            Spacer(Modifier.height(6.dp))
+                        }
                         Text(st.narrative, color = theme.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
                         // Contexte propre à cet élément : place dans le classement, profil, autres records
                         st.context.forEach { (title, text) ->
@@ -1995,7 +2076,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
             st.multiChartVisual?.let { visual ->
                 item { MultiChartConstellation(visual, color) }
             }
-            if (def.id != "MOST_RECORDS" && st.facts.isNotEmpty()) item {
+            if (def.id != "MOST_RECORDS" && !movementRecord && st.facts.isNotEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle("📋 Les faits", color)
                     st.facts.forEach { (k, v) ->
@@ -2024,7 +2105,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                 }
             }
-            if (st.timeline.isNotEmpty() && st.presenceVisual == null && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
+            if (st.timeline.isNotEmpty() && st.presenceVisual == null && !movementRecord && def.id !in setOf("MOST_CONSISTENT", "MOST_BLOCKED_TOP5", "LONGEST_LIFESPAN")) item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     SectionTitle((if (st.heat) "🔥 " else "📈 ") + (st.timelineTitle ?: "Frise"), color)
                     if (st.heat) HeatGrid(st.timeline, color) else Timeline(st.timeline, color, st.timelineValueSuffix ?: "▶")
