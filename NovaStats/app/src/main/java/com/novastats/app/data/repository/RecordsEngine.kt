@@ -18,7 +18,7 @@ import com.novastats.app.domain.RecordResult
 import java.time.LocalDate
 
 /**
- * 🏅 Moteur des 34 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
+ * 🏅 Moteur des 35 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
  * et écrit le Top 10 de chaque record (Top 20 pour Most Perfect All Kill) dans `records_cache`.
  * Tous les records se créent automatiquement (import JSON compris) — aucune saisie manuelle.
  */
@@ -169,6 +169,45 @@ class RecordsEngine(private val db: NovaDatabase) {
             db.recordDao().clearType("MOST_RECORDS")
             (out + mostRecords).chunked(500).forEach { db.recordDao().insertAll(it) }
         }
+    }
+
+    /** Amorçage ciblé du nouveau Most Debut Top 5 depuis les premières apparitions déjà archivées. */
+    suspend fun rebuildDebutTop5Only() {
+        val links = loadLinks()
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        for (p in chartPeriods) {
+            val trackSeries = toSeries(db.billboardDao().allTrackRows(p.dbName), p)
+            val albumSeries = toSeries(db.billboardDao().allAlbumRows(p.dbName), p)
+            data class View(
+                val category: RecordCategory,
+                val subcategory: String?,
+                val series: Map<Long, List<RecordAppearance>>,
+                val owners: (Long) -> Set<Long>
+            )
+            val views = listOf(
+                View(RecordCategory.ARTIST, "SONGS", trackSeries) { links.trackArtists[it].orEmpty() },
+                View(RecordCategory.ARTIST, "ALBUMS", albumSeries) { links.albumArtist[it]?.let { artistId -> setOf(artistId) }.orEmpty() },
+                View(RecordCategory.ALBUM, null, trackSeries) { links.trackAlbum[it]?.let { albumId -> setOf(albumId) }.orEmpty() }
+            )
+            for (view in views) {
+                val debutItems = RecordMath.distinctItemsDebutingInZone(view.series, 5)
+                val debutCounts = HashMap<Long, MutableSet<Long>>()
+                val lastDate = HashMap<Long, String>()
+                for ((itemId, appearances) in view.series) {
+                    if (appearances.isEmpty()) continue
+                    for (owner in view.owners(itemId)) {
+                        lastDate[owner] = maxOf(lastDate[owner] ?: "", appearances.last().date)
+                        if (itemId in debutItems) debutCounts.getOrPut(owner) { HashSet() }.add(itemId)
+                    }
+                }
+                val results = debutCounts.map { (owner, items) ->
+                    RecordResult(owner, items.size.toDouble(), lastDate[owner])
+                }
+                emit(out, "MOST_DEBUT_TOP5", p, view.category, view.subcategory, results, now)
+            }
+        }
+        replaceRecordFamiliesAndRefreshPalmares(setOf("MOST_DEBUT_TOP5"), out, now)
     }
 
     /** Amorçage du nouveau cumulatif #1 depuis les snapshots, sans toucher aux autres caches source. */
@@ -404,7 +443,8 @@ class RecordsEngine(private val db: NovaDatabase) {
         )
         for (v in views) {
             val inChart = HashMap<Long, MutableSet<Long>>(); val top10 = HashMap<Long, MutableSet<Long>>(); val at1 = HashMap<Long, MutableSet<Long>>()
-            val debut1 = HashMap<Long, MutableSet<Long>>(); val debut10 = HashMap<Long, MutableSet<Long>>()
+            val debut1 = HashMap<Long, MutableSet<Long>>(); val debut5 = HashMap<Long, MutableSet<Long>>(); val debut10 = HashMap<Long, MutableSet<Long>>()
+            val debut5Items = RecordMath.distinctItemsDebutingInZone(v.series, 5)
             val lastDate = HashMap<Long, String>()
             // Simultanés : période → owner → nb d'items par zone
             val simultaneous = HashMap<String, HashMap<Long, IntArray>>() // zones : 2,5,10,20,50,all
@@ -419,6 +459,7 @@ class RecordsEngine(private val db: NovaDatabase) {
                     if (s.any { it.position <= 10 }) top10.getOrPut(o) { HashSet() }.add(itemId)
                     if (s.any { it.position == 1 }) at1.getOrPut(o) { HashSet() }.add(itemId)
                     if (entry.position == 1) debut1.getOrPut(o) { HashSet() }.add(itemId)
+                    if (itemId in debut5Items) debut5.getOrPut(o) { HashSet() }.add(itemId)
                     if (entry.position <= 10) debut10.getOrPut(o) { HashSet() }.add(itemId)
                     lastDate[o] = maxOf(lastDate[o] ?: "", s.last().date)
                     for (a in s) {
@@ -437,6 +478,7 @@ class RecordsEngine(private val db: NovaDatabase) {
             emit(out, "MOST_SONGS_TOP5", p, v.cat, v.sub, res(top5), now)
             emit(out, "MOST_SONGS_AT_1", p, v.cat, v.sub, res(at1), now)
             emit(out, "MOST_DEBUT_1", p, v.cat, v.sub, res(debut1), now)
+            emit(out, "MOST_DEBUT_TOP5", p, v.cat, v.sub, res(debut5), now)
             emit(out, "MOST_DEBUT_TOP10", p, v.cat, v.sub, res(debut10), now)
             for (z in zoneLimits.indices) {
                 val best = HashMap<Long, RecordResult>()

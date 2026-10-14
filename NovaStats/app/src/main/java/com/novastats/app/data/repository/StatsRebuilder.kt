@@ -65,6 +65,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         RecordsEngine(db).rebuildSongsTop5Only()
     }
 
+    /** Amorçage ciblé de Most Debut Top 5 et actualisation du seul palmarès qui en dépend. */
+    suspend fun rebuildDebutTop5Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildDebutTop5Only()
+    }
+
     /** Reconstitue les Perfect All Kill manquants depuis les snapshots et rafraîchit uniquement les caches HoF liés. */
     suspend fun rebuildPerfectAllKillsOnly() = rebuildMutex.withLock {
         BillboardEngine(db).reconcilePerfectAllKillsFromSnapshots()

@@ -12,8 +12,8 @@ class RecordMathTest {
     private fun s(vararg p: Pair<Int, Int>) = p.map { (idx, pos) -> RecordAppearance(idx, "2026-01-%02d".format(idx + 1), pos, 10) }
 
     @Test
-    fun `catalogue expose les 34 records`() {
-        assertEquals(34, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue expose les 35 records`() {
+        assertEquals(35, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertTrue(RecordCatalog.ALL.all { it.categories.isNotEmpty() })
         // sous-sections uniquement pour des catégories proposées
         RecordCatalog.ALL.forEach { d -> d.subs.keys.forEach { c -> assertTrue("${d.id}/$c", c in d.categories) } }
@@ -51,6 +51,36 @@ class RecordMathTest {
         assertEquals(setOf(10L, 20L, 40L), RecordMath.distinctItemsInZone(series, 5))
         assertEquals(setOf(10L, 20L, 30L, 40L), RecordMath.distinctItemsInZone(series, 10))
         assertEquals(setOf(10L), RecordMath.distinctItemsInZone(series, 1))
+    }
+
+    @Test
+    fun `Most Debut Top 5 est un palier distinct et garde les cadences`() {
+        val record = RecordCatalog.byId("MOST_DEBUT_TOP5")!!
+        assertEquals(35, record.number)
+        assertEquals(RecordUnit.COUNT, record.unit)
+        assertEquals(RecordGroup.DEBUT, RecordCatalog.groupOf[record.id])
+        assertEquals(listOf(RecordCategory.ARTIST, RecordCategory.ALBUM), record.categories)
+        assertEquals(listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY), record.periods)
+    }
+
+    @Test
+    fun `debut Top 5 exige une entree immediate et est emboite entre Top 1 et Top 10`() {
+        val series = mapOf(
+            10L to s(0 to 1, 1 to 14),  // entrée #1
+            20L to s(0 to 5, 1 to 2),   // entrée #5
+            30L to s(0 to 6, 1 to 1),   // entrée #6 : #1 plus tard ne devient pas un début Top 5
+            40L to s(0 to 10, 1 to 4),  // entrée #10 : #4 plus tard ne devient pas un début Top 5
+            50L to emptyList()
+        )
+        val directTop1 = RecordMath.distinctItemsDebutingInZone(series, 1)
+        val directTop5 = RecordMath.distinctItemsDebutingInZone(series, 5)
+        val directTop10 = RecordMath.distinctItemsDebutingInZone(series, 10)
+        assertEquals(setOf(10L), directTop1)
+        assertEquals(setOf(10L, 20L), directTop5)
+        assertEquals(setOf(10L, 20L, 30L, 40L), directTop10)
+        assertTrue(directTop1.all { it in directTop5 })
+        assertTrue(directTop5.all { it in directTop10 })
+        assertEquals(emptySet<Long>(), RecordMath.distinctItemsDebutingInZone(series, 0))
     }
 
     @Test

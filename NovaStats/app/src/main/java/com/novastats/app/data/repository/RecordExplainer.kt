@@ -33,7 +33,18 @@ import java.util.Locale
 class RecordExplainer(private val db: NovaDatabase) {
 
     data class Point(val date: String, val label: String, val position: Int?, val plays: Int?, val highlight: Boolean = false, val note: String? = null)
-    data class Item(val type: String, val id: Long, val name: String, val detail: String, val imageUrl: String?, val highlight: Boolean = false)
+    data class Item(
+        val type: String,
+        val id: Long,
+        val name: String,
+        val detail: String,
+        val imageUrl: String?,
+        val highlight: Boolean = false,
+        /** Données structurées du premier passage, utilisées par la galerie premium des débuts. */
+        val entryPosition: Int? = null,
+        val entryDateLabel: String? = null,
+        val entryPlays: Int? = null
+    )
     /** Une case de la constellation Multi-Chart, au meilleur jour commun observé. */
     data class ChartRank(val code: String, val label: String, val position: Int?)
     data class MultiChartVisual(val stages: List<ChartRank>, val top2: Boolean, val bestDate: String?)
@@ -859,7 +870,7 @@ class RecordExplainer(private val db: NovaDatabase) {
             "PODIUM_SWEEP" -> podiumSweep(period ?: Period.WEEKLY, cat, sub, id, name)
             "LONGEST_LISTENING_STREAK" -> listeningStreak(cat, id, name)
             "MOST_RECORDS" -> mostRecords(cat, id, name)
-            "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1", "MOST_DEBUT_1", "MOST_DEBUT_TOP10", "MOST_SIMULTANEOUS", "MOST_SUCCESSIVE_1" ->
+            "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1", "MOST_DEBUT_1", "MOST_DEBUT_TOP5", "MOST_DEBUT_TOP10", "MOST_SIMULTANEOUS", "MOST_SUCCESSIVE_1" ->
                 ownerStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
             "FASTEST_CERT" -> fastestCert(cat, sub, id, name)
             "FASTEST_PANTHEON" -> fastestPantheon(sub, id, name)
@@ -1549,7 +1560,15 @@ class RecordExplainer(private val db: NovaDatabase) {
         val mine = all.filterKeys { it in ids }
         val chart = "chart ${p.frLabel.lowercase()}"
         val what = if (itemCat == RecordCategory.ALBUM) "album" else "titre"
-        suspend fun item(iid: Long, detail: String, hl: Boolean = false): Item { val (nm, img) = nameOf(itemCat.dbName, iid); return Item(itemCat.dbName, iid, nm, detail, img, hl) }
+        suspend fun item(iid: Long, detail: String, hl: Boolean = false, debut: RecordAppearance? = null): Item {
+            val (nm, img) = nameOf(itemCat.dbName, iid)
+            return Item(
+                itemCat.dbName, iid, nm, detail, img, hl,
+                entryPosition = debut?.position,
+                entryDateLabel = debut?.date?.let { on(p, it) },
+                entryPlays = debut?.plays
+            )
+        }
         fun peakOf(s: List<RecordAppearance>) = s.minBy { it.position }
 
         return when (def.id) {
@@ -1601,16 +1620,31 @@ class RecordExplainer(private val db: NovaDatabase) {
                     songReachVisual = visual
                 )
             }
-            "MOST_DEBUT_1", "MOST_DEBUT_TOP10" -> {
-                val limit = if (def.id == "MOST_DEBUT_1") 1 else 10
-                val hits = mine.filter { (_, s) -> s.first().position <= limit }
-                val items = hits.entries.sortedBy { it.value.first().date }.map { (iid, s) -> val e = s.first(); item(iid, "entré ${pos(e.position)} ${on(p, e.date)} · ${e.plays} ▶", true) }
+            "MOST_DEBUT_1", "MOST_DEBUT_TOP5", "MOST_DEBUT_TOP10" -> {
+                val limit = when (def.id) { "MOST_DEBUT_1" -> 1; "MOST_DEBUT_TOP5" -> 5; else -> 10 }
+                val zone = when (limit) { 1 -> "au #1"; 5 -> "dans le Top 5"; else -> "dans le Top 10" }
+                val hits = mine.filter { (_, appearances) -> appearances.firstOrNull()?.position?.let { it <= limit } == true }
+                val items = hits.entries.sortedBy { it.value.first().date }.map { (iid, appearances) ->
+                    val debut = appearances.first()
+                    item(iid, "entré ${pos(debut.position)} ${on(p, debut.date)} · ${debut.plays} ▶", true, debut)
+                }
+                val featuredNames = items.take(3).joinToString(", ") { it.name }
+                val remaining = items.size - minOf(items.size, 3)
+                val examples = when {
+                    featuredNames.isBlank() -> ""
+                    remaining > 0 -> " Parmi les premières entrées : $featuredNames et $remaining autre${if (remaining > 1) "s" else ""}."
+                    else -> " Première${if (items.size > 1) "s entrées" else " entrée"} : $featuredNames."
+                }
                 Story(
-                    "${def.emoji} ${hits.size} ${plural(hits.size, what)} entrés directement ${if (limit == 1) "au #1" else "dans le Top 10"}",
-                    "${hits.size} ${plural(hits.size, what)} de $name sont entrés dans le $chart directement ${if (limit == 1) "à la première place" else "dans le Top 10"}, dès leur première apparition : " +
-                        items.joinToString(", ") { it.name } + ".",
-                    listOf("Débuts ${if (limit == 1) "#1" else "Top 10"}" to "${hits.size}", "Total classés dans ce chart" to "${mine.size}"),
-                    itemsTitle = "Les débuts en question", items = items
+                    "${def.emoji} ${hits.size} ${plural(hits.size, what)} entrés directement $zone",
+                    "$name compte ${hits.size} ${plural(hits.size, what)} entrés directement $zone dans le $chart, dès leur toute première apparition. " +
+                        "Chaque élément ne compte qu'une fois; une remontée ultérieure ne transforme pas un début tardif en début direct.$examples",
+                    listOf(
+                        "Débuts directs · $zone" to "${hits.size}",
+                        "Éléments suivis dans ce chart" to "${mine.size}",
+                        "Entrées hors zone" to "${mine.size - hits.size}"
+                    ),
+                    itemsTitle = "Le registre des premières entrées", items = items
                 )
             }
             "MOST_SIMULTANEOUS" -> {

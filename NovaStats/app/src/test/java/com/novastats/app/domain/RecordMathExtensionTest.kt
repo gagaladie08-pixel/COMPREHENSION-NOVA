@@ -93,8 +93,8 @@ class RecordMathExtensionTest {
     }
 
     @Test
-    fun `catalogue 34 records et groupes`() {
-        assertEquals(34, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue 35 records et groupes`() {
+        assertEquals(35, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertEquals(RecordGroup.DURATION, RecordCatalog.groupOf["MOST_CUMULATIVE_TOP5"])
         assertTrue(RecordCatalog.byId("MOST_CUMULATIVE_TOP5")!!.title.contains("Top 5"))
         val cumulativeNoOne = RecordCatalog.byId("MOST_CUMULATIVE_ARTIST_NO1")!!

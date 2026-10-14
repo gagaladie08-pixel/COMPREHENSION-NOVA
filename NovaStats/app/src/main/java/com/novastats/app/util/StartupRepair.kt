@@ -111,6 +111,19 @@ object StartupRepair {
                     }
                 }
 
+                // Amorçage idempotent du nouveau Most Debut Top 5 depuis les premières apparitions archivées.
+                // Seul ce cache et le palmarès qui en dépend sont recalculés.
+                if (!prefs.getBoolean("debut_top5_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "🔷 Amorçage ciblé Most Debut Top 5 depuis les snapshots Billboard")
+                        app.rebuilder.rebuildDebutTop5Only()
+                        RebuildAudit.write(context, "✅ Cache Most Debut Top 5 recalculé pour les quatre cadences")
+                        prefs.edit().putBoolean("debut_top5_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Amorçage Most Debut Top 5 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
+
                 // Rattrapage idempotent du Perfect All Kill : ajout uniquement des événements absents.
                 // Les snapshots et les autres distinctions ne sont ni effacés ni réattribués.
                 if (!prefs.getBoolean("perfect_all_kill_v2_done", false)) {

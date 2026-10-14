@@ -1,7 +1,7 @@
 package com.novastats.app.domain
 
 /*
- * 🏅 Les 34 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
+ * 🏅 Les 35 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
  * Kotlin pur : définitions + moteur de calcul sur des séries de positions, testable en JVM.
  */
 
@@ -58,7 +58,8 @@ object RecordCatalog {
         "MOST_CONSISTENT" to RecordGroup.DURATION, "MOST_BLOCKED_TOP5" to RecordGroup.DURATION,
         "BIGGEST_JUMP" to RecordGroup.MOVEMENT, "BIGGEST_FALL" to RecordGroup.MOVEMENT, "BIGGEST_COMEBACK" to RecordGroup.MOVEMENT, "BIGGEST_CLIMBER" to RecordGroup.MOVEMENT,
         "SLEEPER_HIT" to RecordGroup.MOVEMENT, "FASTEST_RISE" to RecordGroup.MOVEMENT, "LONGEST_ROAD" to RecordGroup.MOVEMENT,
-        "MOST_DEBUT_1" to RecordGroup.DEBUT, "MOST_DEBUT_TOP10" to RecordGroup.DEBUT, "BIGGEST_DEBUT" to RecordGroup.DEBUT,
+        "MOST_DEBUT_1" to RecordGroup.DEBUT, "MOST_DEBUT_TOP5" to RecordGroup.DEBUT,
+        "MOST_DEBUT_TOP10" to RecordGroup.DEBUT, "BIGGEST_DEBUT" to RecordGroup.DEBUT,
         "FASTEST_CERT" to RecordGroup.SPEED, "FASTEST_PANTHEON" to RecordGroup.SPEED,
         "BIGGEST_PERIOD" to RecordGroup.TOTALS, "MOST_CERTIFICATIONS" to RecordGroup.TOTALS, "MOST_HOF" to RecordGroup.TOTALS, "MOST_GLOBAL" to RecordGroup.TOTALS, "MOST_PERFECT_ALL_KILL" to RecordGroup.TOTALS, "MULTI_CHART" to RecordGroup.TOTALS,
         "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_TOP5" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
@@ -161,6 +162,7 @@ object RecordCatalog {
         RecordDef(5, "MOST_SONGS_TOP10", "🔥", "Most Songs in Top 10", "Le plus de titres distincts dans le Top 10", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
         RecordDef(6, "MOST_SONGS_AT_1", "🥇", "Most Songs in #1", "Le plus de titres distincts arrivés au #1", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
         RecordDef(7, "MOST_DEBUT_1", "🚀", "Most Debut #1", "Le plus de titres entrés directement au #1", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
+        RecordDef(35, "MOST_DEBUT_TOP5", "🔷", "Most Debut Top 5", "Le plus de titres distincts entrés directement dans le Top 5", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
         RecordDef(8, "MOST_DEBUT_TOP10", "✨", "Most Debut Top 10", "Le plus de titres entrés directement dans le Top 10", chartPeriods, artistAlbum, artistSongsAlbums, RecordUnit.COUNT),
         RecordDef(9, "FASTEST_CERT", "⚡", "Fastest Certification", "Certification obtenue le plus vite depuis la première écoute", emptyList(), listOf(RecordCategory.TRACK, RecordCategory.ALBUM),
             mapOf(RecordCategory.TRACK to certLevels, RecordCategory.ALBUM to certLevels), RecordUnit.DURATION_MS, ascending = true, screen = "FASTEST"),
@@ -288,6 +290,14 @@ object RecordMath {
     fun distinctItemsInZone(seriesByItem: Map<Long, List<RecordAppearance>>, maxPosition: Int): Set<Long> =
         seriesByItem.asSequence()
             .filter { (_, series) -> series.any { it.position <= maxPosition } }
+            .map { (itemId, _) -> itemId }
+            .toSet()
+
+    /** Éléments dont la toute première apparition est déjà dans [maxPosition]; une remontée ultérieure ne compte pas. */
+    fun distinctItemsDebutingInZone(seriesByItem: Map<Long, List<RecordAppearance>>, maxPosition: Int): Set<Long> =
+        if (maxPosition < 1) emptySet()
+        else seriesByItem.asSequence()
+            .filter { (_, series) -> series.firstOrNull()?.position?.let { it in 1..maxPosition } == true }
             .map { (itemId, _) -> itemId }
             .toSet()
 
