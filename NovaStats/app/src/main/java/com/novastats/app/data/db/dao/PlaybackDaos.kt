@@ -141,6 +141,19 @@ interface ScrobbleDao {
     @Query("DELETE FROM scrobbles WHERE scrobble_id IN (:ids)")
     suspend fun deleteMany(ids: List<Long>)
 
+    /** L'éditeur déplace d'abord les écoutes dans la corbeille; les calculs continuent d'utiliser CONFIRMED uniquement. */
+    @Query("UPDATE scrobbles SET status = 'TRASHED' WHERE scrobble_id IN (:ids) AND status = 'CONFIRMED'")
+    suspend fun moveToTrash(ids: List<Long>): Int
+
+    @Query("UPDATE scrobbles SET status = 'CONFIRMED' WHERE scrobble_id IN (:ids) AND status = 'TRASHED'")
+    suspend fun restoreFromTrash(ids: List<Long>): Int
+
+    @Query("DELETE FROM scrobbles WHERE scrobble_id IN (:ids) AND status = 'TRASHED'")
+    suspend fun permanentlyDeleteTrashed(ids: List<Long>): Int
+
+    @Query("DELETE FROM scrobbles WHERE status = 'TRASHED'")
+    suspend fun emptyTrash(): Int
+
     @Query("SELECT * FROM scrobbles WHERE scrobble_id IN (:ids)")
     suspend fun byIds(ids: List<Long>): List<ScrobbleEntity>
 
@@ -174,6 +187,33 @@ interface ScrobbleDao {
         """
     )
     fun recent(limit: Int = 20): Flow<List<RecentScrobble>>
+
+    /** Recherche complète paginée pour l'éditeur (statut CONFIRMED ou TRASHED uniquement). */
+    @Query(
+        """
+        SELECT s.*, t.title AS title,
+               (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name,
+               t.cover_url AS cover_url
+        FROM scrobbles s
+        JOIN tracks t ON t.track_id = s.track_id
+        LEFT JOIN artists a ON a.artist_id = s.artist_id
+        LEFT JOIN albums al ON al.album_id = s.album_id
+        WHERE s.status = :status AND (
+            :query = '' OR t.title LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(a.name, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(al.title, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_title, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_artist, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_album, '') LIKE '%' || :query || '%' COLLATE NOCASE
+        )
+        ORDER BY s.started_at DESC, s.scrobble_id DESC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    suspend fun searchEditorPage(status: String, query: String, limit: Int, offset: Int): List<RecentScrobble>
+
+    @Query("SELECT COUNT(*) FROM scrobbles WHERE status = 'TRASHED'")
+    fun trashCountFlow(): Flow<Int>
 
     @Query("SELECT * FROM scrobbles WHERE status = 'PENDING' ORDER BY started_at")
     suspend fun pending(): List<ScrobbleEntity>

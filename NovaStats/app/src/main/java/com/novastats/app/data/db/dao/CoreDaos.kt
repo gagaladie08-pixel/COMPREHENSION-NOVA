@@ -326,6 +326,31 @@ interface TrackDao {
     @Query("SELECT t.*, (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t ORDER BY t.play_count DESC, t.title LIMIT :limit")
     fun allForEditor(limit: Int = 2000): Flow<List<RankedTrack>>
 
+    /** Recherche texte sur tout le catalogue, paginée côté SQLite pour éviter la limite du classement des 2 000 titres. */
+    @Query(
+        """
+        SELECT t.*,
+               (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = t.track_id ORDER BY ta2.is_primary DESC, ta2.id)) AS artist_name,
+               (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title,
+               t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms
+        FROM tracks t
+        WHERE (
+            :query = '' OR t.title LIKE '%' || :query || '%' COLLATE NOCASE
+            OR EXISTS (SELECT 1 FROM track_artists ta JOIN artists a ON a.artist_id = ta.artist_id WHERE ta.track_id = t.track_id AND a.name LIKE '%' || :query || '%' COLLATE NOCASE)
+            OR EXISTS (SELECT 1 FROM albums al WHERE al.album_id = t.album_id AND al.title LIKE '%' || :query || '%' COLLATE NOCASE)
+        )
+        AND (
+            :filter = 'ALL'
+            OR (:filter = 'REVIEW' AND (t.needs_review = 1 OR t.confidence_score < 70))
+            OR (:filter = 'NO_ALBUM' AND t.album_id IS NULL)
+            OR (:filter = 'NO_COVER' AND t.cover_url IS NULL)
+        )
+        ORDER BY t.play_count DESC, t.title COLLATE NOCASE
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    suspend fun searchEditorPage(query: String, filter: String, limit: Int, offset: Int): List<RankedTrack>
+
     @Query("SELECT t.*, (SELECT name FROM artists WHERE artist_id = t.artist_id) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t WHERE t.needs_review = 1 OR t.confidence_score < 70 ORDER BY t.confidence_score, t.play_count DESC")
     fun needingReview(): Flow<List<RankedTrack>>
 

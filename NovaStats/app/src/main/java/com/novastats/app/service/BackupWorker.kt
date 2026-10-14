@@ -51,6 +51,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             val (text, _) = BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
             val file = File(dir(app), BackupExporter.fileName())
             file.writeText(text)
+            check(BackupExporter.verify(file)) { "La sauvegarde écrite est absente ou illisible." }
             existing(app).drop(KEEP).forEach { it.delete() }
             app.settings.setLastBackupAt(System.currentTimeMillis())
             return file

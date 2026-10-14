@@ -404,9 +404,9 @@ interface ApiCacheDao {
 @Dao
 interface EditorDao {
     @Insert suspend fun insertEdit(row: EditHistoryEntity): Long
-    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT :limit") fun history(limit: Int = 50): Flow<List<EditHistoryEntity>>
-    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT 1") suspend fun last(): EditHistoryEntity?
-    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT 50") suspend fun historyList(): List<EditHistoryEntity>
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC, id DESC LIMIT :limit") fun history(limit: Int = 50): Flow<List<EditHistoryEntity>>
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC, id DESC LIMIT 1") suspend fun last(): EditHistoryEntity?
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC, id DESC LIMIT 50") suspend fun historyList(): List<EditHistoryEntity>
     @Query("DELETE FROM edit_history WHERE id = :id") suspend fun deleteEdit(id: Long)
     @Query("DELETE FROM edit_history") suspend fun clearHistory()
     @Query("DELETE FROM edit_history WHERE id NOT IN (SELECT id FROM edit_history ORDER BY created_at DESC LIMIT 50)") suspend fun trimTo50()

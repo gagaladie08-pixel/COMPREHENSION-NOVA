@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -105,6 +106,16 @@ object BackupExporter {
     fun formatVersion(text: String): String? = runCatching {
         (json.parseToJsonElement(text) as? JsonObject)?.get("nova_version")?.jsonPrimitive?.content
     }.getOrNull()
+
+    /** Vérifie qu'un backup écrit est un JSON NovaStats complet et décodable avant une opération destructive en lot. */
+    fun verify(file: File): Boolean {
+        if (!file.isFile || file.length() <= 0L) return false
+        return runCatching {
+            val text = file.readText()
+            val export = json.decodeFromString(NovaExport.serializer(), text)
+            export.nova_version == NovaExport.FORMAT_VERSION && export.version == 1 && export.exportedAt > 0L
+        }.getOrDefault(false)
+    }
 
     /** Vrai si le fichier vient d'une version de NovaStats plus récente que celle-ci. */
     fun isNewerThanSupported(version: String?): Boolean {
