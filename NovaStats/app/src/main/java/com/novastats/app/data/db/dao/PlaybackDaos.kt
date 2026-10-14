@@ -117,6 +117,12 @@ interface ScrobbleDao {
     @Query("SELECT * FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED' ORDER BY started_at DESC")
     suspend fun allOfTrack(trackId: Long): List<ScrobbleEntity>
 
+    @Query("SELECT DISTINCT raw_artist FROM scrobbles WHERE track_id = :trackId AND raw_artist IS NOT NULL AND TRIM(raw_artist) != ''")
+    suspend fun rawArtistsOfTrack(trackId: Long): List<String>
+
+    @Query("SELECT DISTINCT raw_album FROM scrobbles WHERE track_id = :trackId AND raw_album IS NOT NULL AND TRIM(raw_album) != ''")
+    suspend fun rawAlbumsOfTrack(trackId: Long): List<String>
+
     @Query("SELECT * FROM scrobbles WHERE artist_id = :artistId AND status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allOfArtist(artistId: Long): List<ScrobbleEntity>
 
@@ -206,11 +212,54 @@ interface ScrobbleDao {
             OR COALESCE(s.raw_artist, '') LIKE '%' || :query || '%' COLLATE NOCASE
             OR COALESCE(s.raw_album, '') LIKE '%' || :query || '%' COLLATE NOCASE
         )
-        ORDER BY s.started_at DESC, s.scrobble_id DESC
+        ORDER BY
+            CASE WHEN :sort = 'TITLE_ASC' THEN t.title END COLLATE NOCASE ASC,
+            CASE WHEN :sort = 'OLDEST' THEN s.started_at END ASC,
+            CASE WHEN :sort != 'TITLE_ASC' AND :sort != 'OLDEST' THEN s.started_at END DESC,
+            s.scrobble_id DESC
         LIMIT :limit OFFSET :offset
         """
     )
-    suspend fun searchEditorPage(status: String, query: String, limit: Int, offset: Int): List<RecentScrobble>
+    suspend fun searchEditorPage(status: String, query: String, sort: String, limit: Int, offset: Int): List<RecentScrobble>
+
+    @Query(
+        """
+        SELECT COUNT(*)
+        FROM scrobbles s
+        JOIN tracks t ON t.track_id = s.track_id
+        LEFT JOIN artists a ON a.artist_id = s.artist_id
+        LEFT JOIN albums al ON al.album_id = s.album_id
+        WHERE s.status = :status AND (
+            :query = '' OR t.title LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(a.name, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(al.title, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_title, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_artist, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_album, '') LIKE '%' || :query || '%' COLLATE NOCASE
+        )
+        """
+    )
+    suspend fun countEditorResults(status: String, query: String): Int
+
+    @Query(
+        """
+        SELECT s.scrobble_id
+        FROM scrobbles s
+        JOIN tracks t ON t.track_id = s.track_id
+        LEFT JOIN artists a ON a.artist_id = s.artist_id
+        LEFT JOIN albums al ON al.album_id = s.album_id
+        WHERE s.status = :status AND (
+            :query = '' OR t.title LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(a.name, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(al.title, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_title, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_artist, '') LIKE '%' || :query || '%' COLLATE NOCASE
+            OR COALESCE(s.raw_album, '') LIKE '%' || :query || '%' COLLATE NOCASE
+        )
+        ORDER BY s.started_at DESC, s.scrobble_id DESC
+        """
+    )
+    suspend fun searchEditorIds(status: String, query: String): List<Long>
 
     @Query("SELECT COUNT(*) FROM scrobbles WHERE status = 'TRASHED'")
     fun trashCountFlow(): Flow<Int>
@@ -330,6 +379,11 @@ interface ScrobbleDao {
 
     @Query("SELECT * FROM scrobbles WHERE status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allConfirmedOrdered(): List<ScrobbleEntity>
+
+    /** Écoutes conservées dans la corbeille, incluses dans les sauvegardes pré-purge mais jamais dans les statistiques. */
+    @Query("SELECT * FROM scrobbles WHERE status = 'TRASHED' ORDER BY started_at")
+    suspend fun allTrashedOrdered(): List<ScrobbleEntity>
+
     /**
      * 🧟 Albums fantômes + fuites d'album : les écoutes pointant vers un album qui n'a PLUS aucun titre
      * rattaché, OU arrivées SANS tag album (`album_id` nul), sont réattribuées à l'album ACTUEL de leur

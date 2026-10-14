@@ -31,7 +31,9 @@ data class LegacyBackup(
     /** 🔒 Noms d'artistes protégés (format 2.1+) — restaurés AVANT la résolution des titres. */
     val artist_exceptions: List<String> = emptyList(),
     /** 💿 Marquages manuels « album multi-artistes » (format 2.2+). */
-    val album_overrides: List<com.novastats.app.data.importer.ExportAlbumOverride> = emptyList()
+    val album_overrides: List<com.novastats.app.data.importer.ExportAlbumOverride> = emptyList(),
+    /** Écoutes déjà placées dans la corbeille (format 2.4+), conservées hors des statistiques à la restauration. */
+    val trashed_plays: List<ExportTrashedPlay> = emptyList()
 )
 
 @Serializable
@@ -83,7 +85,9 @@ data class ImportReport(
     val playsRepaired: Int = 0,
     val playsBelowThreshold: Int,
     val unknownSongRefs: Int,
-    val durationMs: Long
+    val durationMs: Long,
+    val trashedPlaysInFile: Int = 0,
+    val trashedPlaysImported: Int = 0
 ) {
     fun summary(): String = buildString {
         appendLine("✅ Import terminé en ${durationMs / 1000}s")
@@ -91,6 +95,7 @@ data class ImportReport(
         appendLine("• $playsImported écoutes importées sur $playsInFile")
         if (playsIgnoredDuplicates > 0) appendLine("• $playsIgnoredDuplicates doublons ignorés")
         if (playsRepaired > 0) appendLine("• $playsRepaired écoutes existantes réattribuées à la bonne version (invités / remix)")
+        if (trashedPlaysInFile > 0) appendLine("• $trashedPlaysImported écoute(s) restaurée(s) dans la corbeille sur $trashedPlaysInFile (exclues des statistiques)")
         if (playsBelowThreshold > 0) appendLine("• $playsBelowThreshold écoutes sous le seuil (comptées comme skip)")
         if (unknownSongRefs > 0) appendLine("• $unknownSongRefs écoutes sans titre correspondant")
     }
@@ -158,8 +163,9 @@ object LegacyBackupImporter {
             library.clearCaches()
         }
 
-        onProgress("Import de ${backup.plays.size} écoutes…")
+        onProgress("Import de ${backup.plays.size} écoutes confirmées…")
         var imported = 0; var duplicates = 0; var belowThreshold = 0; var unknown = 0; var repaired = 0
+        var trashedImported = 0
         val batch = ArrayList<ScrobbleEntity>(500)
         val songById = backup.songs.associateBy { it.id }
         val rootOf = HashMap<Long, Long>()
@@ -214,6 +220,52 @@ object LegacyBackupImporter {
             flush()
         }
 
+        if (backup.trashed_plays.isNotEmpty()) {
+            onProgress("Restauration de ${backup.trashed_plays.size} écoute(s) dans la corbeille…")
+            val trashBatch = ArrayList<ScrobbleEntity>(500)
+            suspend fun flushTrash() {
+                if (trashBatch.isEmpty()) return
+                trashedImported += db.scrobbleDao().insertAll(trashBatch).count { it != -1L }
+                trashBatch.clear()
+            }
+            db.withTransaction {
+                backup.trashed_plays.sortedBy { it.playedAt }.forEachIndexed { i, play ->
+                    val resolved = trackBySongId[play.songId]
+                    if (resolved == null) {
+                        unknown++
+                        return@forEachIndexed
+                    }
+                    val duration = play.listenedDuration.coerceAtLeast(0L)
+                    val endedAt = play.endedAt?.coerceAtLeast(play.playedAt)
+                        ?: try { Math.addExact(play.playedAt, duration) } catch (_: ArithmeticException) { Long.MAX_VALUE }
+                    val validatedAt = play.validatedAt?.coerceIn(play.playedAt, endedAt)
+                    trashBatch += ScrobbleEntity(
+                        trackId = resolved.trackId,
+                        artistId = resolved.primaryArtistId,
+                        albumId = resolved.albumId,
+                        startedAt = play.playedAt,
+                        validatedAt = validatedAt,
+                        endedAt = endedAt,
+                        durationListenedMs = duration,
+                        sourceApp = play.sourceApp,
+                        detectionSource = play.detectionSource,
+                        confidenceScore = play.confidenceScore.coerceIn(0, 100),
+                        status = ScrobbleStatus.TRASHED,
+                        isSkip = play.isSkip,
+                        createdAt = play.createdAt,
+                        needsReview = play.needsReview,
+                        reviewReason = play.reviewReason,
+                        rawTitle = play.rawTitle,
+                        rawArtist = play.rawArtist,
+                        rawAlbum = play.rawAlbum
+                    )
+                    if (trashBatch.size >= 500) flushTrash()
+                    if (i % 2000 == 0) onProgress("Corbeille : $i / ${backup.trashed_plays.size}")
+                }
+                flushTrash()
+            }
+        }
+
         onProgress("Albums multi-artistes…")
         AlbumSharing.consolidate(db, library)
         onProgress("Recalcul des statistiques…")
@@ -227,7 +279,9 @@ object LegacyBackupImporter {
             playsRepaired = repaired,
             playsBelowThreshold = belowThreshold,
             unknownSongRefs = unknown,
-            durationMs = System.currentTimeMillis() - t0
+            durationMs = System.currentTimeMillis() - t0,
+            trashedPlaysInFile = backup.trashed_plays.size,
+            trashedPlaysImported = trashedImported
         )
         db.migrationLogDao().insert(
             MigrationLogEntity(

@@ -21,8 +21,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 🤖 Synchro agent — FONCTION TEMPORAIRE (à retirer une fois le peaufinage terminé).
- * Pousse l'export JSON COMPLET (BackupExporter v2.3 : écoutes, titres, artistes, albums,
- * certifications, Panthéon, Hall of Fame, éditions, corrections) vers un Gist GitHub privé,
+ * Pousse l'export JSON NovaStats v2.4 (écoutes confirmées, titres, artistes, albums,
+ * certifications, Panthéon, Hall of Fame, éditions, corrections ; corbeille exclue) vers un Gist GitHub privé,
  * afin que l'agent de développement dispose d'un miroir fidèle de la base.
  * Le token ne quitte l'appareil que vers api.github.com ; la synchro se désactive d'un interrupteur.
  */
@@ -61,7 +61,8 @@ object AgentSync {
         if (!force && !s.agentSync.first()) return@withContext null
         val token = s.agentToken.first()?.trim().orEmpty()
         if (token.isEmpty()) return@withContext "⚠️ Aucun token GitHub enregistré (Réglages → Synchro agent)"
-        val (text, sum) = BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
+        // Ne pas transférer la corbeille vers le miroir distant ; les exports locaux la conservent.
+        val (text, sum) = BackupExporter.build(app.database, BuildConfig.VERSION_NAME, includeTrashedPlays = false)
         // L'API GitHub tronque tout fichier > 1 Mo : le miroir part compressé (gzip + base64, ~5x plus petit),
         // lisible intégralement via api.github.com. nova_status.txt reste du texte clair pour un coup d'œil humain.
         val gz = java.io.ByteArrayOutputStream().use { bos ->
@@ -71,7 +72,8 @@ object AgentSync {
         val b64 = android.util.Base64.encodeToString(gz, android.util.Base64.NO_WRAP)
         val statusTxt = "NovaStats ${BuildConfig.VERSION_NAME} · export ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date())} (heure appareil)\n" +
             "${sum.plays} écoutes · ${sum.songs} titres · ${sum.artists} artistes · ${sum.albums} albums\n" +
-            "Miroir complet : nova_backup.b64 (gzip+base64, ${gz.size / 1024} Ko)\n" +
+            "Corbeille exclue de la synchro distante ; incluse dans les backups locaux.\n" +
+            "Export synchronisé : nova_backup.b64 (gzip+base64, ${gz.size / 1024} Ko)\n" +
             "Système temporaire — synchro agent."
         val gistId = s.agentGistId.first().orEmpty()
         // Ne purger l'ancien fichier brut que s'il existe encore : demander la suppression d'un fichier

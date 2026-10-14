@@ -318,6 +318,10 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE play_count > 0")
     suspend fun allPlayed(): List<TrackEntity>
 
+    /** Titres joués ou nécessaires à la restauration d'une écoute conservée dans la corbeille. */
+    @Query("SELECT * FROM tracks WHERE play_count > 0 OR track_id IN (SELECT track_id FROM scrobbles WHERE status = 'TRASHED')")
+    suspend fun allForBackup(): List<TrackEntity>
+
     /** Tous les titres de cet artiste, y compris les titres de catalogue pas encore écoutés. */
     @Query("SELECT * FROM tracks WHERE artist_id = :artistId")
     suspend fun allByArtistId(artistId: Long): List<TrackEntity>
@@ -345,11 +349,34 @@ interface TrackDao {
             OR (:filter = 'NO_ALBUM' AND t.album_id IS NULL)
             OR (:filter = 'NO_COVER' AND t.cover_url IS NULL)
         )
-        ORDER BY t.play_count DESC, t.title COLLATE NOCASE
+        ORDER BY
+            CASE WHEN :sort = 'NAME_ASC' THEN 0 ELSE 1 END,
+            CASE WHEN :sort = 'NAME_ASC' THEN t.title END COLLATE NOCASE ASC,
+            CASE WHEN :sort = 'RECENT' THEN (SELECT MAX(s.started_at) FROM scrobbles s WHERE s.track_id = t.track_id AND s.status = 'CONFIRMED') END DESC,
+            CASE WHEN :sort = 'PLAYS_DESC' THEN t.play_count END DESC,
+            t.title COLLATE NOCASE ASC, t.track_id ASC
         LIMIT :limit OFFSET :offset
         """
     )
-    suspend fun searchEditorPage(query: String, filter: String, limit: Int, offset: Int): List<RankedTrack>
+    suspend fun searchEditorPage(query: String, filter: String, sort: String, limit: Int, offset: Int): List<RankedTrack>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM tracks t
+        WHERE (
+            :query = '' OR t.title LIKE '%' || :query || '%' COLLATE NOCASE
+            OR EXISTS (SELECT 1 FROM track_artists ta JOIN artists a ON a.artist_id = ta.artist_id WHERE ta.track_id = t.track_id AND a.name LIKE '%' || :query || '%' COLLATE NOCASE)
+            OR EXISTS (SELECT 1 FROM albums al WHERE al.album_id = t.album_id AND al.title LIKE '%' || :query || '%' COLLATE NOCASE)
+        )
+        AND (
+            :filter = 'ALL'
+            OR (:filter = 'REVIEW' AND (t.needs_review = 1 OR t.confidence_score < 70))
+            OR (:filter = 'NO_ALBUM' AND t.album_id IS NULL)
+            OR (:filter = 'NO_COVER' AND t.cover_url IS NULL)
+        )
+        """
+    )
+    suspend fun countSearchEditor(query: String, filter: String): Int
 
     @Query("SELECT t.*, (SELECT name FROM artists WHERE artist_id = t.artist_id) AS artist_name, (SELECT title FROM albums WHERE album_id = t.album_id) AS album_title, t.play_count AS period_plays, t.total_duration_ms AS period_duration_ms FROM tracks t WHERE t.needs_review = 1 OR t.confidence_score < 70 ORDER BY t.confidence_score, t.play_count DESC")
     fun needingReview(): Flow<List<RankedTrack>>
@@ -910,6 +937,9 @@ interface TrackLinkDao {
 
     @Query("SELECT * FROM track_artists WHERE track_id = :trackId ORDER BY is_primary DESC, id")
     suspend fun trackArtistsForTrack(trackId: Long): List<TrackArtistEntity>
+
+    @Query("SELECT * FROM track_albums WHERE track_id = :trackId ORDER BY is_primary DESC, id")
+    suspend fun trackAlbumsForTrack(trackId: Long): List<TrackAlbumEntity>
 
     @Query("SELECT * FROM track_artists") suspend fun allTrackArtists(): List<TrackArtistEntity>
     @Query("SELECT * FROM track_albums") suspend fun allTrackAlbums(): List<TrackAlbumEntity>

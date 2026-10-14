@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,10 +12,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -27,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +50,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.NovaStatsApp
@@ -71,6 +77,15 @@ private enum class EditorTab(val label: String) { OVERVIEW("✦ Atelier Nova"), 
 private enum class TrackEditorFilter(val key: String, val label: String) {
     ALL("ALL", "Tous"), REVIEW("REVIEW", "À vérifier"), NO_ALBUM("NO_ALBUM", "Sans album"), NO_COVER("NO_COVER", "Sans pochette")
 }
+private enum class TrackEditorSort(val key: String, val label: String) {
+    MOST_PLAYED("PLAYS_DESC", "Écoutes ↓"), NAME("NAME_ASC", "Nom A→Z"), RECENT("RECENT", "Récents")
+}
+private enum class PlayEditorSort(val key: String, val label: String) {
+    NEWEST("NEWEST", "Plus récentes"), OLDEST("OLDEST", "Plus anciennes"), TITLE("TITLE_ASC", "Titre A→Z")
+}
+private enum class HistoryEditorFilter(val label: String) {
+    ALL("Toutes"), UNDOABLE("Annulables"), IRREVERSIBLE("Irréversibles"), TRASH("Corbeille"), MERGES("Fusions / liens")
+}
 
 /**
  * 🛠️ Éditeur de données (Paramètres → Éditeur). Recherche, suggestions de fusion, renommage, fusion,
@@ -90,13 +105,31 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
     var debouncedQuery by remember { mutableStateOf("") }
     LaunchedEffect(query) { delay(250); debouncedQuery = query.trim() }
     var trackFilter by remember { mutableStateOf(TrackEditorFilter.ALL) }
+    var trackSort by remember { mutableStateOf(TrackEditorSort.MOST_PLAYED) }
+    var catalogSort by remember { mutableStateOf(TrackEditorSort.MOST_PLAYED) }
+    var playSort by remember { mutableStateOf(PlayEditorSort.NEWEST) }
     var trackPage by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
     var playsPage by remember { mutableStateOf<List<RecentScrobble>>(emptyList()) }
+    var trackResultCount by remember { mutableIntStateOf(0) }
+    var playsResultCount by remember { mutableIntStateOf(0) }
     var pageLoading by remember { mutableStateOf(false) }
+    var pageRequestGeneration by remember { mutableIntStateOf(0) }
+    var bulkLoading by remember { mutableStateOf(false) }
     var trackHasMore by remember { mutableStateOf(false) }
     var playsHasMore by remember { mutableStateOf(false) }
     var refreshToken by remember { mutableIntStateOf(0) }
     var operationMessage by remember { mutableStateOf<String?>(null) }
+    var selectedTrackIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var historyQuery by remember { mutableStateOf("") }
+    var historyFilter by remember { mutableStateOf(HistoryEditorFilter.ALL) }
+    var historyDetail by remember { mutableStateOf<com.novastats.app.data.db.entity.EditHistoryEntity?>(null) }
+    var undoBannerFor by remember { mutableStateOf<Long?>(null) }
+    var pendingUndoFromHistoryId by remember { mutableStateOf<Long?>(null) }
+    var bulkTrackEditType by remember { mutableStateOf<String?>(null) }
+    var bulkTargetSearch by remember { mutableStateOf("") }
+    var bulkTargetSelected by remember { mutableStateOf(false) }
+    var bulkTargetId by remember { mutableStateOf<Long?>(null) }
+    var emptyTrashTyped by remember { mutableStateOf("") }
 
     val tracks by app.database.trackDao().allForEditor().collectAsStateWithLifecycle(initialValue = emptyList())
     val trackCount by app.database.trackDao().countFlow().collectAsStateWithLifecycle(initialValue = 0)
@@ -115,33 +148,53 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
     val protectedNames by app.database.artistExceptionDao().all().collectAsStateWithLifecycle(initialValue = emptyList())
     var newProtected by remember { mutableStateOf("") }
 
-    LaunchedEffect(tab, debouncedQuery, trackFilter, refreshToken) {
+    LaunchedEffect(tab, debouncedQuery, trackFilter, trackSort, playSort, refreshToken) {
+        val requestId = ++pageRequestGeneration
+        if (tab != EditorTab.TRACKS && tab != EditorTab.PLAYS && tab != EditorTab.TRASH) {
+            pageLoading = false
+            return@LaunchedEffect
+        }
+        pageLoading = true
         when (tab) {
-            EditorTab.TRACKS -> {
-                pageLoading = true
-                try {
-                    trackPage = withContext(Dispatchers.IO) { app.database.trackDao().searchEditorPage(debouncedQuery, trackFilter.key, EDITOR_PAGE_SIZE, 0) }
-                    trackHasMore = trackPage.size == EDITOR_PAGE_SIZE
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
+            EditorTab.TRACKS -> try {
+                val result = withContext(Dispatchers.IO) {
+                    val page = app.database.trackDao().searchEditorPage(debouncedQuery, trackFilter.key, trackSort.key, EDITOR_PAGE_SIZE, 0)
+                    val count = app.database.trackDao().countSearchEditor(debouncedQuery, trackFilter.key)
+                    page to count
+                }
+                if (requestId == pageRequestGeneration) {
+                    trackPage = result.first
+                    trackResultCount = result.second
+                    trackHasMore = trackPage.size < trackResultCount
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (requestId == pageRequestGeneration) {
                     operationMessage = "❌ Recherche impossible : ${error.message ?: error.javaClass.simpleName}"
-                    trackPage = emptyList(); trackHasMore = false
-                } finally { pageLoading = false }
-            }
-            EditorTab.PLAYS, EditorTab.TRASH -> {
-                pageLoading = true
-                try {
-                    val playStatus = if (tab == EditorTab.TRASH) ScrobbleStatus.TRASHED else ScrobbleStatus.CONFIRMED
-                    playsPage = withContext(Dispatchers.IO) { app.database.scrobbleDao().searchEditorPage(playStatus, debouncedQuery, EDITOR_PAGE_SIZE, 0) }
-                    playsHasMore = playsPage.size == EDITOR_PAGE_SIZE
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
+                    trackPage = emptyList(); trackResultCount = 0; trackHasMore = false
+                }
+            } finally { if (requestId == pageRequestGeneration) pageLoading = false }
+            EditorTab.PLAYS, EditorTab.TRASH -> try {
+                val playStatus = if (tab == EditorTab.TRASH) ScrobbleStatus.TRASHED else ScrobbleStatus.CONFIRMED
+                val result = withContext(Dispatchers.IO) {
+                    val page = app.database.scrobbleDao().searchEditorPage(playStatus, debouncedQuery, playSort.key, EDITOR_PAGE_SIZE, 0)
+                    val count = app.database.scrobbleDao().countEditorResults(playStatus, debouncedQuery)
+                    page to count
+                }
+                if (requestId == pageRequestGeneration) {
+                    playsPage = result.first
+                    playsResultCount = result.second
+                    playsHasMore = playsPage.size < playsResultCount
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (requestId == pageRequestGeneration) {
                     operationMessage = "❌ Recherche impossible : ${error.message ?: error.javaClass.simpleName}"
-                    playsPage = emptyList(); playsHasMore = false
-                } finally { pageLoading = false }
-            }
+                    playsPage = emptyList(); playsResultCount = 0; playsHasMore = false
+                }
+            } finally { if (requestId == pageRequestGeneration) pageLoading = false }
             else -> Unit
         }
     }
@@ -151,11 +204,14 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
     fun execute(block: suspend () -> Unit, preflightMessage: String? = null) {
         scope.launch {
             val previousStatus = editor.status.value
+            val previousHistoryId = history.firstOrNull()?.id
+            undoBannerFor = null
             operationMessage = preflightMessage
             backupInProgress = preflightMessage != null
             try {
                 withContext(Dispatchers.IO) { block() }
                 refreshToken++
+                pendingUndoFromHistoryId = previousHistoryId
                 operationMessage = editor.status.value?.takeIf { it != previousStatus } ?: "✅ Action terminée."
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -167,38 +223,58 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
         }
     }
     val exec: (suspend () -> Unit) -> Unit = { block -> execute(block) }
-    val execProtected: (suspend () -> Unit) -> Unit = { block -> execute(block, "💾 Création et vérification de la sauvegarde avant fusion…") }
+    val execProtected: (suspend () -> Unit) -> Unit = { block -> execute(block, "💾 Création et vérification de la sauvegarde de sécurité…") }
     fun loadMoreTracks() {
         if (!trackHasMore || pageLoading) return
+        val requestId = ++pageRequestGeneration
+        val queryAtStart = debouncedQuery
+        val filterAtStart = trackFilter
+        val sortAtStart = trackSort
+        val offsetAtStart = trackPage.size
+        val refreshAtStart = refreshToken
         scope.launch {
             pageLoading = true
             try {
-                val next = withContext(Dispatchers.IO) { app.database.trackDao().searchEditorPage(debouncedQuery, trackFilter.key, EDITOR_PAGE_SIZE, trackPage.size) }
-                trackPage = trackPage + next
-                trackHasMore = next.size == EDITOR_PAGE_SIZE
+                val next = withContext(Dispatchers.IO) { app.database.trackDao().searchEditorPage(queryAtStart, filterAtStart.key, sortAtStart.key, EDITOR_PAGE_SIZE, offsetAtStart) }
+                if (requestId == pageRequestGeneration && tab == EditorTab.TRACKS && debouncedQuery == queryAtStart && trackFilter == filterAtStart && trackSort == sortAtStart && refreshToken == refreshAtStart) {
+                    trackPage = trackPage + next
+                    trackHasMore = trackPage.size < trackResultCount
+                }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                operationMessage = "❌ Chargement impossible : ${error.message ?: error.javaClass.simpleName}"
-                trackHasMore = false
-            } finally { pageLoading = false }
+                if (requestId == pageRequestGeneration) {
+                    operationMessage = "❌ Chargement impossible : ${error.message ?: error.javaClass.simpleName}"
+                    trackHasMore = false
+                }
+            } finally { if (requestId == pageRequestGeneration) pageLoading = false }
         }
     }
     fun loadMorePlays(trashed: Boolean) {
         if (!playsHasMore || pageLoading) return
+        val requestId = ++pageRequestGeneration
+        val queryAtStart = debouncedQuery
+        val sortAtStart = playSort
+        val offsetAtStart = playsPage.size
+        val refreshAtStart = refreshToken
         scope.launch {
             pageLoading = true
             try {
                 val playStatus = if (trashed) ScrobbleStatus.TRASHED else ScrobbleStatus.CONFIRMED
-                val next = withContext(Dispatchers.IO) { app.database.scrobbleDao().searchEditorPage(playStatus, debouncedQuery, EDITOR_PAGE_SIZE, playsPage.size) }
-                playsPage = playsPage + next
-                playsHasMore = next.size == EDITOR_PAGE_SIZE
+                val next = withContext(Dispatchers.IO) { app.database.scrobbleDao().searchEditorPage(playStatus, queryAtStart, sortAtStart.key, EDITOR_PAGE_SIZE, offsetAtStart) }
+                val expectedTab = if (trashed) EditorTab.TRASH else EditorTab.PLAYS
+                if (requestId == pageRequestGeneration && tab == expectedTab && debouncedQuery == queryAtStart && playSort == sortAtStart && refreshToken == refreshAtStart) {
+                    playsPage = playsPage + next
+                    playsHasMore = playsPage.size < playsResultCount
+                }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                operationMessage = "❌ Chargement impossible : ${error.message ?: error.javaClass.simpleName}"
-                playsHasMore = false
-            } finally { pageLoading = false }
+                if (requestId == pageRequestGeneration) {
+                    operationMessage = "❌ Chargement impossible : ${error.message ?: error.javaClass.simpleName}"
+                    playsHasMore = false
+                }
+            } finally { if (requestId == pageRequestGeneration) pageLoading = false }
         }
     }
 
@@ -213,7 +289,10 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
     var confirmTrashIds by remember { mutableStateOf<List<Long>?>(null) }
     var confirmPurgeIds by remember { mutableStateOf<List<Long>?>(null) }
     var confirmEmptyTrash by remember { mutableStateOf(false) }
-    LaunchedEffect(tab, debouncedQuery, refreshToken) { selectedPlayIds = emptySet() }
+    LaunchedEffect(tab, debouncedQuery, trackFilter, trackSort, catalogSort, playSort, refreshToken) {
+        selectedPlayIds = emptySet()
+        selectedTrackIds = emptySet()
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -237,6 +316,37 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
             DuplicateBadge(dupsForTab.size, noun, enabled = !busy && !backupInProgress) { dupPopup = tab }
         }
 
+        val q = debouncedQuery.lowercase(Locale.ROOT)
+        val filteredArtists = remember(artists, q, catalogSort) {
+            val matches = artists.filter { q.isEmpty() || it.name.lowercase(Locale.ROOT).contains(q) }
+            if (catalogSort == TrackEditorSort.NAME) matches.sortedBy { it.name.lowercase(Locale.ROOT) }
+            else matches.sortedWith(compareByDescending<ArtistEntity> { it.playCount }.thenBy { it.name.lowercase(Locale.ROOT) })
+        }
+        val filteredAlbums = remember(albums, q, catalogSort) {
+            val matches = albums.filter { q.isEmpty() || it.album.title.lowercase(Locale.ROOT).contains(q) || it.artistName.lowercase(Locale.ROOT).contains(q) }
+            if (catalogSort == TrackEditorSort.NAME) matches.sortedBy { it.album.title.lowercase(Locale.ROOT) }
+            else matches.sortedWith(compareByDescending<RankedAlbum> { it.periodPlays }.thenBy { it.album.title.lowercase(Locale.ROOT) })
+        }
+        val historyQ = historyQuery.trim().lowercase(Locale.ROOT)
+        val filteredHistory = remember(history, historyQ, historyFilter) {
+            history.filter { entry ->
+                val isUndoable = com.novastats.app.data.repository.DataEditorManager.canUndo(entry)
+                val matchesFilter = when (historyFilter) {
+                    HistoryEditorFilter.ALL -> true
+                    HistoryEditorFilter.UNDOABLE -> isUndoable
+                    HistoryEditorFilter.IRREVERSIBLE -> !isUndoable
+                    HistoryEditorFilter.TRASH -> entry.type in setOf("DELETE_PLAY", "TRASH_RESTORE", "TRASH_PURGE")
+                    HistoryEditorFilter.MERGES -> entry.type in setOf("MERGE", "LINK_VERSION")
+                }
+                val searchable = listOfNotNull(entry.type, editTypeLabel(entry.type), editHistoryTarget(entry), editHistorySummary(entry), entry.before, entry.after)
+                    .joinToString(" ").lowercase(Locale.ROOT)
+                matchesFilter && (historyQ.isEmpty() || searchable.contains(historyQ))
+            }
+        }
+        val historyTop = history.firstOrNull()
+        val canUndoLatest = historyTop?.let { com.novastats.app.data.repository.DataEditorManager.canUndo(it) } == true
+        val listState = rememberLazyListState()
+
         if (tab == EditorTab.TRACKS) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TrackEditorFilter.entries.forEach { filter ->
@@ -244,63 +354,138 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
                 }
             }
         }
-
+        if (tab in setOf(EditorTab.TRACKS, EditorTab.ARTISTS, EditorTab.ALBUMS)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                (if (tab == EditorTab.TRACKS) TrackEditorSort.entries else TrackEditorSort.entries.filterNot { it == TrackEditorSort.RECENT }).forEach { sort ->
+                    val selected = if (tab == EditorTab.TRACKS) trackSort == sort else catalogSort == sort
+                    NovaFilterChip(
+                        flagKey = sort,
+                        selected = selected,
+                        onClick = { if (tab == EditorTab.TRACKS) trackSort = sort else catalogSort = sort },
+                        label = { Text(sort.label) }
+                    )
+                }
+            }
+        }
+        if (tab == EditorTab.PLAYS || tab == EditorTab.TRASH) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                PlayEditorSort.entries.forEach { sort ->
+                    NovaFilterChip(flagKey = sort, selected = playSort == sort, onClick = { playSort = sort }, label = { Text(sort.label) })
+                }
+            }
+        }
+        if (tab == EditorTab.TRACKS) {
+            val pageIds = trackPage.take(com.novastats.app.data.repository.DataEditorManager.MAX_BATCH_TRACKS).map { it.track.trackId }.toSet()
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${selectedTrackIds.size}/${com.novastats.app.data.repository.DataEditorManager.MAX_BATCH_TRACKS} titre(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                TextButton(
+                    onClick = {
+                        val next = if (pageIds.isNotEmpty() && pageIds.all { it in selectedTrackIds }) selectedTrackIds - pageIds else selectedTrackIds + pageIds
+                        if (next.size <= com.novastats.app.data.repository.DataEditorManager.MAX_BATCH_TRACKS) selectedTrackIds = next
+                        else operationMessage = "Limite de 80 titres par lot : retire d’abord quelques sélections."
+                    },
+                    enabled = pageIds.isNotEmpty() && !busy && !backupInProgress
+                ) { Text(if (pageIds.isNotEmpty() && pageIds.all { it in selectedTrackIds }) "Désélectionner le lot" else "Sélectionner jusqu’à 80", color = theme.primary) }
+                if (selectedTrackIds.isNotEmpty()) TextButton(onClick = { selectedTrackIds = emptySet() }) { Text("Effacer", color = theme.textSecondary) }
+            }
+        }
         if (tab == EditorTab.PLAYS || tab == EditorTab.TRASH) {
             val pageIds = playsPage.map { it.scrobble.scrobbleId }.toSet()
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("${selectedPlayIds.size} sélectionnée(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            val allMatchesSelected = playsResultCount > 0 && selectedPlayIds.size >= playsResultCount
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${selectedPlayIds.size} écoute(s) sélectionnée(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 TextButton(
                     onClick = { selectedPlayIds = if (pageIds.isNotEmpty() && pageIds.all { it in selectedPlayIds }) selectedPlayIds - pageIds else selectedPlayIds + pageIds },
-                    enabled = pageIds.isNotEmpty() && !busy && !backupInProgress
+                    enabled = pageIds.isNotEmpty() && !busy && !backupInProgress && !bulkLoading
                 ) { Text(if (pageIds.isNotEmpty() && pageIds.all { it in selectedPlayIds }) "Désélectionner la page" else "Sélectionner la page", color = theme.primary) }
-            }
-            if (selectedPlayIds.isNotEmpty()) {
-                TextButton(onClick = { selectedPlayIds = emptySet() }, modifier = Modifier.align(Alignment.End).padding(horizontal = 16.dp), enabled = !busy && !backupInProgress) {
-                    Text("Tout désélectionner", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (tab == EditorTab.PLAYS) {
-                        Button(
-                            onClick = { confirmTrashIds = selectedPlayIds.toList() }, enabled = !busy && !backupInProgress,
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.secondary)
-                        ) { Text("🗑️ Mettre en corbeille") }
-                    } else {
-                        Button(
-                            onClick = { exec { editor.restoreTrashed(selectedPlayIds.toList()) }; selectedPlayIds = emptySet() },
-                            enabled = !busy && !backupInProgress, colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
-                        ) { Text("↩️ Restaurer") }
-                        Button(
-                            onClick = { confirmPurgeIds = selectedPlayIds.toList() }, enabled = !busy && !backupInProgress,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))
-                        ) { Text("⚠️ Purger") }
-                    }
-                }
+                TextButton(
+                    onClick = {
+                        if (allMatchesSelected) selectedPlayIds = emptySet()
+                        else scope.launch {
+                            bulkLoading = true
+                            val requestedTab = tab
+                            val requestedQuery = debouncedQuery
+                            try {
+                                val playStatus = if (requestedTab == EditorTab.TRASH) ScrobbleStatus.TRASHED else ScrobbleStatus.CONFIRMED
+                                val ids = withContext(Dispatchers.IO) { app.database.scrobbleDao().searchEditorIds(playStatus, requestedQuery) }
+                                if (tab == requestedTab && debouncedQuery == requestedQuery) {
+                                    selectedPlayIds = ids.toSet()
+                                    operationMessage = "${ids.size} résultat(s) sélectionné(s) pour cette recherche."
+                                }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                if (tab == requestedTab && debouncedQuery == requestedQuery) operationMessage = "❌ Sélection impossible : ${error.message ?: error.javaClass.simpleName}"
+                            } finally { bulkLoading = false }
+                        }
+                    },
+                    enabled = playsResultCount > 0 && !busy && !backupInProgress && !bulkLoading
+                ) { Text(if (bulkLoading) "Sélection…" else if (allMatchesSelected) "Tout désélectionner" else "Tous les $playsResultCount résultats", color = theme.primary) }
+                if (selectedPlayIds.isNotEmpty() && !allMatchesSelected) TextButton(onClick = { selectedPlayIds = emptySet() }) { Text("Effacer", color = theme.textSecondary) }
             }
         }
 
         if (tab == EditorTab.TRASH && trashCount > 0) {
             TextButton(
-                onClick = { confirmEmptyTrash = true }, enabled = !busy && !backupInProgress,
+                onClick = { confirmEmptyTrash = true; emptyTrashTyped = "" }, enabled = !busy && !backupInProgress,
                 modifier = Modifier.align(Alignment.End).padding(horizontal = 16.dp)
             ) { Text("Vider toute la corbeille…", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) }
         }
 
-        if (tab in setOf(EditorTab.TRACKS, EditorTab.ARTISTS, EditorTab.ALBUMS, EditorTab.PLAYS, EditorTab.TRASH)) {
+        if (tab in setOf(EditorTab.TRACKS, EditorTab.ARTISTS, EditorTab.ALBUMS, EditorTab.PLAYS, EditorTab.TRASH, EditorTab.HISTORY)) {
+            val isHistorySearch = tab == EditorTab.HISTORY
+            val searchValue = if (isHistorySearch) historyQuery else query
             OutlinedTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                placeholder = { Text(if (tab == EditorTab.TRASH) "🔍 Rechercher dans la corbeille…" else "🔍 Rechercher dans la bibliothèque…") },
+                value = searchValue,
+                onValueChange = { if (isHistorySearch) historyQuery = it else query = it },
+                singleLine = true,
+                placeholder = { Text(when {
+                    isHistorySearch -> "🔍 Rechercher dans l’historique…"
+                    tab == EditorTab.TRASH -> "🔍 Rechercher dans la corbeille…"
+                    else -> "🔍 Rechercher dans la bibliothèque…"
+                }) },
+                trailingIcon = {
+                    if (searchValue.isNotBlank()) TextButton(onClick = { if (isHistorySearch) historyQuery = "" else query = "" }) { Text("Effacer") }
+                },
+                supportingText = {
+                    Text(when (tab) {
+                        EditorTab.TRACKS -> "$trackResultCount résultat(s) · ${trackPage.size} chargé(s)"
+                        EditorTab.ARTISTS -> "${filteredArtists.size} résultat(s)"
+                        EditorTab.ALBUMS -> "${filteredAlbums.size} résultat(s)"
+                        EditorTab.PLAYS, EditorTab.TRASH -> "$playsResultCount résultat(s) · ${playsPage.size} chargé(s)"
+                        EditorTab.HISTORY -> "${filteredHistory.size} entrée(s) parmi les ${history.size} plus récentes"
+                        else -> ""
+                    }, color = theme.textSecondary)
+                },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
             )
         }
-        if (busy || backupInProgress || pageLoading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = theme.accent)
+        if (tab == EditorTab.HISTORY) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                HistoryEditorFilter.entries.forEach { filter ->
+                    NovaFilterChip(flagKey = filter, selected = historyFilter == filter, onClick = { historyFilter = filter }, label = { Text(filter.label) })
+                }
+            }
+        }
+        if (busy || backupInProgress || pageLoading || bulkLoading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp), color = theme.accent)
         (operationMessage ?: status)?.let {
             Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
-
-        val q = query.trim().lowercase()
-        val historyTop = history.firstOrNull()
-        val canUndoLatest = historyTop?.let { com.novastats.app.data.repository.DataEditorManager.canUndo(it) } == true
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+        LaunchedEffect(operationMessage, historyTop?.id, canUndoLatest, pendingUndoFromHistoryId) {
+            val latest = historyTop
+            if (operationMessage?.startsWith("✅") == true && canUndoLatest && latest != null && latest.id != pendingUndoFromHistoryId) {
+                undoBannerFor = latest.id
+            }
+        }
+        LaunchedEffect(undoBannerFor) {
+            val shownId = undoBannerFor ?: return@LaunchedEffect
+            delay(7000)
+            if (undoBannerFor == shownId) undoBannerFor = null
+        }
+        LaunchedEffect(tab, debouncedQuery, trackFilter, trackSort, catalogSort, playSort, historyQuery, historyFilter) {
+            if (listState.firstVisibleItemIndex > 0) listState.scrollToItem(0)
+        }
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 EditorTab.OVERVIEW -> {
                     item(key = "overview") {
@@ -313,25 +498,34 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
                     }
                 }
                 EditorTab.TRACKS -> {
-                    if (trackPage.isEmpty() && !pageLoading) item { EditorEmptyState("Aucun titre ne correspond à cette recherche.") }
+                    if (trackPage.isEmpty() && pageLoading) item(key = "track-loading") { EditorLoadingState("Recherche dans le catalogue…") }
+                    else if (trackPage.isEmpty()) item { EditorEmptyState("Aucun titre ne correspond à cette recherche.") }
                     items(trackPage, key = { "t" + it.track.trackId }) { t ->
-                        EditorRow(t.track.title, "${t.artistName}${t.albumTitle?.let { " · $it" } ?: ""} · ${t.periodPlays} ▶", t.track.coverUrl) { action = EditorAction.Track(t) }
+                        TrackSelectionRow(
+                            track = t,
+                            selected = t.track.trackId in selectedTrackIds,
+                            onSelected = { checked ->
+                                val id = t.track.trackId
+                                if (checked && selectedTrackIds.size >= com.novastats.app.data.repository.DataEditorManager.MAX_BATCH_TRACKS && id !in selectedTrackIds) {
+                                    operationMessage = "Limite de 80 titres par lot atteinte. Désélectionne un titre pour en ajouter un autre."
+                                } else selectedTrackIds = if (checked) selectedTrackIds + id else selectedTrackIds - id
+                            },
+                            onClick = { action = EditorAction.Track(t) }
+                        )
                     }
                     item(key = "track-page-footer") {
-                        EditorPageFooter(trackPage.size, trackHasMore, pageLoading, "titres") { loadMoreTracks() }
+                        EditorPageFooter(trackPage.size, trackResultCount, trackHasMore, pageLoading, "titres") { loadMoreTracks() }
                     }
                 }
                 EditorTab.ARTISTS -> {
-                    val filtered = artists.filter { q.isEmpty() || it.name.lowercase().contains(q) }
-                    if (filtered.isEmpty()) item { EditorEmptyState("Aucun artiste ne correspond à cette recherche.") }
-                    items(filtered, key = { "a" + it.artistId }) { a ->
+                    if (filteredArtists.isEmpty()) item { EditorEmptyState("Aucun artiste ne correspond à cette recherche.") }
+                    items(filteredArtists, key = { "a" + it.artistId }) { a ->
                         EditorRow(a.name, "${a.playCount} ▶", a.photoUrl, circle = true) { action = EditorAction.Artist(a) }
                     }
                 }
                 EditorTab.ALBUMS -> {
-                    val filtered = albums.filter { q.isEmpty() || it.album.title.lowercase().contains(q) || it.artistName.lowercase().contains(q) }
-                    if (filtered.isEmpty()) item { EditorEmptyState("Aucun album ne correspond à cette recherche.") }
-                    items(filtered, key = { "al" + it.album.albumId }) { al ->
+                    if (filteredAlbums.isEmpty()) item { EditorEmptyState("Aucun album ne correspond à cette recherche.") }
+                    items(filteredAlbums, key = { "al" + it.album.albumId }) { al ->
                         EditorRow(al.album.title, "${al.artistName} · ${al.periodPlays} ▶", al.album.coverUrl) { action = EditorAction.Album(al) }
                     }
                 }
@@ -344,7 +538,8 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
                             color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp, 8.dp)
                         )
                     }
-                    if (playsPage.isEmpty() && !pageLoading) item { EditorEmptyState(if (isTrash) "La corbeille est vide ou aucun résultat ne correspond." else "Aucune écoute ne correspond à cette recherche.") }
+                    if (playsPage.isEmpty() && pageLoading) item(key = "plays-loading") { EditorLoadingState("Recherche des écoutes…") }
+                    else if (playsPage.isEmpty()) item { EditorEmptyState(if (isTrash) "La corbeille est vide ou aucun résultat ne correspond." else "Aucune écoute ne correspond à cette recherche.") }
                     items(playsPage, key = { "s" + it.scrobble.scrobbleId }) { s ->
                         PlaySelectionRow(
                             scrobble = s, selected = s.scrobble.scrobbleId in selectedPlayIds,
@@ -356,7 +551,7 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
                         )
                     }
                     item(key = if (isTrash) "trash-page-footer" else "plays-page-footer") {
-                        EditorPageFooter(playsPage.size, playsHasMore, pageLoading, "écoutes") { loadMorePlays(isTrash) }
+                        EditorPageFooter(playsPage.size, playsResultCount, playsHasMore, pageLoading, "écoutes") { loadMorePlays(isTrash) }
                     }
                 }
                 EditorTab.REVIEW -> {
@@ -407,13 +602,24 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
                             else Text("L'annulation restaure uniquement cette dernière action et conserve les autres entrées de l'historique.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
                         }
                     }
-                    items(history, key = { "h" + it.id }) { h ->
-                        Column(Modifier.fillMaxWidth().padding(16.dp, 6.dp)) {
-                            Text("${editTypeEmoji(h.type)} ${editTypeLabel(h.type)} · ${editHistoryTarget(h)}", color = theme.text, fontWeight = FontWeight.SemiBold)
+                    if (filteredHistory.isEmpty()) item(key = "history-empty") { EditorEmptyState("Aucune entrée ne correspond aux filtres de l’historique.") }
+                    items(filteredHistory, key = { "h" + it.id }) { h ->
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(14.dp)).background(theme.surface.copy(alpha = 0.72f))
+                                .clickable { historyDetail = h }
+                                .semantics { contentDescription = "Détails de ${editTypeLabel(h.type)} : ${editHistorySummary(h)}" }
+                                .padding(12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${editTypeEmoji(h.type)} ${editTypeLabel(h.type)}", color = theme.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                Text("Détails ›", color = theme.primary, style = MaterialTheme.typography.labelSmall)
+                            }
+                            Text(editHistoryTarget(h), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                             Text("${editHistorySummary(h)} · ${playFmt.format(h.createdAt)}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                             if (!com.novastats.app.data.repository.DataEditorManager.canUndo(h)) Text(
                                 com.novastats.app.data.repository.DataEditorManager.undoUnavailableReason(h),
-                                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp)
                             )
                         }
                     }
@@ -421,9 +627,146 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+
+        if (undoBannerFor != null && historyTop?.id == undoBannerFor && canUndoLatest && operationMessage?.startsWith("✅") == true) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                color = theme.surface, contentColor = theme.text,
+                shape = RoundedCornerShape(14.dp), shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, theme.primary.copy(alpha = 0.35f))
+            ) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(operationMessage ?: "Action terminée", modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { undoBannerFor = null; exec { editor.undo() } }, enabled = !busy && !backupInProgress) {
+                        Text("Annuler", color = theme.primary, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        if ((tab == EditorTab.TRACKS && selectedTrackIds.isNotEmpty()) ||
+            ((tab == EditorTab.PLAYS || tab == EditorTab.TRASH) && selectedPlayIds.isNotEmpty())) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(), color = theme.surface,
+                contentColor = theme.text, shadowElevation = 8.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, theme.accent.copy(alpha = 0.25f))
+            ) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (tab == EditorTab.TRACKS) "${selectedTrackIds.size} titre(s) prêt(s) à modifier"
+                            else "${selectedPlayIds.size} écoute(s) sélectionnée(s)",
+                            color = theme.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { selectedTrackIds = emptySet(); selectedPlayIds = emptySet() }, enabled = !busy && !backupInProgress) {
+                            Text("Tout effacer", color = theme.textSecondary)
+                        }
+                    }
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        when (tab) {
+                            EditorTab.TRACKS -> {
+                                Button(onClick = {
+                                    bulkTrackEditType = "ARTIST"; bulkTargetSearch = ""; bulkTargetSelected = false; bulkTargetId = null
+                                }, enabled = !busy && !backupInProgress, colors = ButtonDefaults.buttonColors(containerColor = theme.primary)) { Text("🎤 Modifier l’artiste") }
+                                Button(onClick = {
+                                    bulkTrackEditType = "ALBUM"; bulkTargetSearch = ""; bulkTargetSelected = false; bulkTargetId = null
+                                }, enabled = !busy && !backupInProgress, colors = ButtonDefaults.buttonColors(containerColor = theme.accent)) { Text("💿 Modifier l’album") }
+                            }
+                            EditorTab.PLAYS -> Button(
+                                onClick = { confirmTrashIds = selectedPlayIds.toList() }, enabled = !busy && !backupInProgress,
+                                colors = ButtonDefaults.buttonColors(containerColor = theme.secondary)
+                            ) { Text("🗑️ Mettre en corbeille") }
+                            EditorTab.TRASH -> {
+                                Button(onClick = { exec { editor.restoreTrashed(selectedPlayIds.toList()) }; selectedPlayIds = emptySet() }, enabled = !busy && !backupInProgress,
+                                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary)) { Text("↩️ Restaurer") }
+                                Button(onClick = { confirmPurgeIds = selectedPlayIds.toList() }, enabled = !busy && !backupInProgress,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))) { Text("⚠️ Purger") }
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
+            }
+        }
     }
 
     action?.let { a -> EditorActionDialog(a, artists, albums, onDismiss = { action = null }, exec = exec, execProtected = execProtected) }
+
+    bulkTrackEditType?.let { editType ->
+        val artistMode = editType == "ARTIST"
+        val selectedTracks = trackPage.filter { it.track.trackId in selectedTrackIds }
+        val targetArtists = remember(artists, bulkTargetSearch) {
+            artists.filter { bulkTargetSearch.isBlank() || it.name.contains(bulkTargetSearch, ignoreCase = true) }
+                .sortedByDescending { it.playCount }.take(8)
+        }
+        val targetAlbums = remember(albums, bulkTargetSearch) {
+            albums.filter { bulkTargetSearch.isBlank() || it.album.title.contains(bulkTargetSearch, ignoreCase = true) || it.artistName.contains(bulkTargetSearch, ignoreCase = true) }
+                .sortedByDescending { it.periodPlays }.take(8)
+        }
+        AlertDialog(
+            onDismissRequest = { bulkTrackEditType = null; bulkTargetSelected = false },
+            containerColor = theme.surface,
+            title = { Text(if (artistMode) "Modifier l’artiste de ${selectedTrackIds.size} titres" else "Modifier l’album de ${selectedTrackIds.size} titres", color = theme.text) },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Choisis une fiche existante. Les fiches et écoutes liées seront mises à jour ensemble ; les collisions de titre sont refusées sans modification partielle. Une seule annulation restaurera le lot.",
+                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = bulkTargetSearch, onValueChange = { bulkTargetSearch = it }, singleLine = true,
+                        label = { Text(if (artistMode) "Rechercher un artiste" else "Rechercher un album") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                    if (!artistMode) {
+                        TextButton(onClick = { bulkTargetSelected = true; bulkTargetId = null }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Aucun album (retirer l’album des titres)", color = if (bulkTargetSelected && bulkTargetId == null) theme.primary else theme.textSecondary)
+                        }
+                    }
+                    if (artistMode) {
+                        targetArtists.forEach { target ->
+                            TextButton(
+                                onClick = { bulkTargetId = target.artistId; bulkTargetSelected = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("🎤 ${target.name} · ${target.playCount} écoutes", color = if (bulkTargetId == target.artistId) theme.primary else theme.text) }
+                        }
+                    } else {
+                        targetAlbums.forEach { target ->
+                            TextButton(
+                                onClick = { bulkTargetId = target.album.albumId; bulkTargetSelected = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("💿 ${target.album.title} — ${target.artistName} · ${target.periodPlays} écoutes", color = if (bulkTargetId == target.album.albumId) theme.primary else theme.text) }
+                        }
+                    }
+                    if (bulkTargetSelected) {
+                        val targetLabel = if (artistMode) artists.firstOrNull { it.artistId == bulkTargetId }?.name ?: "(aucun artiste)"
+                        else albums.firstOrNull { it.album.albumId == bulkTargetId }?.album?.title ?: "(aucun album)"
+                        Text("Aperçu : ${selectedTracks.size} titre(s) → $targetLabel", color = theme.accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                        selectedTracks.take(4).forEach { track ->
+                            Text("• ${track.track.title} — ${track.artistName}${track.albumTitle?.let { " · $it" } ?: ""}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (selectedTracks.size > 4) Text("… et ${selectedTracks.size - 4} autre(s)", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = bulkTargetSelected && selectedTrackIds.isNotEmpty() && (!artistMode || bulkTargetId != null) && !busy && !backupInProgress,
+                    onClick = {
+                        val ids = selectedTrackIds.toList()
+                        val targetId = bulkTargetId
+                        bulkTrackEditType = null
+                        selectedTrackIds = emptySet()
+                        exec {
+                            if (artistMode) editor.setTracksArtistBatch(ids, targetId ?: error("Artiste cible requis"))
+                            else editor.setTracksAlbumBatch(ids, targetId)
+                        }
+                    }
+                ) { Text("Appliquer à ${selectedTrackIds.size} titres", color = theme.primary, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { bulkTrackEditType = null; bulkTargetSelected = false }) { Text("Annuler", color = theme.textSecondary) } }
+        )
+    }
 
     confirmTrashIds?.let { ids ->
         val selectedTitles = playsPage.filter { it.scrobble.scrobbleId in ids }.take(4)
@@ -449,21 +792,81 @@ fun DataEditorScreen(startOnReview: Boolean = false, focusTrackId: Long? = null)
             text = {
                 Column {
                     Text("${ids.size} écoute${if (ids.size > 1) "s" else ""} seront supprimées de la base. Cette action ne peut pas être annulée et les écoutes ne seront plus restaurables.", color = theme.textSecondary)
+                    Text("Une sauvegarde complète et vérifiée, incluant les écoutes de la corbeille, sera créée avant la purge. En cas d’échec, rien ne sera supprimé.", color = theme.primary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                     selectedTitles.forEach { Text("• ${it.title} — ${it.artistName}", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall) }
                     if (ids.size > selectedTitles.size) Text("… et ${ids.size - selectedTitles.size} autre(s)", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = { val chosen = ids.toList(); confirmPurgeIds = null; selectedPlayIds = emptySet(); exec { editor.permanentlyDeleteTrashed(chosen) } }) { Text("Supprimer définitivement", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) } },
+            confirmButton = { TextButton(
+                enabled = !busy && !backupInProgress,
+                onClick = {
+                    val chosen = ids.toList(); confirmPurgeIds = null; selectedPlayIds = emptySet()
+                    execProtected {
+                        val backupFile = BackupWorker.writeBackup(app)
+                        check(BackupExporter.verify(backupFile)) { "La sauvegarde incluant la corbeille est absente ou illisible ; aucune purge n’a été lancée." }
+                        editor.permanentlyDeleteTrashed(chosen)
+                    }
+                }
+            ) { Text("Créer la sauvegarde puis supprimer", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) } },
             dismissButton = { TextButton(onClick = { confirmPurgeIds = null }) { Text("Annuler", color = theme.textSecondary) } }
         )
     }
     if (confirmEmptyTrash) {
         AlertDialog(
-            onDismissRequest = { confirmEmptyTrash = false }, containerColor = theme.surface,
+            onDismissRequest = { confirmEmptyTrash = false; emptyTrashTyped = "" }, containerColor = theme.surface,
             title = { Text("Vider toute la corbeille ?", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) },
-            text = { Text("${trashCount} écoute${if (trashCount > 1) "s" else ""} seront supprimées définitivement. Aucune restauration ne sera possible. Cette purge est irréversible.", color = theme.textSecondary) },
-            confirmButton = { TextButton(onClick = { confirmEmptyTrash = false; exec { editor.emptyTrash() } }) { Text("Vider définitivement", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) } },
-            dismissButton = { TextButton(onClick = { confirmEmptyTrash = false }) { Text("Conserver", color = theme.textSecondary) } }
+            text = {
+                Column {
+                    Text("${trashCount} écoute${if (trashCount > 1) "s" else ""} seront supprimées définitivement. Aucune restauration directe ne sera possible. Cette purge est irréversible.", color = theme.textSecondary)
+                    Text("Une sauvegarde complète et vérifiée comprenant la corbeille sera créée avant suppression. Si sa vérification échoue, la purge sera annulée.", color = theme.primary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    OutlinedTextField(
+                        value = emptyTrashTyped, onValueChange = { emptyTrashTyped = it }, singleLine = true,
+                        label = { Text("Tape VIDER pour confirmer") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = { TextButton(
+                enabled = emptyTrashTyped.trim().equals("VIDER", ignoreCase = true) && !busy && !backupInProgress,
+                onClick = {
+                    confirmEmptyTrash = false; emptyTrashTyped = ""
+                    execProtected {
+                        val backupFile = BackupWorker.writeBackup(app)
+                        check(BackupExporter.verify(backupFile)) { "La sauvegarde incluant la corbeille est absente ou illisible ; aucune purge n’a été lancée." }
+                        editor.emptyTrash()
+                    }
+                }
+            ) { Text("Sauvegarder puis vider définitivement", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) } },
+            dismissButton = { TextButton(onClick = { confirmEmptyTrash = false; emptyTrashTyped = "" }) { Text("Conserver", color = theme.textSecondary) } }
+        )
+    }
+
+    historyDetail?.let { entry ->
+        val isLatestUndoable = history.firstOrNull()?.id == entry.id && com.novastats.app.data.repository.DataEditorManager.canUndo(entry)
+        AlertDialog(
+            onDismissRequest = { historyDetail = null }, containerColor = theme.surface,
+            title = { Text("${editTypeEmoji(entry.type)} ${editTypeLabel(entry.type)}", color = theme.text, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    Text(editHistoryTarget(entry), color = theme.accent, fontWeight = FontWeight.SemiBold)
+                    Text(playFmt.format(entry.createdAt), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+                    Text(editHistorySummary(entry), color = theme.text, modifier = Modifier.padding(top = 10.dp))
+                    entry.before?.takeIf { it.isNotBlank() }?.let { Text("Avant : $it", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) }
+                    entry.after?.takeIf { it.isNotBlank() }?.let { Text("Après : $it", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
+                    when (entry.type) {
+                        "MERGE" -> Text("Cette fusion n’est pas annulable depuis l’historique. Consulte la sauvegarde de sécurité si tu dois revenir en arrière.", color = Color(0xFFB3261E), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+                        "TRASH_PURGE" -> Text("La purge ne peut pas être annulée depuis l’application. Les purges effectuées avec la version actuelle créent d’abord une sauvegarde vérifiée contenant les éléments de la corbeille.", color = Color(0xFFB3261E), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+                        else -> if (!com.novastats.app.data.repository.DataEditorManager.canUndo(entry)) Text(
+                            com.novastats.app.data.repository.DataEditorManager.undoUnavailableReason(entry),
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (isLatestUndoable) TextButton(onClick = { historyDetail = null; exec { editor.undo() } }) { Text("Annuler cette action", color = theme.primary, fontWeight = FontWeight.Bold) }
+                else TextButton(onClick = { historyDetail = null }) { Text("Fermer", color = theme.textSecondary) }
+            },
+            dismissButton = { if (isLatestUndoable) TextButton(onClick = { historyDetail = null }) { Text("Fermer", color = theme.textSecondary) } }
         )
     }
 
@@ -590,15 +993,48 @@ private fun EditorMetricCard(
 }
 
 @Composable
+private fun TrackSelectionRow(
+    track: RankedTrack, selected: Boolean, onSelected: (Boolean) -> Unit, onClick: () -> Unit
+) {
+    val theme = Nova.theme
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.58f))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "${track.track.title}, ${track.artistName}, ${track.periodPlays} écoutes. Appuyer pour les détails." }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = selected,
+            onCheckedChange = onSelected,
+            colors = CheckboxDefaults.colors(checkedColor = theme.accent),
+            modifier = Modifier.semantics { contentDescription = "Sélectionner ${track.track.title}" }
+        )
+        CoverArt(track.track.coverUrl, track.track.title, size = 40)
+        Spacer(Modifier.width(9.dp))
+        Column(Modifier.weight(1f)) {
+            Text(track.track.title, color = theme.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${track.artistName}${track.albumTitle?.let { " · $it" } ?: ""} · ${track.periodPlays} ▶", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text("✏️", color = theme.primary)
+    }
+}
+
+@Composable
 private fun PlaySelectionRow(
     scrobble: RecentScrobble, selected: Boolean, onSelected: (Boolean) -> Unit, onClick: () -> Unit
 ) {
     val theme = Nova.theme
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.58f))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "${scrobble.title}, ${scrobble.artistName}, écoute du ${playFmt.format(scrobble.scrobble.startedAt)}. Appuyer pour les détails." }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Checkbox(checked = selected, onCheckedChange = onSelected, colors = CheckboxDefaults.colors(checkedColor = theme.accent))
+        Checkbox(checked = selected, onCheckedChange = onSelected, colors = CheckboxDefaults.colors(checkedColor = theme.accent), modifier = Modifier.semantics { contentDescription = "Sélectionner l’écoute ${scrobble.title}" })
         CoverArt(scrobble.coverUrl, scrobble.title, size = 40)
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
@@ -613,11 +1049,29 @@ private fun PlaySelectionRow(
 }
 
 @Composable
-private fun EditorPageFooter(loaded: Int, hasMore: Boolean, loading: Boolean, unit: String, onLoadMore: () -> Unit) {
+private fun EditorLoadingState(message: String) {
+    val theme = Nova.theme
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        repeat(3) { index ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.width(42.dp).height(42.dp).clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.85f)))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Spacer(Modifier.fillMaxWidth(if (index == 0) 0.72f else 0.56f).height(13.dp).clip(RoundedCornerShape(8.dp)).background(theme.surface.copy(alpha = 0.8f)))
+                    Spacer(Modifier.fillMaxWidth(0.42f).height(10.dp).clip(RoundedCornerShape(8.dp)).background(theme.surface.copy(alpha = 0.55f)))
+                }
+            }
+        }
+        Text(message, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun EditorPageFooter(loaded: Int, total: Int, hasMore: Boolean, loading: Boolean, unit: String, onLoadMore: () -> Unit) {
     val theme = Nova.theme
     val itemLabel = when (unit) {
-        "écoutes" -> "$loaded écoute${if (loaded > 1) "s" else ""} chargée${if (loaded > 1) "s" else ""}"
-        else -> "$loaded titre${if (loaded > 1) "s" else ""} chargé${if (loaded > 1) "s" else ""}"
+        "écoutes" -> "$loaded sur $total écoute${if (total > 1) "s" else ""}"
+        else -> "$loaded sur $total titre${if (total > 1) "s" else ""}"
     }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(itemLabel, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -707,9 +1161,7 @@ private fun DuplicatesPopup(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = on, onCheckedChange = { selected = if (it) selected + p.key else selected - p.key }, colors = CheckboxDefaults.colors(checkedColor = theme.accent))
                     Column(Modifier.weight(1f)) {
-                        DupLine(gone, label = "Disparaît", labelColor = theme.textSecondary)
-                        Text("   ⬇ fusionné dans", color = theme.accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        DupLine(keep, label = "Conservé", labelColor = theme.accent)
+                        MergeComparisonPreview(gone, keep)
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -734,7 +1186,7 @@ private fun DuplicatesPopup(
             onDismissRequest = { confirmMerge = false }, containerColor = theme.surface,
             title = { Text("Confirmer ${chosenPairs.size} fusion${if (chosenPairs.size > 1) "s" else ""} ?", color = theme.text) },
             text = {
-                Column {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                     Text("Les éléments indiqués « Disparaît » seront transférés vers « Conservé ». Pour les titres, deux écoutes au même horodatage sont traitées comme un doublon et l'une est supprimée. La fusion n'est pas annulable. Une sauvegarde JSON sera créée et vérifiée avant le lot ; si une paire échoue, les autres peuvent déjà avoir été appliquées et le résultat précisera les réussites/échecs.", color = theme.textSecondary)
                     chosenPairs.take(6).forEach { pair ->
                         val keep = if (pair.key in swapped) pair.from else pair.into
@@ -757,16 +1209,35 @@ private fun DuplicatesPopup(
 }
 
 @Composable
-private fun DupLine(side: DupSide, label: String, labelColor: Color) {
+private fun MergeComparisonPreview(source: DupSide, target: DupSide) {
     val theme = Nova.theme
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-        CoverArt(side.cover, side.title, size = 36, circle = side.circle)
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(side.title, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${side.subtitle} · ${side.plays} ▶", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Text(label, color = labelColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+    Row(
+        Modifier.fillMaxWidth().padding(top = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        MergeComparisonSide(Modifier.weight(1f), source, "DISPARAÎT", theme.secondary)
+        Text("→", color = theme.accent, fontWeight = FontWeight.Black)
+        MergeComparisonSide(Modifier.weight(1f), target, "CONSERVÉ", theme.primary)
+    }
+}
+
+@Composable
+private fun MergeComparisonSide(modifier: Modifier, side: DupSide, label: String, accent: Color) {
+    val theme = Nova.theme
+    Column(
+        modifier.clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.72f))
+            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .semantics { contentDescription = "$label : ${side.title}, ${side.subtitle}, ${side.plays} écoutes" }
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.height(6.dp))
+        CoverArt(side.cover, side.title, size = 44, circle = side.circle)
+        Text(side.title, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 5.dp))
+        Text(side.subtitle.ifBlank { "Sans précision" }, color = theme.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
+        Text("${side.plays} écoutes", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
     }
 }
 
@@ -775,7 +1246,8 @@ private val playFmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
 private fun editTypeEmoji(t: String) = when (t) {
     "RENAME" -> "✏️"; "MERGE", "LINK_VERSION" -> "🔗"; "DELETE_PLAY", "TRASH_PURGE" -> "🗑️"
     "TRASH_RESTORE" -> "↩️"; "ARTIST_CHANGE" -> "🎤"; "ALBUM_CHANGE", "ALBUM_SHARED" -> "💿"
-    "COVER_CHANGE" -> "🖼️"; "GHOST_PURGE" -> "⚠️"; else -> "✅"
+    "COVER_CHANGE" -> "🖼️"; "GHOST_PURGE" -> "⚠️"
+    "BATCH_ARTIST_CHANGE" -> "🎤"; "BATCH_ALBUM_CHANGE" -> "💿"; else -> "✅"
 }
 
 private fun editTypeLabel(t: String) = when (t) {
@@ -785,18 +1257,25 @@ private fun editTypeLabel(t: String) = when (t) {
     "ALBUM_CHANGE" -> "Changement d'album"; "ALBUM_SHARED" -> "Marquage multi-artistes"
     "COVER_CHANGE" -> "Modification d'image"; "REVIEWED" -> "Marqué comme correct"
     "REVIEW_IGNORE" -> "Correction ignorée"; "REVIEW_FIX" -> "Correction des métadonnées"
-    "GHOST_PURGE" -> "Nettoyage définitif"; else -> t.replace('_', ' ').lowercase()
+    "GHOST_PURGE" -> "Nettoyage définitif"
+    "BATCH_ARTIST_CHANGE" -> "Artiste modifié en lot"; "BATCH_ALBUM_CHANGE" -> "Album modifié en lot"
+    else -> t.replace('_', ' ').lowercase()
 }
 
 private fun editHistorySummary(entry: com.novastats.app.data.db.entity.EditHistoryEntity): String = when (entry.type) {
     "DELETE_PLAY" -> "${entry.extraData?.toIntOrNull()?.let { "$it écoute(s)" } ?: "Écoutes sélectionnées"} déplacée(s) vers la corbeille"
     "TRASH_RESTORE" -> "${entry.extraData?.toIntOrNull()?.let { "$it écoute(s)" } ?: "Écoutes sélectionnées"} restaurée(s)"
     "TRASH_PURGE" -> "Purge définitive · ${entry.before ?: "corbeille"}"
+    "BATCH_ARTIST_CHANGE" -> "${entry.before ?: "Lot de titres"} → artiste « ${entry.after ?: "—"} »"
+    "BATCH_ALBUM_CHANGE" -> "${entry.before ?: "Lot de titres"} → album « ${entry.after ?: "—"} »"
     else -> "${entry.before ?: "—"} → ${entry.after ?: "—"}"
 }
 
-private fun editHistoryTarget(entry: com.novastats.app.data.db.entity.EditHistoryEntity): String =
-    if (entry.type == "TRASH_PURGE" && entry.entityId == 0L) "corbeille entière" else "${entry.entityType} #${entry.entityId}"
+private fun editHistoryTarget(entry: com.novastats.app.data.db.entity.EditHistoryEntity): String = when {
+    entry.type == "TRASH_PURGE" && entry.entityId == 0L -> "corbeille entière"
+    entry.entityType == "TRACK_BATCH" -> "${entry.before ?: "Lot de titres"} (ID de référence #${entry.entityId})"
+    else -> "${entry.entityType} #${entry.entityId}"
+}
 
 private sealed interface EditorAction {
     data class Track(val t: RankedTrack) : EditorAction
@@ -808,7 +1287,14 @@ private sealed interface EditorAction {
 @Composable
 private fun EditorRow(title: String, subtitle: String, cover: String?, circle: Boolean = false, onClick: () -> Unit) {
     val theme = Nova.theme
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.58f))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "$title. $subtitle. Appuyer pour modifier." }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         CoverArt(cover, title, size = 40, circle = circle)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -835,11 +1321,15 @@ private fun EditorActionDialog(
     var trackMergeTargets by remember { mutableStateOf<List<RankedTrack>>(emptyList()) }
     var trackMergeLoading by remember { mutableStateOf(false) }
     var pendingMerge by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var pendingMergeFromSide by remember { mutableStateOf<DupSide?>(null) }
+    var pendingMergeToSide by remember { mutableStateOf<DupSide?>(null) }
     var pendingMergeDescription by remember { mutableStateOf("") }
     LaunchedEffect(action) {
         mode = "MENU"
         pick = ""
         pendingMerge = null
+        pendingMergeFromSide = null
+        pendingMergeToSide = null
         text = when (action) { is EditorAction.Track -> action.t.track.title; is EditorAction.Artist -> action.a.name; is EditorAction.Album -> action.al.album.title; is EditorAction.Play -> "" }
     }
     LaunchedEffect(action, mode, pick) {
@@ -850,7 +1340,7 @@ private fun EditorActionDialog(
                 delay(180)
                 val sourceId = action.t.track.trackId
                 trackMergeTargets = withContext(Dispatchers.IO) {
-                    app.database.trackDao().searchEditorPage(pick.trim(), "ALL", 8, 0).filterNot { it.track.trackId == sourceId }
+                    app.database.trackDao().searchEditorPage(pick.trim(), "ALL", TrackEditorSort.MOST_PLAYED.key, 8, 0).filterNot { it.track.trackId == sourceId }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
@@ -866,9 +1356,11 @@ private fun EditorActionDialog(
         is EditorAction.Track -> "🎵 ${action.t.track.title}"; is EditorAction.Artist -> "🎤 ${action.a.name}"
         is EditorAction.Album -> "💿 ${action.al.album.title}"; is EditorAction.Play -> "▶ ${action.title}"
     }
-    fun stageMerge(from: Long, into: Long, description: String) {
+    fun stageMerge(from: Long, into: Long, description: String, fromSide: DupSide, toSide: DupSide) {
         pendingMerge = from to into
         pendingMergeDescription = description
+        pendingMergeFromSide = fromSide
+        pendingMergeToSide = toSide
         mode = "CONFIRM_MERGE"
     }
 
@@ -876,7 +1368,7 @@ private fun EditorActionDialog(
         onDismissRequest = onDismiss, containerColor = theme.surface, titleContentColor = theme.text, textContentColor = theme.textSecondary,
         title = { Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 when (mode) {
                     "MENU" -> {
                         when (action) {
@@ -937,12 +1429,16 @@ private fun EditorActionDialog(
                         when (action) {
                             is EditorAction.Artist -> artists.filter { it.artistId != action.a.artistId && (q.isEmpty() || it.name.lowercase().contains(q)) }.take(8).forEach { target ->
                                 MenuItem("🎤 ${target.name} (${target.playCount} ▶)") {
-                                    stageMerge(action.a.artistId, target.artistId, "L'artiste « ${action.a.name} » disparaîtra ; ses titres et écoutes seront transférés vers « ${target.name} ». Les albums et titres homonymes pourront aussi être fusionnés.")
+                                    val fromSide = DupSide(action.a.artistId, action.a.name, "${action.a.distinctTracks} titres", action.a.photoUrl, action.a.playCount, circle = true)
+                                    val toSide = DupSide(target.artistId, target.name, "${target.distinctTracks} titres", target.photoUrl, target.playCount, circle = true)
+                                    stageMerge(action.a.artistId, target.artistId, "L'artiste « ${action.a.name} » disparaîtra ; ses titres et écoutes seront transférés vers « ${target.name} ». Les albums et titres homonymes pourront aussi être fusionnés.", fromSide, toSide)
                                 }
                             }
                             is EditorAction.Album -> albums.filter { it.album.albumId != action.al.album.albumId && (q.isEmpty() || it.album.title.lowercase().contains(q)) }.take(8).forEach { target ->
                                 MenuItem("💿 ${target.album.title} — ${target.artistName}") {
-                                    stageMerge(action.al.album.albumId, target.album.albumId, "L'album « ${action.al.album.title} » disparaîtra ; ses titres et écoutes seront transférés vers « ${target.album.title} ».")
+                                    val fromSide = DupSide(action.al.album.albumId, action.al.album.title, action.al.artistName, action.al.album.coverUrl, action.al.album.playCount)
+                                    val toSide = DupSide(target.album.albumId, target.album.title, target.artistName, target.album.coverUrl, target.album.playCount)
+                                    stageMerge(action.al.album.albumId, target.album.albumId, "L'album « ${action.al.album.title} » disparaîtra ; ses titres et écoutes seront transférés vers « ${target.album.title} ».", fromSide, toSide)
                                 }
                             }
                             is EditorAction.Track -> {
@@ -950,7 +1446,9 @@ private fun EditorActionDialog(
                                 else if (trackMergeTargets.isEmpty()) Text("Aucun titre cible trouvé.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                                 trackMergeTargets.forEach { target ->
                                     MenuItem("🎵 ${target.track.title} — ${target.artistName}") {
-                                        stageMerge(action.t.track.trackId, target.track.trackId, "Le titre « ${action.t.track.title} » sera fusionné dans « ${target.track.title} ». Ses écoutes seront déplacées ; celles partageant le même horodatage que la cible seront traitées comme doublons et supprimées.")
+                                        val fromSide = DupSide(action.t.track.trackId, action.t.track.title, listOfNotNull(action.t.artistName, action.t.albumTitle).joinToString(" · "), action.t.track.coverUrl, action.t.track.playCount)
+                                        val toSide = DupSide(target.track.trackId, target.track.title, listOfNotNull(target.artistName, target.albumTitle).joinToString(" · "), target.track.coverUrl, target.track.playCount)
+                                        stageMerge(action.t.track.trackId, target.track.trackId, "Le titre « ${action.t.track.title} » sera fusionné dans « ${target.track.title} ». Ses écoutes seront déplacées ; celles partageant le même horodatage que la cible seront traitées comme doublons et supprimées.", fromSide, toSide)
                                     }
                                 }
                             }
@@ -959,16 +1457,25 @@ private fun EditorActionDialog(
                     }
                     "CONFIRM_MERGE" -> {
                         Text(pendingMergeDescription, color = theme.text)
-                        Text("Cette fusion n'est pas annulable depuis l'historique. Une sauvegarde sera créée puis vérifiée ; en cas d'échec, la fusion ne sera pas exécutée.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                        val source = pendingMergeFromSide
+                        val target = pendingMergeToSide
+                        if (source != null && target != null) MergeComparisonPreview(source, target)
+                        Text("Cette fusion n’est pas annulable depuis l’historique. Une sauvegarde complète sera créée et vérifiée avant l’exécution ; si elle échoue, la fusion ne sera pas lancée.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                     }
                     "CONFIRM_PLAY_TRASH" -> Text(
                         "Écoute du ${playFmt.format((action as EditorAction.Play).s.startedAt)} : elle sera retirée des statistiques et placée dans la corbeille. Tu pourras la restaurer ensuite.",
                         color = theme.textSecondary
                     )
-                    "CONFIRM_PLAY_PURGE" -> Text(
-                        "Écoute du ${playFmt.format((action as EditorAction.Play).s.startedAt)} : elle sera supprimée définitivement de la base. Cette action est irréversible.",
-                        color = Color(0xFFB3261E)
-                    )
+                    "CONFIRM_PLAY_PURGE" -> Column {
+                        Text(
+                            "Écoute du ${playFmt.format((action as EditorAction.Play).s.startedAt)} : elle sera supprimée définitivement de la base. Cette action est irréversible.",
+                            color = Color(0xFFB3261E)
+                        )
+                        Text(
+                            "Une sauvegarde vérifiée, incluant la corbeille, sera créée avant la suppression. Si elle échoue, l’écoute sera conservée.",
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
                 }
             }
         },
@@ -995,8 +1502,12 @@ private fun EditorActionDialog(
                     exec { editor.deleteScrobble(action.s.scrobbleId) }; onDismiss()
                 }) { Text("Mettre à la corbeille", color = theme.primary, fontWeight = FontWeight.Bold) }
                 action is EditorAction.Play && action.trashed && mode == "CONFIRM_PLAY_PURGE" -> TextButton(onClick = {
-                    exec { editor.permanentlyDeleteTrashed(listOf(action.s.scrobbleId)) }; onDismiss()
-                }) { Text("Supprimer définitivement", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) }
+                    execProtected {
+                        val backupFile = BackupWorker.writeBackup(app)
+                        check(BackupExporter.verify(backupFile)) { "La sauvegarde incluant la corbeille est absente ou illisible ; aucune purge n’a été lancée." }
+                        editor.permanentlyDeleteTrashed(listOf(action.s.scrobbleId))
+                    }; onDismiss()
+                }) { Text("Sauvegarder puis supprimer", color = Color(0xFFB3261E), fontWeight = FontWeight.Bold) }
                 mode == "RENAME" -> TextButton(onClick = {
                     exec {
                         when (action) {

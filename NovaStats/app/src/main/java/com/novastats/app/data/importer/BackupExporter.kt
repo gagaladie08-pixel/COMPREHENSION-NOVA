@@ -13,9 +13,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 📤 Export JSON NovaStats v2.3 — rétro-compatible v1 : les clés `songs` / `plays` sont exactement celles du format
- * legacy (donc ré-importables par [LegacyBackupImporter]), enrichies des liens de versions, du statut / horodatage
- * de validation des écoutes, des artistes, albums, certifications, Panthéon, Hall of Fame et de l'historique d'édition.
+ * 📤 Export JSON NovaStats v2.4 — rétro-compatible v1 : les clés `songs` / `plays` restent ré-importables, et
+ * `trashed_plays` préserve les écoutes de la corbeille pour les sauvegardes pré-purge sans les réintégrer aux stats.
+ * Le fichier conserve aussi les liens de versions, métadonnées, certifications, Panthéon, Hall of Fame et historique.
  */
 @Serializable
 data class NovaExport(
@@ -34,10 +34,30 @@ data class NovaExport(
     val hall_of_fame: List<ExportHof> = emptyList(),
     val edit_history: List<ExportEdit> = emptyList(),
     val artist_exceptions: List<String> = emptyList(),
-    val album_overrides: List<ExportAlbumOverride> = emptyList()
+    val album_overrides: List<ExportAlbumOverride> = emptyList(),
+    /** Écoutes retirées des statistiques, préservées séparément afin qu'un backup avant purge puisse les restaurer. */
+    val trashed_plays: List<ExportTrashedPlay> = emptyList()
 ) {
-    companion object { const val FORMAT_VERSION = "2.3" }
+    companion object { const val FORMAT_VERSION = "2.4" }
 }
+
+@Serializable data class ExportTrashedPlay(
+    val songId: Long,
+    val playedAt: Long,
+    val listenedDuration: Long,
+    val validatedAt: Long? = null,
+    val endedAt: Long? = null,
+    val sourceApp: String? = null,
+    val detectionSource: String = "IMPORT",
+    val confidenceScore: Int = 100,
+    val isSkip: Boolean = false,
+    val needsReview: Boolean = false,
+    val reviewReason: String? = null,
+    val rawTitle: String? = null,
+    val rawArtist: String? = null,
+    val rawAlbum: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
 
 @Serializable data class ExportArtist(val id: Long, val name: String, val photoUrl: String? = null, val playCount: Int = 0)
 @Serializable data class ExportAlbum(val id: Long, val title: String, val artistId: Long? = null, val coverUrl: String? = null, val playCount: Int = 0)
@@ -48,16 +68,16 @@ data class NovaExport(
 @Serializable data class ExportHof(val entityId: Long, val entityType: String, val periodType: String, val entryType: String, val entryDate: String)
 @Serializable data class ExportEdit(val type: String, val entityType: String, val entityId: Long, val before: String? = null, val after: String? = null, val createdAt: Long)
 
-data class ExportSummary(val songs: Int, val plays: Int, val artists: Int, val albums: Int, val bytes: Int)
+data class ExportSummary(val songs: Int, val plays: Int, val artists: Int, val albums: Int, val bytes: Int, val trashedPlays: Int = 0)
 
 object BackupExporter {
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
-    fun fileName(): String = "nova_backup_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date()) + ".json"
+    fun fileName(): String = "nova_backup_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date()) + ".json"
 
-    suspend fun build(db: NovaDatabase, appVersion: String): Pair<String, ExportSummary> {
-        val tracks = db.trackDao().allPlayed()
+    suspend fun build(db: NovaDatabase, appVersion: String, includeTrashedPlays: Boolean = true): Pair<String, ExportSummary> {
+        val tracks = if (includeTrashedPlays) db.trackDao().allForBackup() else db.trackDao().allPlayed()
         val artists = db.artistDao().allPlayedList()
         val artistName = artists.associate { it.artistId to it.name }
         val albums = db.albumDao().all()
@@ -83,6 +103,25 @@ object BackupExporter {
                     validatedAt = it.validatedAt
                 )
             }
+        val trashedPlays = if (includeTrashedPlays) db.scrobbleDao().allTrashedOrdered().map {
+            ExportTrashedPlay(
+                songId = it.trackId,
+                playedAt = it.startedAt,
+                listenedDuration = it.durationListenedMs,
+                validatedAt = it.validatedAt,
+                endedAt = it.endedAt,
+                sourceApp = it.sourceApp,
+                detectionSource = it.detectionSource,
+                confidenceScore = it.confidenceScore,
+                isSkip = it.isSkip,
+                needsReview = it.needsReview,
+                reviewReason = it.reviewReason,
+                rawTitle = it.rawTitle,
+                rawArtist = it.rawArtist,
+                rawAlbum = it.rawAlbum,
+                createdAt = it.createdAt
+            )
+        } else emptyList()
 
         val export = NovaExport(
             export_date = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(Date()),
@@ -96,10 +135,11 @@ object BackupExporter {
             hall_of_fame = db.hallOfFameDao().all().map { ExportHof(it.entityId, it.entityType, it.periodType, it.entryType, it.entryDate) },
             edit_history = db.editorDao().historyList().map { ExportEdit(it.type, it.entityType, it.entityId, it.before, it.after, it.createdAt) },
             artist_exceptions = db.artistExceptionDao().allList().map { it.name },
-            album_overrides = db.editorDao().correctionsOfType(com.novastats.app.data.repository.LibraryRepository.CORRECTION_ALBUM_SHARED).map { ExportAlbumOverride(it.originalValue, it.correctedValue == "1") }
+            album_overrides = db.editorDao().correctionsOfType(com.novastats.app.data.repository.LibraryRepository.CORRECTION_ALBUM_SHARED).map { ExportAlbumOverride(it.originalValue, it.correctedValue == "1") },
+            trashed_plays = trashedPlays
         )
         val text = json.encodeToString(NovaExport.serializer(), export)
-        return text to ExportSummary(songs.size, plays.size, artists.size, albums.size, text.toByteArray().size)
+        return text to ExportSummary(songs.size, plays.size, artists.size, albums.size, text.toByteArray().size, trashedPlays.size)
     }
 
     /** Lit `nova_version` d'un fichier (null = format v1 legacy). */
@@ -108,12 +148,15 @@ object BackupExporter {
     }.getOrNull()
 
     /** Vérifie qu'un backup écrit est un JSON NovaStats complet et décodable avant une opération destructive en lot. */
-    fun verify(file: File): Boolean {
+    fun verify(file: File, expectedTrashedPlays: Int? = null): Boolean {
         if (!file.isFile || file.length() <= 0L) return false
         return runCatching {
             val text = file.readText()
             val export = json.decodeFromString(NovaExport.serializer(), text)
-            export.nova_version == NovaExport.FORMAT_VERSION && export.version == 1 && export.exportedAt > 0L
+            export.nova_version == NovaExport.FORMAT_VERSION &&
+                export.version == 1 &&
+                export.exportedAt > 0L &&
+                (expectedTrashedPlays == null || export.trashed_plays.size == expectedTrashedPlays)
         }.getOrDefault(false)
     }
 

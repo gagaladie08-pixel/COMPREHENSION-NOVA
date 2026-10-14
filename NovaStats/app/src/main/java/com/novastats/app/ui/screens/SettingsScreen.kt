@@ -695,7 +695,7 @@ private fun DataPage() {
         SectionTitle("📤 Export / 📥 Import JSON")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                Text("Format NovaStats v2.3 : compatible avec l'ancien format v1 (songs + plays), avec liens de versions, horodatages de validation et données enrichies.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("Format NovaStats v2.4 : compatible avec l'ancien format v1 (songs + plays). Les écoutes de la corbeille sont conservées séparément dans les backups afin de pouvoir être restaurées sans compter dans les statistiques.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
@@ -706,7 +706,7 @@ private fun DataPage() {
                                     BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
                                 }
                                 pendingExport = text
-                                status = "${summary.songs} titres · ${summary.plays} écoutes · ${summary.bytes / 1024} Ko"
+                                status = "${summary.songs} titres · ${summary.plays} écoutes · ${summary.trashedPlays} corbeille · ${summary.bytes / 1024} Ko"
                                 saver.launch(BackupExporter.fileName())
                             } catch (e: CancellationException) {
                                 throw e

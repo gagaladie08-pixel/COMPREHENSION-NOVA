@@ -48,10 +48,24 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         fun existing(context: Context): List<File> = dir(context).listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedByDescending { it.lastModified() }
 
         suspend fun writeBackup(app: NovaStatsApp): File {
-            val (text, _) = BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
-            val file = File(dir(app), BackupExporter.fileName())
-            file.writeText(text)
-            check(BackupExporter.verify(file)) { "La sauvegarde écrite est absente ou illisible." }
+            val (text, summary) = BackupExporter.build(app.database, BuildConfig.VERSION_NAME, includeTrashedPlays = true)
+            val directory = dir(app)
+            val file = File(directory, BackupExporter.fileName())
+            val temporary = File(directory, "${file.name}.tmp")
+            try {
+                temporary.writeText(text)
+                check(BackupExporter.verify(temporary, expectedTrashedPlays = summary.trashedPlays)) {
+                    "La sauvegarde temporaire est absente, illisible ou ne contient pas toutes les écoutes de la corbeille."
+                }
+                check(!file.exists()) { "Un fichier de sauvegarde porte déjà ce nom ; aucune opération destructive ne sera lancée." }
+                check(temporary.renameTo(file)) { "Impossible de finaliser le fichier de sauvegarde ; aucune opération destructive ne sera lancée." }
+                if (!BackupExporter.verify(file, expectedTrashedPlays = summary.trashedPlays)) {
+                    file.delete()
+                    error("La sauvegarde finalisée est illisible ou incomplète ; aucune opération destructive ne sera lancée.")
+                }
+            } finally {
+                if (temporary.exists()) temporary.delete()
+            }
             existing(app).drop(KEEP).forEach { it.delete() }
             app.settings.setLastBackupAt(System.currentTimeMillis())
             return file
