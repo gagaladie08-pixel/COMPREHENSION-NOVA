@@ -9,7 +9,7 @@ import org.junit.Test
 class DataEditorUndoPolicyTest {
     @Test
     fun onlyActionsWithRestorableStateAreMarkedUndoable() {
-        assertTrue(DataEditorManager.canUndo(entry("RENAME")))
+        assertTrue(DataEditorManager.canUndo(entry("RENAME", entityType = "TRACK")))
         assertFalse(DataEditorManager.canUndo(entry("RENAME", before = null, entityType = "TRACK")))
         assertTrue(DataEditorManager.canUndo(entry("ALBUM_CHANGE", before = null, entityType = "TRACK")))
         assertFalse(DataEditorManager.canUndo(entry("ARTIST_CHANGE", before = "Featuring Artist", entityType = "TRACK")))
