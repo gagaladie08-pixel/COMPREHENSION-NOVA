@@ -550,14 +550,14 @@ object ShareCards {
         val gap = 21f
         val cardWidth = (W - 144f - gap * 2f) / 3f
         val pillars = listOf(
-            Triple("HOT 100", visual.trackName, visual.trackImageUrl) to Color(0xFF65C7FF).toArgb(),
+            Triple("HOT 100", visual.trackName, visual.trackImageUrl) to 0xFF65C7FF.toInt(),
             Triple("ARTIST 50", visual.artistName, visual.artistImageUrl) to violet,
             Triple("ALBUMS 75", visual.albumName, visual.albumImageUrl) to 0xFFFFC86B.toInt()
         )
         pillars.forEachIndexed { index, (pillar, color) ->
             val left = 72f + index * (cardWidth + gap)
             val rect = RectF(left, cardTop, left + cardWidth, cardBottom)
-            c.drawRoundRect(rect, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = withAlpha(theme.surface.toArgb(), 0.82f) })
+            c.drawRoundRect(rect, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = withAlpha(theme.surface.toArgb(), 0.82f) })
             c.drawRoundRect(rect, 28f, 28f, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f; this.color = withAlpha(color, 0.74f) })
             c.drawText(pillar.first, rect.centerX(), rect.top + 54f, textPaint(bold, 23f, color).apply { textAlign = Paint.Align.CENTER; letterSpacing = 0.08f })
             val imageRect = RectF(rect.left + 35f, rect.top + 82f, rect.right - 35f, rect.top + 322f)
