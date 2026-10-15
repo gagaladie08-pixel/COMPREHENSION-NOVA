@@ -116,6 +116,10 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.THRESHOLD] = sec }
     }
     suspend fun setWhitelist(apps: Set<String>) = context.dataStore.edit { it[Keys.WHITELIST] = apps }
+    suspend fun setWhitelistApp(packageName: String, allowed: Boolean) = context.dataStore.edit { prefs ->
+        val current = prefs[Keys.WHITELIST] ?: emptySet()
+        prefs[Keys.WHITELIST] = if (allowed) current + packageName else current - packageName
+    }
     suspend fun setBlacklistArtists(v: Set<String>) = context.dataStore.edit { it[Keys.BLACKLIST_ARTISTS] = v }
     suspend fun setBlacklistKeywords(v: Set<String>) = context.dataStore.edit { it[Keys.BLACKLIST_KEYWORDS] = v }
     suspend fun setFilterLongTracks(v: Boolean) = context.dataStore.edit { it[Keys.FILTER_LONG_TRACKS] = v }

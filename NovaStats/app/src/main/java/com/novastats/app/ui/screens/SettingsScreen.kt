@@ -85,6 +85,7 @@ import java.util.Locale
 /** Sous-pages de ⚙️ Paramètres. */
 enum class SettingsPage(val emoji: String, val title: String, val subtitle: String) {
     DETECTION("🎵", "Détection", "Seuil, apps sources, blacklist, filtres"),
+    SOURCE_APPS("📱", "Applications sources", "Choisir les applications suivies"),
     APPEARANCE("🎨", "Apparence", "15 thèmes néon · taille du texte · retour haptique"),
     NOTIFICATIONS("🔔", "Notifications", "Récompenses, vérifications, Awards et charts"),
     DATA("🗄️", "Données", "Export / import, liens manuels, sauvegarde auto, suppression"),
@@ -116,13 +117,20 @@ fun SettingsScreen() {
             com.novastats.app.ui.navigation.PendingNav.consume()
         }
     }
-    BackHandler(enabled = page != null) { page = null; editorReview = false; editorFocus = null }
+    BackHandler(enabled = page != null) {
+        if (page == SettingsPage.SOURCE_APPS) page = SettingsPage.DETECTION
+        else { page = null; editorReview = false; editorFocus = null }
+    }
     val current = page
     if (current == null) SettingsHome { page = it }
     else Column(Modifier.fillMaxSize()) {
-        SubPageHeader(current) { page = null }
+        SubPageHeader(current) { page = if (current == SettingsPage.SOURCE_APPS) SettingsPage.DETECTION else null }
         when (current) {
-            SettingsPage.DETECTION -> DetectionPage(onOpenReview = { editorReview = true; editorFocus = null; page = SettingsPage.EDITOR })
+            SettingsPage.DETECTION -> DetectionPage(
+                onOpenReview = { editorReview = true; editorFocus = null; page = SettingsPage.EDITOR },
+                onOpenSourceApps = { page = SettingsPage.SOURCE_APPS }
+            )
+            SettingsPage.SOURCE_APPS -> SourceAppsPage()
             SettingsPage.APPEARANCE -> AppearancePage(onOpenCustom = { page = SettingsPage.CUSTOM_THEME })
             SettingsPage.NOTIFICATIONS -> NotificationsPage()
             SettingsPage.DATA -> DataPage()
@@ -199,7 +207,7 @@ private fun SettingsHome(onOpen: (SettingsPage) -> Unit) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        SettingsPage.entries.forEach { p -> NavRow(p) { onOpen(p) } }
+        SettingsPage.entries.filterNot { it == SettingsPage.SOURCE_APPS }.forEach { p -> NavRow(p) { onOpen(p) } }
     }
 }
 
@@ -240,7 +248,7 @@ private val KNOWN_PLAYERS = linkedMapOf(
 )
 
 @Composable
-private fun DetectionPage(onOpenReview: () -> Unit = {}) {
+private fun DetectionPage(onOpenReview: () -> Unit, onOpenSourceApps: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as NovaStatsApp
     val settings = app.settings
@@ -252,8 +260,6 @@ private fun DetectionPage(onOpenReview: () -> Unit = {}) {
     val whitelist by settings.whitelist.collectAsStateWithLifecycle(initialValue = emptySet())
     val blArtists by settings.blacklistArtists.collectAsStateWithLifecycle(initialValue = emptySet())
     val blKeywords by settings.blacklistKeywords.collectAsStateWithLifecycle(initialValue = emptySet())
-    val sources by app.database.scrobbleDao().distinctSources().collectAsStateWithLifecycle(initialValue = emptyList())
-    val detection by DetectionState.state.collectAsStateWithLifecycle()
     val reviewCount by app.database.scrobbleDao().reviewCountFlow().collectAsStateWithLifecycle(initialValue = 0)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -288,54 +294,17 @@ private fun DetectionPage(onOpenReview: () -> Unit = {}) {
 
         SectionTitle("📱 Applications sources")
         NovaCard {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    if (whitelist.isEmpty()) "Toutes les applications sont écoutées. Coche des apps pour n'écouter qu'elles."
-                    else "${whitelist.size} app(s) autorisée(s) — les autres sont ignorées.",
-                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
-                )
-                Spacer(Modifier.height(6.dp))
-                val candidates = (KNOWN_PLAYERS.keys + sources + detection.activeSessions + detection.ignoredSessions + whitelist).distinct()
-                candidates.forEach { pkg ->
-                    val label = KNOWN_PLAYERS[pkg] ?: runCatching { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
-                    val seen = pkg in sources || pkg in detection.activeSessions
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(label, color = theme.text, style = MaterialTheme.typography.bodyMedium)
-                            Text(pkg + if (seen) " · détectée" else "", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                        }
-                        Switch(checked = pkg in whitelist, onCheckedChange = { on -> scope.launch { settings.setWhitelist(if (on) whitelist + pkg else whitelist - pkg) } })
-                    }
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Applications suivies", color = theme.text, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (whitelist.isEmpty()) "Toutes les applications"
+                        else "${whitelist.size} application(s) choisie(s)",
+                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                    )
                 }
-                Spacer(Modifier.height(10.dp))
-                var query by remember { mutableStateOf("") }
-                var allApps by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-                LaunchedEffect(Unit) {
-                    val pm = context.packageManager
-                    allApps = withContext(Dispatchers.Default) {
-                        runCatching { pm.getInstalledApplications(0).map { it.packageName to pm.getApplicationLabel(it).toString() }.sortedBy { it.second.lowercase() } }.getOrDefault(emptyList())
-                    }
-                }
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Ajouter n'importe quelle app de ton téléphone…") },
-                    label = { Text("🔍 Rechercher une app") }
-                )
-                if (query.trim().length >= 2) {
-                    val q = query.trim().lowercase()
-                    allApps.filter { (pkg, label) -> pkg !in whitelist && (label.lowercase().contains(q) || pkg.contains(q)) }.take(15).forEach { (pkg, label) ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { scope.launch { settings.setWhitelist(whitelist + pkg) } }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(label, color = theme.text, style = MaterialTheme.typography.bodyMedium)
-                                Text(pkg, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                            }
-                            Text("+ Ajouter", color = theme.primary, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                Button(onClick = onOpenSourceApps, colors = ButtonDefaults.buttonColors(containerColor = theme.primary)) {
+                    Text("Choisir")
                 }
             }
         }
