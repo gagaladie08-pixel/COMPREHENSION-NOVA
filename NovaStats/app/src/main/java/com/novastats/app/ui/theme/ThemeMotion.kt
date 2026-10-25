@@ -77,14 +77,37 @@ object NovaMotion {
         }
 
         return when (theme.signature) {
+            Signature.SCANLINES_GLITCH -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) +
+                slideInHorizontally(tween(theme.transitionMs, easing = EaseOutExpo)) { it / 18 } +
+                scaleIn(tween(theme.transitionMs, easing = FastOutSlowInEasing), initialScale = 0.985f)
+            Signature.CHROME_SWEEP -> fadeIn(tween(theme.transitionMs)) +
+                scaleIn(tween(theme.transitionMs, easing = EaseInOutBack), initialScale = 0.90f)
             Signature.JUMP_CUT -> EnterTransition.None
+            Signature.GOLD_SHIMMER -> fadeIn(tween(theme.transitionMs)) +
+                scaleIn(tween(theme.transitionMs, easing = EaseInOutBack), initialScale = 0.94f)
+            Signature.RISING_BUBBLES -> fadeIn(tween(theme.transitionMs)) +
+                slideInVertically(tween(theme.transitionMs, easing = EaseOutBounce)) { it / 12 } +
+                scaleIn(tween(theme.transitionMs, easing = EaseOutBounce), initialScale = 0.82f)
+            Signature.CURTAIN -> fadeIn(tween(theme.transitionMs / 2, delayMillis = theme.transitionMs / 3)) +
+                slideInHorizontally(tween(theme.transitionMs, easing = LinearOutSlowInEasing)) { it / 30 }
+            Signature.BW_FLASH -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) +
+                scaleIn(tween(theme.transitionMs, easing = EaseOutExpo), initialScale = 1.08f)
+            Signature.BLUE_FLASH -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) +
+                slideInHorizontally(tween(theme.transitionMs, easing = EaseOutExpo)) { it / 12 }
             Signature.CLOUD_FADE -> fadeIn(tween(theme.transitionMs, easing = LinearOutSlowInEasing))
-            Signature.CURTAIN -> fadeIn(tween(theme.transitionMs / 2, delayMillis = theme.transitionMs / 3))
-            Signature.RISING_BUBBLES -> fadeIn(tween(theme.transitionMs)) + scaleIn(tween(theme.transitionMs, easing = EaseOutBounce), initialScale = 0.9f)
-            Signature.GOLD_SHIMMER -> fadeIn(tween(theme.transitionMs)) + scaleIn(tween(theme.transitionMs, easing = EaseInOutBack), initialScale = 0.96f)
-            Signature.BW_FLASH, Signature.BLUE_FLASH -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) + slideInHorizontally(tween(theme.transitionMs, easing = EaseOutExpo)) { it / 12 }
+            Signature.WARM_PULSE -> fadeIn(tween(theme.transitionMs, easing = FastOutSlowInEasing)) +
+                scaleIn(tween(theme.transitionMs, easing = FastOutSlowInEasing), initialScale = 0.94f)
             Signature.RANDOM_GLITCH -> fadeIn(snap(Random.nextInt(0, 120)))
-            else -> fadeIn(tween(duration(theme), easing = easing(theme))) + scaleIn(tween(duration(theme), easing = easing(theme)), initialScale = 0.97f)
+            Signature.CONFETTI -> fadeIn(tween(theme.transitionMs, easing = EaseOutBounce)) +
+                scaleIn(tween(theme.transitionMs, easing = EaseOutBounce), initialScale = 0.90f)
+            Signature.SPARKLES -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) +
+                scaleIn(tween(theme.transitionMs, easing = EaseOutExpo), initialScale = 0.88f)
+            Signature.PATTERN_REVEAL -> fadeIn(tween(theme.transitionMs, easing = LinearOutSlowInEasing)) +
+                slideInVertically(tween(theme.transitionMs, easing = LinearOutSlowInEasing)) { it / 24 } +
+                scaleIn(tween(theme.transitionMs), initialScale = 0.965f)
+            Signature.DUAL_CONTRAST -> fadeIn(tween(theme.transitionMs, easing = FastOutSlowInEasing)) +
+                slideInHorizontally(tween(theme.transitionMs, easing = FastOutSlowInEasing)) { it / 24 } +
+                scaleIn(tween(theme.transitionMs), initialScale = 0.97f)
         }
     }
 
@@ -97,11 +120,34 @@ object NovaMotion {
         }
 
         return when (theme.signature) {
+            Signature.SCANLINES_GLITCH -> fadeOut(tween(theme.transitionMs / 2)) +
+                slideOutHorizontally(tween(theme.transitionMs / 2, easing = EaseOutExpo)) { -it / 24 }
+            Signature.CHROME_SWEEP -> fadeOut(tween(theme.transitionMs / 2)) +
+                scaleOut(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing), targetScale = 0.92f)
             Signature.JUMP_CUT, Signature.RANDOM_GLITCH -> ExitTransition.None
-            Signature.CLOUD_FADE -> fadeOut(tween(theme.transitionMs / 2))
-            Signature.BW_FLASH, Signature.BLUE_FLASH -> fadeOut(tween(theme.transitionMs / 2)) + slideOutHorizontally(tween(theme.transitionMs)) { -it / 12 }
-            Signature.CURTAIN -> fadeOut(tween(theme.transitionMs / 4))
-            else -> fadeOut(tween(duration(theme) / 2)) + scaleOut(tween(duration(theme) / 2), targetScale = 0.98f)
+            Signature.GOLD_SHIMMER -> fadeOut(tween(theme.transitionMs / 2)) +
+                scaleOut(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing), targetScale = 0.96f)
+            Signature.RISING_BUBBLES -> fadeOut(tween(theme.transitionMs / 2)) +
+                slideOutVertically(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing)) { it / 20 } +
+                scaleOut(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing), targetScale = 0.90f)
+            Signature.CURTAIN -> fadeOut(tween(theme.transitionMs / 3)) +
+                slideOutHorizontally(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing)) { -it / 32 }
+            Signature.BW_FLASH -> fadeOut(tween(theme.transitionMs / 3)) +
+                scaleOut(tween(theme.transitionMs / 2, easing = EaseOutExpo), targetScale = 0.94f)
+            Signature.BLUE_FLASH -> fadeOut(tween(theme.transitionMs / 2)) +
+                slideOutHorizontally(tween(theme.transitionMs)) { -it / 12 }
+            Signature.CLOUD_FADE -> fadeOut(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing))
+            Signature.WARM_PULSE -> fadeOut(tween(theme.transitionMs / 2)) +
+                scaleOut(tween(theme.transitionMs / 2, easing = FastOutSlowInEasing), targetScale = 0.97f)
+            Signature.CONFETTI -> fadeOut(tween(theme.transitionMs / 2)) +
+                slideOutVertically(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing)) { it / 28 }
+            Signature.SPARKLES -> fadeOut(tween(theme.transitionMs / 2)) +
+                scaleOut(tween(theme.transitionMs / 2, easing = EaseOutExpo), targetScale = 0.90f)
+            Signature.PATTERN_REVEAL -> fadeOut(tween(theme.transitionMs / 2)) +
+                scaleOut(tween(theme.transitionMs / 2), targetScale = 0.965f)
+            Signature.DUAL_CONTRAST -> fadeOut(tween(theme.transitionMs / 2)) +
+                slideOutHorizontally(tween(theme.transitionMs / 2)) { -it / 28 } +
+                scaleOut(tween(theme.transitionMs / 2), targetScale = 0.975f)
         }
     }
 }

@@ -67,7 +67,7 @@ import com.novastats.app.ui.screens.StatsScreen
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import com.novastats.app.ui.theme.NovaMotion
-import com.novastats.app.ui.theme.SurvivorGlyph
+import com.novastats.app.ui.theme.NovaTabGlyph
 import com.novastats.app.ui.theme.ThemeEvents
 import com.novastats.app.ui.theme.ThemeFxHost
 import com.novastats.app.ui.theme.ThemedTabIcon
@@ -78,17 +78,17 @@ enum class NovaTab(
     val label: String,
     val emoji: String,
     val icon: ImageVector,
-    val survivorGlyph: SurvivorGlyph
+    val iconGlyph: NovaTabGlyph
 ) {
-    HOME("home", "Accueil", "🏠", Icons.Filled.Home, SurvivorGlyph.HOME),
-    STATS("stats", "Stats", "📊", Icons.Filled.BarChart, SurvivorGlyph.STATS),
-    BILLBOARD("billboard", "Billboard", "🏆", Icons.Filled.EmojiEvents, SurvivorGlyph.BILLBOARD),
-    RECORDS("records", "Records", "🏅", Icons.Filled.MilitaryTech, SurvivorGlyph.RECORDS),
-    CERTIFICATIONS("certifications", "Certifs", "💎", Icons.Filled.Diamond, SurvivorGlyph.CERTIFICATIONS),
-    HALL_OF_FAME("hall_of_fame", "Hall of Fame", "🏛️", Icons.Filled.AccountBalance, SurvivorGlyph.HALL_OF_FAME),
-    PANTHEON("pantheon", "Panthéon", "👑", Icons.Filled.Star, SurvivorGlyph.PANTHEON),
-    AWARDS("awards", "Awards", "🏆", Icons.Filled.WorkspacePremium, SurvivorGlyph.AWARDS),
-    SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings, SurvivorGlyph.SETTINGS);
+    HOME("home", "Accueil", "🏠", Icons.Filled.Home, NovaTabGlyph.HOME),
+    STATS("stats", "Stats", "📊", Icons.Filled.BarChart, NovaTabGlyph.STATS),
+    BILLBOARD("billboard", "Billboard", "🏆", Icons.Filled.EmojiEvents, NovaTabGlyph.BILLBOARD),
+    RECORDS("records", "Records", "🏅", Icons.Filled.MilitaryTech, NovaTabGlyph.RECORDS),
+    CERTIFICATIONS("certifications", "Certifs", "💎", Icons.Filled.Diamond, NovaTabGlyph.CERTIFICATIONS),
+    HALL_OF_FAME("hall_of_fame", "Hall of Fame", "🏛️", Icons.Filled.AccountBalance, NovaTabGlyph.HALL_OF_FAME),
+    PANTHEON("pantheon", "Panthéon", "👑", Icons.Filled.Star, NovaTabGlyph.PANTHEON),
+    AWARDS("awards", "Awards", "🏆", Icons.Filled.WorkspacePremium, NovaTabGlyph.AWARDS),
+    SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings, NovaTabGlyph.SETTINGS);
 }
 
 /** Tous les onglets du cahier des charges — la barre, placée en haut de l'écran, défile horizontalement. */
@@ -181,7 +181,7 @@ fun NovaApp() {
                             tab.icon,
                             contentDescription = tab.label,
                             selected = selected,
-                            glyph = tab.survivorGlyph
+                            glyph = tab.iconGlyph
                         )
                         Text(tab.label, maxLines = 1, style = MaterialTheme.typography.labelSmall, color = if (selected) theme.primary else theme.textSecondary)
                         if (selected && theme.id == "survivor") {

@@ -32,7 +32,7 @@ fun ThemedTabIcon(
     contentDescription: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
-    glyph: SurvivorGlyph? = null
+    glyph: NovaTabGlyph? = null
 ) {
     val theme = Nova.theme
     val tint by animateColorAsState(if (selected) theme.primary else theme.textSecondary, NovaMotion.spec(theme), label = "tint")
@@ -186,10 +186,10 @@ fun ThemedTabIcon(
         },
         contentAlignment = Alignment.Center
     ) {
-        if (theme.id == "survivor" && glyph != null) {
-            SurvivorNavGlyph(glyph, description = contentDescription, selected = selected, modifier = Modifier.size(24.dp))
-        } else {
-            Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
+        when {
+            glyph == null -> Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
+            theme.id == "survivor" -> SurvivorNavGlyph(glyph, description = contentDescription, selected = selected, modifier = Modifier.size(24.dp))
+            else -> ThemedNavGlyph(glyph, contentDescription, selected, modifier = Modifier.size(24.dp))
         }
     }
 }

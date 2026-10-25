@@ -16,15 +16,10 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** Glyphes dessinés spécialement pour les neuf onglets du thème Survivor. */
-enum class SurvivorGlyph {
-    HOME, STATS, BILLBOARD, RECORDS, CERTIFICATIONS, HALL_OF_FAME, PANTHEON, AWARDS, SETTINGS, BRAND
-}
-
-/** Icônes vectorielles multicolores : chaque onglet possède une silhouette propre, pas un filtre Material. */
+/** Rendu vectoriel propre à la signature Survivor, avec une silhouette distincte pour chaque onglet. */
 @Composable
 internal fun SurvivorNavGlyph(
-    glyph: SurvivorGlyph,
+    glyph: NovaTabGlyph,
     description: String,
     selected: Boolean,
     modifier: Modifier = Modifier
@@ -76,7 +71,7 @@ internal fun SurvivorNavGlyph(
         }
 
         when (glyph) {
-            SurvivorGlyph.HOME -> {
+            NovaTabGlyph.HOME -> {
                 val house = polygon(listOf(4f to 10f, 12f to 4f, 20f to 10f, 18f to 10f, 18f to 20f, 6f to 20f, 6f to 10f))
                 drawPath(house, pink.copy(alpha = if (selected) 0.34f else 0.22f))
                 drawPath(house, foreground, style = outline())
@@ -85,7 +80,7 @@ internal fun SurvivorNavGlyph(
                 star(19f, 5f, 2.1f, 0.9f, mint)
             }
 
-            SurvivorGlyph.STATS -> {
+            NovaTabGlyph.STATS -> {
                 line(3.5f, 20f, 20.5f, 20f, foreground.copy(alpha = 0.8f), 1.2f)
                 val bars = listOf(4.5f to 6f, 9.5f to 10f, 14.5f to 14f)
                 val colors = listOf(blue, violet, pink)
@@ -99,7 +94,7 @@ internal fun SurvivorNavGlyph(
                 circle(16.2f, 5f, 1f, foreground)
             }
 
-            SurvivorGlyph.BILLBOARD -> {
+            NovaTabGlyph.BILLBOARD -> {
                 rounded(3.5f, 3.5f, 17f, 13f, violet.copy(alpha = if (selected) 0.28f else 0.18f), 2.2f)
                 drawRoundRect(
                     color = foreground,
@@ -115,7 +110,7 @@ internal fun SurvivorNavGlyph(
                 star(12f, 9.5f, 3.7f, 1.7f, pink)
             }
 
-            SurvivorGlyph.RECORDS -> {
+            NovaTabGlyph.RECORDS -> {
                 drawPath(polygon(listOf(7f to 13.5f, 6f to 21f, 10.3f to 18.8f, 12f to 22f, 13.4f to 14f)), blue.copy(alpha = fillAlpha))
                 drawPath(polygon(listOf(12f to 14f, 14f to 18.8f, 18f to 21f, 17f to 13.5f)), violet.copy(alpha = fillAlpha))
                 circle(12f, 10f, 7f, pink.copy(alpha = if (selected) 0.35f else 0.22f))
@@ -124,7 +119,7 @@ internal fun SurvivorNavGlyph(
                 star(12f, 10f, 3.7f, 1.7f, Color.White)
             }
 
-            SurvivorGlyph.CERTIFICATIONS -> {
+            NovaTabGlyph.CERTIFICATIONS -> {
                 val gem = polygon(listOf(3.5f to 8f, 7.5f to 4f, 16.5f to 4f, 20.5f to 8f, 12f to 20f))
                 drawPath(gem, violet.copy(alpha = if (selected) 0.36f else 0.22f))
                 drawPath(gem, foreground, style = outline())
@@ -135,7 +130,7 @@ internal fun SurvivorNavGlyph(
                 line(14.5f, 8f, 12f, 20f, pink, 1.1f)
             }
 
-            SurvivorGlyph.HALL_OF_FAME -> {
+            NovaTabGlyph.HALL_OF_FAME -> {
                 val hall = Path().apply {
                     moveTo(xy(4f, 20f).x, xy(4f, 20f).y)
                     lineTo(xy(4f, 11f).x, xy(4f, 11f).y)
@@ -153,7 +148,7 @@ internal fun SurvivorNavGlyph(
                 star(12f, 6.5f, 1.7f, 0.7f, Color.White)
             }
 
-            SurvivorGlyph.PANTHEON -> {
+            NovaTabGlyph.PANTHEON -> {
                 val orbit = Path().apply {
                     moveTo(xy(4f, 9f).x, xy(4f, 9f).y)
                     cubicTo(7f * unit + offsetX, 4f * unit + offsetY, 17f * unit + offsetX, 4f * unit + offsetY, 20f * unit + offsetX, 9f * unit + offsetY)
@@ -169,7 +164,7 @@ internal fun SurvivorNavGlyph(
                 star(12f, 12f, 4f, 1.8f, Color.White)
             }
 
-            SurvivorGlyph.AWARDS -> {
+            NovaTabGlyph.AWARDS -> {
                 val cup = polygon(listOf(7f to 4f, 17f to 4f, 16f to 10f, 14.5f to 13f, 12f to 14.5f, 9.5f to 13f, 8f to 10f))
                 drawPath(cup, mint.copy(alpha = if (selected) 0.8f else 0.58f))
                 drawPath(cup, foreground, style = outline(1.5f))
@@ -185,7 +180,7 @@ internal fun SurvivorNavGlyph(
                 star(12f, 8.5f, 2.3f, 1f, Color.White)
             }
 
-            SurvivorGlyph.SETTINGS -> {
+            NovaTabGlyph.SETTINGS -> {
                 val teeth = ArrayList<Pair<Float, Float>>(32)
                 repeat(32) { index ->
                     val angle = -PI / 2.0 + index * PI / 16.0
@@ -201,7 +196,7 @@ internal fun SurvivorNavGlyph(
                 circle(12f, 12f, 0.8f, Color.White)
             }
 
-            SurvivorGlyph.BRAND -> {
+            NovaTabGlyph.BRAND -> {
                 val flame = Path().apply {
                     moveTo(xy(12f, 2.5f).x, xy(12f, 2.5f).y)
                     cubicTo(8f * unit + offsetX, 6f * unit + offsetY, 16f * unit + offsetX, 7f * unit + offsetY, 14f * unit + offsetX, 11f * unit + offsetY)

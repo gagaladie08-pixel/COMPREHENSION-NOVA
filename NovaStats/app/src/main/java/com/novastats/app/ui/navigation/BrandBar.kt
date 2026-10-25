@@ -92,7 +92,7 @@ import com.novastats.app.ui.screens.formatCount
 import com.novastats.app.ui.theme.LocalNovaFonts
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaTheme
-import com.novastats.app.ui.theme.SurvivorGlyph
+import com.novastats.app.ui.theme.NovaTabGlyph
 import com.novastats.app.ui.theme.ThemedTabIcon
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
@@ -172,7 +172,7 @@ fun BrandBar(onSearch: () -> Unit) {
                     contentDescription = theme.name,
                     selected = true,
                     modifier = Modifier.scale(1.15f),
-                    glyph = if (pride) SurvivorGlyph.BRAND else null
+                    glyph = if (pride) NovaTabGlyph.BRAND else null
                 )
             }
             Spacer(Modifier.width(8.dp))

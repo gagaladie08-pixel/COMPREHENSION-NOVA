@@ -75,7 +75,7 @@ fun novaTypography(fonts: NovaFontSet, theme: NovaTheme): Typography {
     val body = fonts.body
     // Les polices « display » (Bebas, Anton, Bungee…) sont déjà massives : on module la graisse.
     val heavy = when (theme.titleFont) {
-        "Bebas Neue", "Anton", "Archivo Black", "Bungee", "Abril Fatface", "Audiowide", "Righteous", "Unica One", "DM Serif Display" -> FontWeight.Normal
+        "Bebas Neue", "Anton", "Archivo Black", "Bungee", "Bowlby One SC", "Abril Fatface", "Audiowide", "Righteous", "Unica One", "DM Serif Display" -> FontWeight.Normal
         else -> FontWeight.Bold
     }
     val titleSpacing = when {

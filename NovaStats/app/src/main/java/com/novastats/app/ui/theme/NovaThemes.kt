@@ -179,7 +179,7 @@ object NovaThemes {
         "villain_era", "🖤", "Villain Era",
         hex("#CC0000"), hex("#4A4A4A"), hex("#8B0000"), hex("#080808"), hex("#111111"), hex("#EEEEEE"), hex("#888888"), hex("#FF0000"),
         effects = "Glitch / jump-cut, pas de fondu", inspiration = "Taylor Swift Reputation + Rihanna Anti — sombre / rebelle",
-        titleFont = "Bebas Neue", bodyFont = "Oswald", iconsDescription = "Traits bruts, effet papier journal déchiré", icons = IconStyle.RAW,
+        titleFont = "Bebas Neue", bodyFont = "Inter", iconsDescription = "Traits bruts, effet papier journal déchiré", icons = IconStyle.RAW,
         transitionMs = 150, easing = MotionEasing.CUT, signature = Signature.JUMP_CUT, cornerDp = 0,
         chart = ChartStyle(stroke = ColorKey.PRIMARY, glowDp = 1f, fillTop = ColorKey.PRIMARY, fillAlpha = 0.3f, shape = CurveShape.ANGULAR)
     )
@@ -209,7 +209,7 @@ object NovaThemes {
         "velvet_stage", "🎭", "Velvet Stage",
         hex("#8B0000"), hex("#722F37"), hex("#CFB53B"), hex("#0C0008"), hex("#1A0010"), hex("#FFF8DC"), hex("#D4AF37"), hex("#FFD700"),
         effects = "Ouverture de rideau depuis le centre", inspiration = "Jennie Ruby + Taylor Swift The Life of a Showgirl — cabaret / glamour",
-        titleFont = "Abril Fatface", bodyFont = "Cormorant", iconsDescription = "Rideaux / plumes stylisés, fins traits dorés sur fond sombre", icons = IconStyle.STAGE,
+        titleFont = "Abril Fatface", bodyFont = "Poppins", iconsDescription = "Rideaux / plumes stylisés, fins traits dorés sur fond sombre", icons = IconStyle.STAGE,
         transitionMs = 500, easing = MotionEasing.EASE_IN_OUT, signature = Signature.CURTAIN, cornerDp = 12,
         chart = ChartStyle(stroke = ColorKey.GLOW_SECONDARY, glowDp = 14f, fillTop = ColorKey.SECONDARY, fillBottom = ColorKey.PRIMARY, spotlight = true)
     )
@@ -219,7 +219,7 @@ object NovaThemes {
         "pink_venom", "🖤", "Pink Venom",
         hex("#FF0080"), hex("#FF0030"), hex("#FF69B4"), hex("#000000"), hex("#0D0008"), hex("#FFFFFF"), hex("#FFB6C1"), hex("#FF007F"),
         effects = "Flash de contraste N&B → couleur au tap", inspiration = "BLACKPINK Born Pink + Rihanna Loud — rock / girl crush",
-        titleFont = "Anton", bodyFont = "Archivo Black", iconsDescription = "Formes pointues épaisses, éclaboussures de couleur vive", icons = IconStyle.SPIKY,
+        titleFont = "Anton", bodyFont = "Inter", iconsDescription = "Formes pointues épaisses, éclaboussures de couleur vive", icons = IconStyle.SPIKY,
         transitionMs = 150, easing = MotionEasing.EASE_OUT_EXPO, signature = Signature.BW_FLASH, cornerDp = 4,
         chart = ChartStyle(stroke = ColorKey.PRIMARY, strokeWidthDp = 4f, glowDp = 2f, fillTop = ColorKey.PRIMARY, fillAlpha = 0.35f, shape = CurveShape.ANGULAR)
     )
@@ -229,7 +229,7 @@ object NovaThemes {
         "cloud_nine", "☁️", "Cloud Nine",
         hex("#FFB6C1"), hex("#E6E6FA"), hex("#FFC0CB"), hex("#FAFAFA"), hex("#FFF5F7"), hex("#555555"), hex("#9090A0"), hex("#C8A2C8"),
         effects = "Fondu doux façon nuage qui se dissipe", inspiration = "Ariana Grande Thank U, Next — pastel / calme",
-        titleFont = "Baloo 2", bodyFont = "Quicksand", iconsDescription = "Nuages / bulles très arrondies, contours très doux", icons = IconStyle.CLOUD,
+        titleFont = "Comfortaa", bodyFont = "Quicksand", iconsDescription = "Nuages / bulles très arrondies, contours très doux", icons = IconStyle.CLOUD,
         transitionMs = 450, easing = MotionEasing.EASE_OUT, signature = Signature.CLOUD_FADE, cornerDp = 26,
         chart = ChartStyle(stroke = ColorKey.PRIMARY, strokeWidthDp = 1.5f, glowDp = 16f, fillTop = ColorKey.PRIMARY, fillAlpha = 0.12f, shape = CurveShape.VERY_ROUND)
     )
@@ -282,7 +282,7 @@ object NovaThemes {
         "pop_revolution", "🎤", "Pop Revolution",
         hex("#4A90D9"), hex("#FF6B9D"), hex("#00BFFF"), hex("#050A1A"), hex("#0A1428"), hex("#FFFFFF"), hex("#A0C4FF"), hex("#F0F8FF"),
         effects = "Flash rapide bleu / blanc au changement d'onglet", inspiration = "BABYMONSTER + Taylor Swift 1989 — K-pop / énergie",
-        titleFont = "Montserrat", bodyFont = "Inter", iconsDescription = "Mix polaroid minimal + accents streetwear saturés", icons = IconStyle.POLAROID,
+        titleFont = "Bowlby One SC", bodyFont = "Inter", iconsDescription = "Mix polaroid minimal + accents streetwear saturés", icons = IconStyle.POLAROID,
         transitionMs = 180, easing = MotionEasing.EASE_OUT_EXPO, signature = Signature.BLUE_FLASH, cornerDp = 10,
         chart = ChartStyle(stroke = ColorKey.PRIMARY, strokeWidthDp = 3f, glowDp = 1f, fillTop = ColorKey.PRIMARY, fillAlpha = 0.3f)
     )

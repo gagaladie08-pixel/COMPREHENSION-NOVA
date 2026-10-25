@@ -28,6 +28,7 @@ class NovaThemesTest {
         // Les 15 effets signature sont tous distincts
         assertEquals(15, NovaThemes.ALL.map { it.signature }.toSet().size)
         assertEquals(15, NovaThemes.ALL.map { it.icons }.toSet().size)
+        assertEquals(15, NovaThemes.ALL.map { it.titleFont }.toSet().size)
     }
 
     @Test fun `palettes conformes au cahier des charges`() {
