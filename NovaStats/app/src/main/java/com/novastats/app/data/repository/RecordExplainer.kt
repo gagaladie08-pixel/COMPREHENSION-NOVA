@@ -1559,41 +1559,83 @@ class RecordExplainer(private val db: NovaDatabase) {
     }
 
     private suspend fun simultaneousNo1DebutStory(period: Period, artistId: Long, name: String, value: Double): Story {
-        val tracks = allSeries(RecordCategory.TRACK, period)
-        val albums = allSeries(RecordCategory.ALBUM, period)
+        val trackSeries = allSeries(RecordCategory.TRACK, period)
+        val albumSeries = allSeries(RecordCategory.ALBUM, period)
         val playedTracks = db.trackDao().allPlayed()
+        val tracksById = playedTracks.associateBy { it.trackId }
+        val albumsById = db.albumDao().all().associateBy { it.albumId }
         val trackAlbums = playedTracks.mapNotNull { track -> track.albumId?.let { track.trackId to it } }.toMap()
         val trackArtists = HashMap<Long, MutableSet<Long>>()
         db.trackLinkDao().allTrackArtists().forEach { trackArtists.getOrPut(it.trackId) { linkedSetOf() }.add(it.artistId) }
         playedTracks.forEach { trackArtists.getOrPut(it.trackId) { linkedSetOf() }.add(it.artistId) }
-        val albumArtists = db.albumDao().all().associate { it.albumId to it.artistId }
-        val periodDates = RecordMath.simultaneousNo1Debuts(tracks, albums, trackAlbums, albumArtists, trackArtists)[artistId].orEmpty()
-        val dates = periodDates.toSortedMap().values.toList()
-        val count = value.toInt()
-        val latest = dates.lastOrNull()
-        val cadence = period.frLabel.lowercase(Locale.FRANCE)
-        val facts = buildList {
-            add("Cadence du chart" to period.frLabel)
-            add("Périodes distinctes" to count.toString())
-            latest?.let { add("Dernier double début au n°1" to on(period, it)) }
+        val albumArtists = albumsById.mapValues { (_, album) -> album.artistId }
+        val matches = RecordMath.simultaneousNo1Debuts(
+            trackSeries, albumSeries, trackAlbums, albumArtists, trackArtists
+        )[artistId].orEmpty()
+        val count = value.toInt().coerceAtLeast(0)
+        val latest = matches.lastOrNull()
+        val cadence = when (period) {
+            Period.DAILY -> "quotidienne"
+            Period.WEEKLY -> "hebdomadaire"
+            Period.MONTHLY -> "mensuelle"
+            Period.YEARLY -> "annuelle"
+            Period.GLOBAL -> "globale"
         }
-        val examples = dates.takeLast(60).map { date -> Point(date, short(period, date), 1, null, date == latest) }
+        val visibleMatches = matches.takeLast(60)
+        val facts = buildList {
+            add("Cadence choisie" to period.frLabel)
+            add("Périodes validées" to count.toString())
+            add("Chart du titre" to "Hot 100 · première entrée au #1")
+            add("Chart de l'album" to "Albums 75 · première entrée au #1")
+            add("Artiste admissible" to "Propriétaire de l'album + crédit sur le titre")
+            add("Comptage" to "Une fois par période, pas par titre")
+            latest?.let {
+                add("Dernière période validée" to "Titre : ${on(period, it.trackDate)} · album : ${on(period, it.albumDate)}")
+            }
+            if (matches.size > visibleMatches.size) add("Archives affichées" to "Les ${visibleMatches.size} plus récentes sur ${matches.size}")
+        }
+        val examples = visibleMatches.map { match ->
+            Point(
+                date = match.trackDate,
+                label = short(period, match.trackDate),
+                position = 1,
+                plays = null,
+                highlight = match.periodIndex == latest?.periodIndex,
+                note = if (match.trackDate == match.albumDate) "Même date" else "Même période"
+            )
+        }
+        val pairItems = visibleMatches.map { match ->
+            val track = tracksById[match.trackId]
+            val album = albumsById[match.albumId]
+            val trackName = track?.title ?: "Titre #${match.trackId}"
+            val albumName = album?.title ?: "Album #${match.albumId}"
+            Item(
+                type = EntityType.TRACK,
+                id = match.trackId,
+                name = "$trackName × $albumName",
+                detail = "Hot 100 #1 ${short(period, match.trackDate)} · Albums 75 #1 ${short(period, match.albumDate)}",
+                imageUrl = track?.coverUrl ?: album?.coverUrl,
+                highlight = match.periodIndex == latest?.periodIndex
+            )
+        }
         return Story(
             headline = "🚀 $count ${plural(count, "double début", "doubles débuts")} au n°1",
-            narrative = if (dates.isEmpty()) {
-                "$name détient ce record sur le $cadence : un nouveau titre et l'album auquel il appartient font tous deux leur première apparition au n°1 pendant la même période de chart."
-            } else {
-                "$name compte $count ${plural(count, "période", "périodes")} de $cadence où un nouveau titre et son album ont tous deux fait leur première apparition au n°1 du même chart. " +
-                    "Chaque période ne compte qu'une fois, même si plusieurs titres de l'album débutent simultanément au sommet."
-            },
+            narrative = "$name a validé $count ${plural(count, "période", "périodes")} sur la cadence $cadence. Pour chacune, le titre doit faire sa toute première apparition au n°1 du Hot 100 ET l'album auquel il est rattaché doit faire sa toute première apparition au n°1 d'Albums 75, pendant la même période. L'artiste doit être crédité sur le titre et être l'artiste propriétaire de l'album. Une remontée au n°1 plus tard ne suffit pas; plusieurs titres concordants sur une seule période ne donnent qu'un seul point.",
             facts = facts,
-            timelineTitle = "Les périodes avec un double début au n°1",
-            timeline = examples
+            timelineTitle = "Périodes où les deux charts débutent au n°1",
+            timeline = examples,
+            itemsTitle = "Paires titre + album qui valident le record",
+            items = pairItems,
+            context = listOf(
+                "À distinguer de Most Debut #1" to "Most Debut #1 repère séparément les éléments qui commencent au sommet. Ici, il faut en plus que le titre ET son album commencent chacun au n°1 pendant la même période.",
+                "Ce qui ne compte pas" to "Un titre ou un album qui atteint le n°1 après une entrée plus basse, ou deux débuts au n°1 sur des périodes différentes."
+            )
         )
     }
 
     private suspend fun fastestListeningMilestone(cat: RecordCategory, sub: String?, id: Long, name: String, cachedValue: Double): Story {
-        val threshold = sub?.toIntOrNull() ?: RecordCatalog.fastestListenStep(cat)
+        val step = RecordCatalog.fastestListenStep(cat)
+        val threshold = sub?.toIntOrNull() ?: step
         val dao = db.scrobbleDao()
         val firstAt: Long?
         val reachedAt: Long?
@@ -1616,16 +1658,29 @@ class RecordExplainer(private val db: NovaDatabase) {
             java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).format(dateTimeFmt)
         } ?: "indisponible"
         val elapsedLabel = RecordCatalog.formatFastDuration(elapsed)
+        val countingRule = when (cat) {
+            RecordCategory.TRACK -> "Les versions reliées à ce titre sont regroupées sous le titre source."
+            RecordCategory.ARTIST -> "Chaque écoute compte pour chaque artiste crédité sur le titre; l'artiste principal sert de repli si aucun crédit détaillé n'existe."
+            RecordCategory.ALBUM -> "Seules les écoutes rattachées à cet album alimentent son compteur."
+        }
+        val narrative = "$name atteint le palier $threshold en $elapsedLabel. Le chronomètre démarre à l'horodatage de sa 1re écoute confirmée et s'arrête à celui de sa $thresholdᵉ écoute confirmée : durée = heure d'arrivée − heure de départ. Le palier $threshold inclut donc bien la première écoute; pour 25 écoutes, on mesure du play n°1 au play n°25. La précision de l'horodatage est conservée jusqu'aux secondes et millisecondes."
         return Story(
             headline = "⏱ $threshold écoutes en $elapsedLabel",
-            narrative = "$name a atteint $threshold écoutes locales NovaStats en $elapsedLabel. Le chrono part de sa première écoute confirmée (${stamp(firstAt)}) et s'arrête à l'écoute qui franchit ce palier (${stamp(reachedAt)}); le temps est conservé jusqu'aux secondes et millisecondes disponibles.",
+            narrative = narrative,
             facts = listOf(
                 "Section" to cat.label,
-                "Palier atteint" to "$threshold écoutes",
-                "Première écoute confirmée" to stamp(firstAt),
-                "Écoute du palier" to stamp(reachedAt),
-                "Temps écoulé" to elapsedLabel,
-                "Source" to "Écoutes locales NovaStats"
+                "Palier actuellement affiché" to "$threshold écoutes",
+                "Pas entre les paliers" to "$step écoutes",
+                "Départ du chrono" to "1re écoute confirmée · ${stamp(firstAt)}",
+                "Arrêt du chrono" to "Écoute n°$threshold · ${stamp(reachedAt)}",
+                "Calcul" to "Horodatage d'arrivée − horodatage de départ",
+                "Temps obtenu" to elapsedLabel,
+                "Source des données" to "Écoutes locales confirmées NovaStats"
+            ),
+            context = listOf(
+                "Comment le compteur varie" to countingRule,
+                "Ce qui est classé" to "Les durées les plus courtes arrivent en tête. Un palier n'est proposé que lorsqu'au moins une entité de cette section l'a atteint.",
+                "À ne pas confondre" to "Ce record mesure les écoutes locales importées/enregistrées par NovaStats, pas les streams mondiaux Spotify ni le temps depuis la sortie du morceau."
             )
         )
     }

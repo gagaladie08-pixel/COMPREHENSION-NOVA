@@ -449,9 +449,9 @@ class RecordsEngine(private val db: NovaDatabase) {
         )
         emit(
             out, "SIMULTANEOUS_NO1_DEBUT", p, RecordCategory.ARTIST, null,
-            simultaneousNo1Debuts.map { (artistId, periods) ->
-                val latestDate = periods.maxByOrNull { it.key }?.value
-                RecordResult(artistId, periods.size.toDouble(), latestDate, "${periods.size} période(s) avec débuts simultanés au n°1")
+            simultaneousNo1Debuts.map { (artistId, matches) ->
+                val latestDate = matches.lastOrNull()?.trackDate
+                RecordResult(artistId, matches.size.toDouble(), latestDate, "${matches.size} période(s) avec doubles débuts au n°1")
             }, now
         )
 

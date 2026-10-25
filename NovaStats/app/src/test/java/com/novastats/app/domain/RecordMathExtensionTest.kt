@@ -87,7 +87,12 @@ class RecordMathExtensionTest {
             artistsForTrack = mapOf(1L to setOf(100L), 2L to setOf(100L), 3L to setOf(200L), 4L to setOf(100L))
         )
 
-        assertEquals(mapOf(1 to "d1"), result[100L])
+        val match = result.getValue(100L).single()
+        assertEquals(1, match.periodIndex)
+        assertEquals("d1", match.trackDate)
+        assertEquals("album-date-in-same-period", match.albumDate)
+        assertEquals(1L, match.trackId)
+        assertEquals(10L, match.albumId)
     }
 
     @Test

@@ -1597,6 +1597,93 @@ private fun RecordExplainer.Held.groupForMostRecords(): RecordGroup = RecordCata
 /* ================================ 🧐 Page « pourquoi il est là » — spécifique à chaque record ================================ */
 
 @Composable
+private fun NewRecordMethodGuide(
+    recordId: String,
+    category: RecordCategory,
+    period: Period?,
+    sub: String?,
+    color: Color
+) {
+    val theme = Nova.theme
+    val title: String
+    val intro: String
+    val steps: List<Triple<String, String, String>>
+    val takeaway: String
+    when (recordId) {
+        "SIMULTANEOUS_NO1_DEBUT" -> {
+            val sameWindow = when (period) {
+                Period.DAILY -> "la même journée de chart"
+                Period.WEEKLY -> "la même semaine de chart"
+                Period.MONTHLY -> "le même mois de chart"
+                Period.YEARLY -> "la même année de chart"
+                else -> "la même période de chart"
+            }
+            title = "🧭 Comment se valide un double début au n°1 ?"
+            intro = "Ce record compare deux charts différents, mais synchronisés par la cadence sélectionnée : le Hot 100 pour le titre et Albums 75 pour l'album."
+            steps = listOf(
+                Triple("01", "Le titre", "Sa toute première apparition dans le Hot 100 est directement à la position n°1."),
+                Triple("02", "L'album", "L'album associé fait lui aussi sa toute première apparition à la position n°1 dans Albums 75."),
+                Triple("03", "La même période", "Les deux premières entrées doivent tomber pendant $sameWindow.")
+            )
+            takeaway = "L'artiste du classement doit être à la fois propriétaire de l'album et crédité sur le titre. Une remontée au n°1 après une entrée plus basse ne compte pas. Même si plusieurs titres conviennent, une période ne rapporte qu'un seul point."
+        }
+        "FASTEST_LISTEN_MILESTONE" -> {
+            val step = RecordCatalog.fastestListenStep(category)
+            val threshold = sub?.toIntOrNull() ?: step
+            val ordinal = if (threshold == 1) "1re" else "${threshold}e"
+            val countingRule = when (category) {
+                RecordCategory.TRACK -> "Titre : un palier tous les $step écoutes; les versions reliées au même titre source sont regroupées."
+                RecordCategory.ARTIST -> "Artiste : un palier tous les $step écoutes; chaque artiste crédité sur le titre reçoit l'écoute."
+                RecordCategory.ALBUM -> "Album : un palier tous les $step écoutes rattachées à cet album."
+            }
+            title = "⏱️ Comment le chronomètre est-il calculé ?"
+            intro = "Tu consultes le palier de $threshold écoutes dans la section ${sectionLabel(category)}. Le classement compare les durées les plus courtes."
+            steps = listOf(
+                Triple("01", "Départ", "L'horodatage de la première écoute confirmée de cette entité."),
+                Triple("02", "Arrivée", "L'horodatage de sa $ordinal écoute confirmée, celle qui atteint le palier."),
+                Triple("03", "Durée", "Heure d'arrivée moins heure de départ, conservée jusqu'aux secondes et millisecondes disponibles.")
+            )
+            takeaway = "$countingRule Seules les écoutes locales confirmées par NovaStats comptent : ce ne sont pas les streams mondiaux Spotify. Un palier suivant apparaît dès qu'au moins une entité de cette section l'atteint."
+        }
+        else -> return
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(theme.surface)
+                .border(1.dp, color.copy(alpha = 0.32f), RoundedCornerShape(18.dp)).padding(14.dp)
+        ) {
+            Text(title, color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(5.dp))
+            Text(intro, color = theme.text, style = MaterialTheme.typography.bodySmall, lineHeight = 18.sp)
+            Spacer(Modifier.height(8.dp))
+            steps.forEach { (number, heading, detail) ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
+                        .background(theme.background.copy(alpha = 0.58f)).padding(9.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Box(
+                        Modifier.size(27.dp).clip(CircleShape).background(color.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(number, color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(heading, color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                        Text(detail, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, lineHeight = 17.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("À RETENIR", color = color, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, letterSpacing = 0.8.sp)
+            Text(takeaway, color = theme.text, style = MaterialTheme.typography.bodySmall, lineHeight = 18.sp)
+        }
+    }
+}
+
+@Composable
 private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (DetailTarget) -> Unit, onEntry: (RecordEntryRef) -> Unit = {}) {
     val theme = Nova.theme
     val app = LocalContext.current.applicationContext as NovaStatsApp
@@ -1784,6 +1871,11 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                     if (!mostRecordsRecord && !lifespanRecord) row.r.extraData?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
                 }
+            }
+        }
+        if (def.id == "SIMULTANEOUS_NO1_DEBUT" || def.id == "FASTEST_LISTEN_MILESTONE") {
+            item(key = "record-method-guide-${def.id}-${ref.category.dbName}-${ref.sub}") {
+                NewRecordMethodGuide(def.id, ref.category, ref.period, ref.sub, color)
             }
         }
         ref.event?.let { ev ->
@@ -2356,6 +2448,8 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                         when {
                             def.id == "LONGEST_LIFESPAN" -> "📖 Le récit de sa carrière"
                             movementRecord -> "🎞️ Le récit du mouvement"
+                            def.id == "SIMULTANEOUS_NO1_DEBUT" -> "🔎 Pourquoi ces deux débuts sont synchronisés"
+                            def.id == "FASTEST_LISTEN_MILESTONE" -> "⏱️ Le détail de son chronomètre"
                             else -> "🧐 Pourquoi il est là"
                         },
                         color

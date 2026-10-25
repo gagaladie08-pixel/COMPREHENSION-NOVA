@@ -224,7 +224,7 @@ object RecordCatalog {
         ),
         RecordDef(
             36, "SIMULTANEOUS_NO1_DEBUT", "🚀", "Most Simultaneous No.1 Debuts",
-            "Périodes où un nouveau titre et son album débutent tous deux au n°1 du même chart, pour un même artiste.",
+            "Pour un même artiste, compte les périodes où le titre fait sa première entrée au n°1 du Hot 100 ET son album sa première entrée au n°1 d'Albums 75, pendant la même période. L'artiste doit posséder l'album et être crédité sur le titre; une période ne compte qu'une fois.",
             chartPeriods, listOf(RecordCategory.ARTIST), unit = RecordUnit.COUNT
         ),
         RecordDef(
@@ -302,6 +302,15 @@ object RecordCatalog {
 /** Une apparition dans un chart : index de période (0,1,2… consécutif dans le calendrier), position, écoutes. */
 data class RecordAppearance(val periodIndex: Int, val date: String, val position: Int, val plays: Int)
 
+/** Paire titre/album qui valide un double début au #1 pendant la même période de chart. */
+data class SimultaneousNo1DebutMatch(
+    val periodIndex: Int,
+    val trackDate: String,
+    val albumDate: String,
+    val trackId: Long,
+    val albumId: Long
+)
+
 /** Résultat d'un record pour une entité. */
 data class RecordResult(val entityId: Long, val value: Double, val date: String? = null, val extra: String? = null)
 
@@ -358,12 +367,12 @@ object RecordMath {
         albumForTrack: Map<Long, Long>,
         artistForAlbum: Map<Long, Long?>,
         artistsForTrack: Map<Long, Set<Long>>
-    ): Map<Long, Map<Int, String>> {
+    ): Map<Long, List<SimultaneousNo1DebutMatch>> {
         val albumDebuts = albumSeries.mapNotNull { (albumId, series) ->
             series.firstOrNull()?.takeIf { it.position == 1 }?.let { albumId to it }
         }.toMap()
-        val periodsByArtist = HashMap<Long, MutableMap<Int, String>>()
-        for ((trackId, appearances) in trackSeries) {
+        val periodsByArtist = HashMap<Long, MutableMap<Int, SimultaneousNo1DebutMatch>>()
+        for ((trackId, appearances) in trackSeries.toSortedMap()) {
             val trackDebut = appearances.firstOrNull()?.takeIf { it.position == 1 } ?: continue
             val albumId = albumForTrack[trackId] ?: continue
             val albumDebut = albumDebuts[albumId] ?: continue
@@ -371,9 +380,17 @@ object RecordMath {
             val artistId = artistForAlbum[albumId] ?: continue
             if (artistId !in artistsForTrack[trackId].orEmpty()) continue
             val periods = periodsByArtist.getOrPut(artistId) { HashMap() }
-            if (trackDebut.periodIndex !in periods) periods[trackDebut.periodIndex] = trackDebut.date
+            if (trackDebut.periodIndex !in periods) {
+                periods[trackDebut.periodIndex] = SimultaneousNo1DebutMatch(
+                    periodIndex = trackDebut.periodIndex,
+                    trackDate = trackDebut.date,
+                    albumDate = albumDebut.date,
+                    trackId = trackId,
+                    albumId = albumId
+                )
+            }
         }
-        return periodsByArtist.mapValues { (_, periods) -> periods.toSortedMap() }
+        return periodsByArtist.mapValues { (_, periods) -> periods.toSortedMap().values.toList() }
     }
 
     fun cumulative(series: List<RecordAppearance>, maxPosition: Int = Int.MAX_VALUE): Int = series.count { it.position <= maxPosition }
