@@ -126,6 +126,9 @@ interface ScrobbleDao {
     @Query("SELECT * FROM scrobbles WHERE artist_id = :artistId AND status = 'CONFIRMED' ORDER BY started_at")
     suspend fun allOfArtist(artistId: Long): List<ScrobbleEntity>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM scrobbles WHERE track_id = :trackId AND album_id IS NOT NULL)")
+    suspend fun hasAlbumForTrack(trackId: Long): Boolean
+
     @Query("SELECT COUNT(*) FROM scrobbles WHERE track_id = :trackId AND status = 'CONFIRMED'")
     suspend fun countOfTrack(trackId: Long): Int
 
@@ -396,6 +399,10 @@ interface ScrobbleDao {
         WHERE (album_id IS NULL
                OR album_id IN (SELECT a.album_id FROM albums a WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.album_id)))
           AND (SELECT t2.album_id FROM tracks t2 WHERE t2.track_id = scrobbles.track_id) IS NOT NULL
+          AND (
+              (SELECT t3.album_association_since FROM tracks t3 WHERE t3.track_id = scrobbles.track_id) IS NULL
+              OR scrobbles.started_at >= (SELECT t4.album_association_since FROM tracks t4 WHERE t4.track_id = scrobbles.track_id)
+          )
         """
     )
     suspend fun reattachOrphanAlbumPlays(): Int

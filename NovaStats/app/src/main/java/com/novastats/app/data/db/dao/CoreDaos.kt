@@ -112,6 +112,24 @@ interface TrackDao {
     suspend fun missingCover(now: Long, limit: Int): List<TrackEntity>
 
     @Query("SELECT COUNT(*) FROM tracks WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+
+    /** Titres sans album établi, hors associations pivot/écoutes déjà renseignées et tentatives API encore en cache. */
+    @Query(
+        """
+        SELECT t.* FROM tracks t
+        WHERE t.album_id IS NULL AND t.play_count > 0
+          AND NOT EXISTS (SELECT 1 FROM track_albums ta WHERE ta.track_id = t.track_id)
+          AND NOT EXISTS (SELECT 1 FROM scrobbles s WHERE s.track_id = t.track_id AND s.album_id IS NOT NULL)
+          AND NOT EXISTS (
+              SELECT 1 FROM api_cache c
+              WHERE c.entity_type = 'TRACK' AND c.entity_id = t.track_id
+                AND c.data_type = 'ALBUM_MATCH' AND c.expires_at > :now
+          )
+        ORDER BY t.play_count DESC, t.track_id LIMIT :limit
+        """
+    )
+    suspend fun missingAlbumAssociation(now: Long, limit: Int): List<TrackEntity>
+
     /** Contexte bibliothèque (vérification des pochettes) : titres connus d'un artiste / d'un album. */
     @Query("SELECT title FROM tracks WHERE artist_id = :artistId") suspend fun titlesOfArtist(artistId: Long): List<String>
     /** Titres où l'artiste est crédité (principal ou featuring) + titres des fiches homonymes (« X feat. Rihanna », « Rihanna, Y »). */
@@ -383,6 +401,9 @@ interface TrackDao {
 
     @Query("UPDATE tracks SET title = :title WHERE track_id = :id") suspend fun rename(id: Long, title: String)
     @Query("UPDATE tracks SET album_id = :albumId WHERE track_id = :id") suspend fun setAlbum(id: Long, albumId: Long?)
+    /** Association API future-only : les scrobbles antérieurs à [associationSince] restent sans album. */
+    @Query("UPDATE tracks SET album_id = :albumId, album_association_since = :associationSince WHERE track_id = :id")
+    suspend fun setAlbumAssociation(id: Long, albumId: Long?, associationSince: Long?)
     @Query("UPDATE tracks SET artist_id = :artistId WHERE track_id = :id") suspend fun setPrimaryArtist(id: Long, artistId: Long)
     @Query("UPDATE tracks SET artist_id = :into WHERE artist_id = :from") suspend fun moveArtist(from: Long, into: Long)
     @Query("UPDATE tracks SET album_id = :into WHERE album_id = :from") suspend fun moveAlbum(from: Long, into: Long)

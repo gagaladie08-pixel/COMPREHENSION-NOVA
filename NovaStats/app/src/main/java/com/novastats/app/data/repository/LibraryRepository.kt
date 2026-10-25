@@ -7,6 +7,7 @@ import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackArtistEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.data.db.entity.UserCorrectionEntity
+import com.novastats.app.domain.AlbumAssociationPolicy
 import com.novastats.app.domain.AlbumOwnership
 import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.util.runCatchingCancellable
@@ -27,7 +28,16 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class LibraryRepository(private val db: NovaDatabase) {
 
-    data class Resolved(val trackId: Long, val primaryArtistId: Long, val albumId: Long?, val artistIds: List<Long>)
+    data class Resolved(
+        val trackId: Long,
+        val primaryArtistId: Long,
+        val albumId: Long?,
+        val artistIds: List<Long>,
+        val albumAssociationSince: Long? = null
+    ) {
+        /** Associe l'album à cette écoute seulement si son horodatage atteint la borne d'effet. */
+        fun albumIdAt(startedAt: Long): Long? = AlbumAssociationPolicy.albumIdAt(albumId, albumAssociationSince, startedAt)
+    }
 
     // Caches mémoire (clé normalisée) — évitent des milliers de requêtes lors d'un import.
     // resolve() est sérialisé ; les caches restent concurrents car clearCaches()/peekTrackId() sont non suspendus.
@@ -95,11 +105,12 @@ class LibraryRepository(private val db: NovaDatabase) {
         durationMs: Long? = null,
         genre: String? = null,
         albumArtist: String? = null,
-        applyCorrections: Boolean = true
+        applyCorrections: Boolean = true,
+        useReaderAlbum: Boolean = true
     ): Resolved = resolutionMutex.withLock {
         val generation = cacheGeneration.get()
         try {
-            resolveLocked(rawTitleIn, rawArtistsIn, rawAlbumIn, durationMs, genre, albumArtist, applyCorrections)
+            resolveLocked(rawTitleIn, rawArtistsIn, rawAlbumIn, durationMs, genre, albumArtist, applyCorrections, useReaderAlbum)
         } finally {
             if (cacheGeneration.get() != generation) clearCacheEntries()
         }
@@ -112,17 +123,19 @@ class LibraryRepository(private val db: NovaDatabase) {
         durationMs: Long?,
         genre: String?,
         albumArtist: String?,
-        applyCorrections: Boolean
+        applyCorrections: Boolean,
+        useReaderAlbum: Boolean
     ): Resolved {
         require(rawTitleIn.isNotBlank()) { "Titre vide : impossible de créer une piste" }
         val rawTitle = if (applyCorrections) corrected("TITLE", rawTitleIn) ?: rawTitleIn else rawTitleIn
         val rawArtists = if (applyCorrections) corrected("ARTIST", rawArtistsIn) ?: rawArtistsIn else rawArtistsIn
-        val rawAlbum = if (applyCorrections) corrected("ALBUM", rawAlbumIn) else rawAlbumIn
+        val rawAlbum = if (applyCorrections && useReaderAlbum) corrected("ALBUM", rawAlbumIn) else rawAlbumIn
         // 🗂️ Quarantaine : nom de fichier/émission brut ou artiste sans nom → artiste « À trier », jamais de fiche fantôme.
         val dumped = TitleNormalizer.isFileDump(rawTitle) || rawArtists.isBlank() ||
             rawArtists.equals("<unknown>", true) || rawArtists.equals("unknown", true)
         val effectiveArtists = if (dumped) QUARANTINE_ARTIST else rawArtists
-        val effectiveAlbum = if (dumped) null else rawAlbum
+        // En détection, l'album brut reste attaché à l'écoute pour diagnostic, mais n'est pas une source de rattachement.
+        val effectiveAlbum = if (dumped || !useReaderAlbum) null else rawAlbum
         val normalized = TitleNormalizer.normalizeTitle(rawTitle)
         // Cascade artistes : 1) champ artiste du player (lui-même "A & B, C" — noms protégés jamais découpés)  2) feat. dans le titre
         val playerArtists = TitleNormalizer.splitArtists(effectiveArtists)
@@ -138,7 +151,17 @@ class LibraryRepository(private val db: NovaDatabase) {
         // Clé complète = titre + artiste principal + invités (triés) : deux jeux d'invités = deux versions
         val baseKey = TitleNormalizer.normalizeKey(normalized.title) + "|" + TitleNormalizer.normalizeKey(primaryName)
         val fullKey = baseKey + "|" + guestNames.map { TitleNormalizer.normalizeKey(it) }.sorted().joinToString(",")
-        trackCache[fullKey]?.let { return it }
+        trackCache[fullKey]?.let { cached ->
+            val associationSince = db.trackDao().getById(cached.trackId)?.albumAssociationSince
+            if (useReaderAlbum) return cached.copy(albumAssociationSince = associationSince)
+            val resolved = cached.copy(
+                albumId = existingAlbumForTrack(cached.trackId),
+                albumAssociationSince = associationSince
+            )
+            trackCache[fullKey] = resolved
+            peekCache[baseKey] = resolved
+            return resolved
+        }
 
         val artistIds = artistNames.map { resolveArtist(it) }
         val primaryArtistId = artistIds.first()
@@ -160,7 +183,7 @@ class LibraryRepository(private val db: NovaDatabase) {
             )
             if (existing != null && existing.originalTrackId == null && root != null && root.trackId != trackId) db.trackDao().linkToRoot(trackId, root.trackId)
             if (existing != null && albumId != null && existing.albumId != albumId && (existing.albumId == null || albumId in sharedAlbumIds)) db.trackDao().update(existing.copy(albumId = albumId, durationMs = existing.durationMs ?: durationMs, genre = existing.genre ?: genre))
-            return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
+            return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey, preserveExistingAlbum = !useReaderAlbum)
         }
 
         // ---- 1bis. Variante « méta » (« (From F1 The Movie) », « (Taylor's Version) », « (Album Version) »…) :
@@ -175,7 +198,7 @@ class LibraryRepository(private val db: NovaDatabase) {
                     TrackEntity(title = normalized.title, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId, durationMs = durationMs, genre = genre, isRemix = true, originalTrackId = root)
                 )
                 if (variant != null && variant.originalTrackId == null && variant.trackId != root) db.trackDao().linkToRoot(trackId, root)
-                return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
+                return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey, preserveExistingAlbum = !useReaderAlbum)
             }
         }
 
@@ -188,7 +211,7 @@ class LibraryRepository(private val db: NovaDatabase) {
                 TrackEntity(title = plainTitle, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId, durationMs = durationMs, genre = genre)
             )
             adoptOrphans(trackId, plainTitle, artistIds)
-            return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
+            return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey, preserveExistingAlbum = !useReaderAlbum)
         }
 
         val rootId = existingPlain.originalTrackId ?: existingPlain.trackId
@@ -206,7 +229,7 @@ class LibraryRepository(private val db: NovaDatabase) {
                 val extraNames = extra.mapNotNull { k -> db.artistDao().getById(k.drop(1).toLong())?.name }
                 val versionTitle = "$plainTitle (with ${extraNames.joinToString(", ")})"
                 val newRoot = db.trackDao().insert(
-                    TrackEntity(title = plainTitle, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId ?: existingPlain.albumId, durationMs = durationMs ?: existingPlain.durationMs, genre = genre ?: existingPlain.genre)
+                    TrackEntity(title = plainTitle, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId ?: existingPlain.albumId.takeIf { useReaderAlbum }, durationMs = durationMs ?: existingPlain.durationMs, genre = genre ?: existingPlain.genre)
                 )
                 db.trackDao().setTitle(existingPlain.trackId, versionTitle)
                 db.trackDao().linkToRoot(existingPlain.trackId, newRoot)
@@ -227,21 +250,38 @@ class LibraryRepository(private val db: NovaDatabase) {
                     val word = if (extraNames.isNotEmpty() && extraNames.all { TitleNormalizer.normalizeKey(it) in fromTitle }) "feat." else "with"
                     val versionTitle = "$plainTitle ($word ${extraNames.joinToString(", ")})"
                     db.trackDao().findByTitleAndArtist(versionTitle, primaryArtistId)?.trackId ?: db.trackDao().insert(
-                        TrackEntity(title = versionTitle, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId ?: existingPlain.albumId, durationMs = durationMs, genre = genre, isRemix = true, originalTrackId = rootId)
+                        TrackEntity(title = versionTitle, titleRaw = rawTitle, artistId = primaryArtistId, albumId = albumId ?: existingPlain.albumId.takeIf { useReaderAlbum }, durationMs = durationMs, genre = genre, isRemix = true, originalTrackId = rootId)
                     )
                 }
             }
         }
-        return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey)
+        return finish(trackId, primaryArtistId, albumId, artistIds, fullKey, baseKey, preserveExistingAlbum = !useReaderAlbum)
     }
 
+    /** Album déjà établi pour ce titre; la relation pivot couvre aussi les anciennes lignes sans album_id primaire. */
+    private suspend fun existingAlbumForTrack(trackId: Long): Long? =
+        db.trackDao().getById(trackId)?.albumId
+            ?: db.trackLinkDao().trackAlbumsForTrack(trackId).firstOrNull()?.albumId
+
     /** Liens artistes (TOUS les artistes présents, même si le titre était déjà connu) + album, cache, résultat. */
-    private suspend fun finish(trackId: Long, primaryArtistId: Long, albumId: Long?, artistIds: List<Long>, fullKey: String, baseKey: String): Resolved {
+    private suspend fun finish(
+        trackId: Long,
+        primaryArtistId: Long,
+        albumId: Long?,
+        artistIds: List<Long>,
+        fullKey: String,
+        baseKey: String,
+        preserveExistingAlbum: Boolean = false
+    ): Resolved {
         artistIds.forEachIndexed { i, id ->
             db.trackLinkDao().insertTrackArtist(TrackArtistEntity(trackId = trackId, artistId = id, isPrimary = i == 0))
         }
-        albumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = trackId, albumId = it)) }
-        return Resolved(trackId, primaryArtistId, albumId, artistIds).also { trackCache[fullKey] = it; peekCache[baseKey] = it }
+        val existingAlbumId = if (preserveExistingAlbum) existingAlbumForTrack(trackId) else null
+        val resolvedAlbumId = albumId ?: existingAlbumId
+        resolvedAlbumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = trackId, albumId = it)) }
+        val associationSince = db.trackDao().getById(trackId)?.albumAssociationSince
+        return Resolved(trackId, primaryArtistId, resolvedAlbumId, artistIds, associationSince)
+            .also { trackCache[fullKey] = it; peekCache[baseKey] = it }
     }
 
     /**
@@ -396,14 +436,15 @@ class LibraryRepository(private val db: NovaDatabase) {
                 val ids = listOf(r.artistId) + db.trackLinkDao().artistIdsForTrack(r.trackId).filter { it != r.artistId }
                 ids.mapNotNull { db.artistDao().getById(it)?.name }.joinToString(", ").ifBlank { "Artiste inconnu" }
             }
-            val resolved = runCatchingCancellable { resolve(title, artist, r.rawAlbum) }.getOrNull() ?: return@forEachIndexed
-            if (resolved.trackId != r.trackId || resolved.primaryArtistId != r.artistId || (resolved.albumId != null && resolved.albumId != r.albumId)) {
+            val resolved = runCatchingCancellable { resolve(title, artist, r.rawAlbum, useReaderAlbum = false) }.getOrNull() ?: return@forEachIndexed
+            val albumForPlay = resolved.albumIdAt(r.startedAt)
+            if (resolved.trackId != r.trackId || resolved.primaryArtistId != r.artistId || (albumForPlay != null && albumForPlay != r.albumId)) {
                 // UNIQUE(track_id, started_at) : si une écoute du titre cible existe déjà au même instant, celle-ci est un doublon → supprimée
                 val clash = if (resolved.trackId != r.trackId) db.scrobbleDao().findByTrackAndStart(resolved.trackId, r.startedAt) else null
                 if (clash != null && clash.scrobbleId != r.scrobbleId) {
                     db.scrobbleDao().delete(r.scrobbleId); duplicates++
                 } else {
-                    runCatchingCancellable { db.scrobbleDao().relink(r.scrobbleId, resolved.trackId, resolved.primaryArtistId, resolved.albumId ?: r.albumId) }
+                    runCatchingCancellable { db.scrobbleDao().relink(r.scrobbleId, resolved.trackId, resolved.primaryArtistId, albumForPlay ?: r.albumId) }
                         .onFailure { e -> if (e is android.database.sqlite.SQLiteConstraintException) { db.scrobbleDao().delete(r.scrobbleId); duplicates++ } else throw e }
                     moved++
                 }

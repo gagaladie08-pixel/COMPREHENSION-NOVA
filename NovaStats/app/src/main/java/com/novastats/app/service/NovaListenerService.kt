@@ -400,7 +400,15 @@ class NovaListenerService : NotificationListenerService() {
      */
     private suspend fun persist(s: ScrobbleTracker.Session, ended: Boolean) {
         val artistRaw = s.key.artist ?: "Artiste inconnu"
-        val resolved = app.library.resolve(s.key.title, artistRaw, s.key.album, s.key.durationMs, albumArtist = s.key.albumArtist)
+        // L'album du lecteur reste en rawAlbum pour diagnostic; il ne crée ni ne remplace un rattachement d'album.
+        val resolved = app.library.resolve(
+            rawTitleIn = s.key.title,
+            rawArtistsIn = artistRaw,
+            rawAlbumIn = s.key.album,
+            durationMs = s.key.durationMs,
+            albumArtist = s.key.albumArtist,
+            useReaderAlbum = false
+        )
         val now = System.currentTimeMillis()
         val listened = s.listenedMs(now)
         // ⚠️ À corriger — score par source : MediaSession 100 · Notification complète 70 · incomplète 50 ;
@@ -408,7 +416,7 @@ class NovaListenerService : NotificationListenerService() {
         val review = ReviewRules.evaluate(s.key.title, s.key.artist, s.detectionSource)
         val confirmed = review.reason != null && app.library.isConfirmed("TITLE", s.key.title) && (s.key.artist.isNullOrBlank() || app.library.isConfirmed("ARTIST", s.key.artist))
         val entity = ScrobbleEntity(
-            trackId = resolved.trackId, artistId = resolved.primaryArtistId, albumId = resolved.albumId,
+            trackId = resolved.trackId, artistId = resolved.primaryArtistId, albumId = resolved.albumIdAt(s.startedAt),
             startedAt = s.startedAt, validatedAt = s.validatedAt, endedAt = if (ended) now else null,
             durationListenedMs = listened, sourceApp = s.key.sourceApp, detectionSource = s.detectionSource,
             confidenceScore = if (confirmed) 100 else review.score,

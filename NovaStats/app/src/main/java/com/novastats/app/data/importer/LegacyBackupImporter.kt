@@ -8,6 +8,7 @@ import com.novastats.app.data.db.entity.ScrobbleStatus
 import com.novastats.app.data.repository.AlbumSharing
 import com.novastats.app.data.repository.LibraryRepository
 import com.novastats.app.domain.TitleNormalizer
+import com.novastats.app.domain.AlbumAssociationPolicy
 import com.novastats.app.data.repository.StatsRebuilder
 import com.novastats.app.domain.ScrobbleRules
 import kotlinx.serialization.Serializable
@@ -45,7 +46,9 @@ data class LegacySong(
     val duration: Long? = null,
     val genre: String? = null,
     /** ID source du titre racine ; absent des anciens backups, utilisé pour restaurer les liens de versions. */
-    val originalSongId: Long? = null
+    val originalSongId: Long? = null,
+    /** Date d'effet d'une association API future-only ; absente des anciens backups pour compatibilité. */
+    val albumAssociationSince: Long? = null
 )
 
 @Serializable
@@ -135,16 +138,28 @@ object LegacyBackupImporter {
 
         onProgress("Résolution de ${backup.songs.size} titres…")
         val trackBySongId = HashMap<Long, LibraryRepository.Resolved>(backup.songs.size * 2)
+        val associationSinceByTrackId = HashMap<Long, Long?>()
         try {
         db.withTransaction {
             backup.songs.forEachIndexed { i, song ->
-                trackBySongId[song.id] = library.resolve(
+                val resolved = library.resolve(
                     rawTitleIn = song.title,
                     rawArtistsIn = song.artistNames,
                     rawAlbumIn = song.albumName,
                     durationMs = song.duration,
                     genre = song.genre
                 )
+                trackBySongId[song.id] = resolved
+                val current = db.trackDao().getById(resolved.trackId)
+                val importedSince = song.albumAssociationSince
+                if (importedSince != null) {
+                    val albumId = current?.albumId ?: resolved.albumId
+                    if (albumId != null) {
+                        val mergedSince = AlbumAssociationPolicy.latestAssociationSince(current?.albumAssociationSince, importedSince)
+                        db.trackDao().setAlbumAssociation(resolved.trackId, albumId, mergedSince)
+                    }
+                }
+                associationSinceByTrackId[resolved.trackId] = db.trackDao().getById(resolved.trackId)?.albumAssociationSince
                 if (i % 200 == 0) onProgress("Titres : $i / ${backup.songs.size}")
             }
             // Restaure après résolution : les identifiants du backup ne sont pas ceux de cette base.
@@ -170,6 +185,11 @@ object LegacyBackupImporter {
         val songById = backup.songs.associateBy { it.id }
         val rootOf = HashMap<Long, Long>()
         suspend fun root(trackId: Long): Long = rootOf.getOrPut(trackId) { db.trackDao().getById(trackId)?.originalTrackId ?: trackId }
+        suspend fun albumForPlay(resolved: LibraryRepository.Resolved, startedAt: Long): Long? {
+            val associationSince = if (associationSinceByTrackId.containsKey(resolved.trackId)) associationSinceByTrackId[resolved.trackId]
+                else db.trackDao().getById(resolved.trackId)?.albumAssociationSince
+            return AlbumAssociationPolicy.albumIdAt(resolved.albumId, associationSince, startedAt)
+        }
 
         suspend fun flush() {
             if (batch.isEmpty()) return
@@ -190,7 +210,8 @@ object LegacyBackupImporter {
                 val existing = db.scrobbleDao().findInGroupAt(r.trackId, root(r.trackId), play.playedAt)
                 if (existing != null) {
                     if (existing.trackId != r.trackId || existing.rawArtist == null) {
-                        db.scrobbleDao().repair(existing.scrobbleId, r.trackId, r.primaryArtistId, r.albumId ?: existing.albumId, song?.title ?: existing.rawTitle, song?.artistNames ?: existing.rawArtist, song?.albumName ?: existing.rawAlbum)
+                        val albumId = albumForPlay(r, play.playedAt) ?: existing.albumId
+                        db.scrobbleDao().repair(existing.scrobbleId, r.trackId, r.primaryArtistId, albumId, song?.title ?: existing.rawTitle, song?.artistNames ?: existing.rawArtist, song?.albumName ?: existing.rawAlbum)
                         if (existing.trackId != r.trackId) repaired++ else duplicates++
                     } else duplicates++
                     return@forEachIndexed
@@ -200,7 +221,7 @@ object LegacyBackupImporter {
                 batch += ScrobbleEntity(
                     trackId = r.trackId,
                     artistId = r.primaryArtistId,
-                    albumId = r.albumId,
+                    albumId = albumForPlay(r, play.playedAt),
                     rawTitle = song?.title,
                     rawArtist = song?.artistNames,
                     rawAlbum = song?.albumName,
@@ -242,7 +263,7 @@ object LegacyBackupImporter {
                     trashBatch += ScrobbleEntity(
                         trackId = resolved.trackId,
                         artistId = resolved.primaryArtistId,
-                        albumId = resolved.albumId,
+                        albumId = albumForPlay(resolved, play.playedAt),
                         startedAt = play.playedAt,
                         validatedAt = validatedAt,
                         endedAt = endedAt,

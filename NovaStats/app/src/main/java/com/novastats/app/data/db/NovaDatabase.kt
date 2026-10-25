@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -198,15 +198,22 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v12 : borne temporelle du rattachement d'album, pour ne jamais attribuer rétroactivement les anciennes écoutes. */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN album_association_since INTEGER")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 // Volontairement PAS de fallbackToDestructiveMigrationOnDowngrade() : il réinitialisait
                 // la base au moindre retour de version. Installer un build plus ancien que la base
                 // effaçait donc les écoutes en silence — plusieurs milliers, irrécupérables.
-                // Les 10 migrations couvrent v1 → v11 : la montée de version est toujours possible,
+                // Les 11 migrations couvrent v1 → v12 : la montée de version est toujours possible,
                 // et un downgrade échoue désormais à l'ouverture au lieu de tout détruire.
                 .build()
                 .also { instance = it }

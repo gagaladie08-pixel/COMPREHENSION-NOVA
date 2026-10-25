@@ -38,6 +38,7 @@ class NovaStatsApp : Application() {
             enricher.onTrackFlagged = { trackId, title, artist, proposal, score ->
                 com.novastats.app.service.ReviewNotifier.notifyFlagged(this@NovaStatsApp, trackId, title, artist, proposal, score)
             }
+            enricher.onAlbumLinked = { library.clearCaches() }
         }
     }
     val editor: DataEditorManager by lazy { DataEditorManager(database, rebuilder, library) }

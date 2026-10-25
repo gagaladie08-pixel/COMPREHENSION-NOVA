@@ -38,7 +38,7 @@ data class NovaExport(
     /** Écoutes retirées des statistiques, préservées séparément afin qu'un backup avant purge puisse les restaurer. */
     val trashed_plays: List<ExportTrashedPlay> = emptyList()
 ) {
-    companion object { const val FORMAT_VERSION = "2.4" }
+    companion object { const val FORMAT_VERSION = "2.5" }
 }
 
 @Serializable data class ExportTrashedPlay(
@@ -90,7 +90,8 @@ object BackupExporter {
                 id = t.trackId, title = t.title,
                 artistNames = ids.mapNotNull { artistName[it] }.distinct().joinToString(", "),
                 albumName = t.albumId?.let { albumTitle[it] }, duration = t.durationMs, genre = t.genre,
-                originalSongId = t.originalTrackId
+                originalSongId = t.originalTrackId,
+                albumAssociationSince = t.albumAssociationSince
             )
         }
         val plays = db.scrobbleDao().allConfirmedOrdered().filter { it.status == ScrobbleStatus.CONFIRMED }

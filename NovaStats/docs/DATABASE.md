@@ -61,7 +61,8 @@ Fichier source : `app/src/main/java/com/novastats/app/data/db/entity/*.kt`
   s'appuient ainsi sur une même recherche, et les séries quotidiennes sont déjà ordonnées par date.
 - **Schéma v10 (`MIGRATION_9_10`)** : ajoute les index `tracks(original_track_id)` et `tracks(first_played_at)` pour les repliements de versions et rangs de découverte.
 - **Schéma v11 (`MIGRATION_10_11`)** : crée `pantheon_speed_history`, un historique non destructif réservé à Fastest Panthéon. Il conserve la date exacte, le nombre d'écoutes et la voie la plus rapide (écoutes, certifications ou égalité), sans modifier l'historique utilisé par l'écran Panthéon classique. Au premier lancement, une réparation ciblée reconstruit ce cache et les deux records Fastest uniquement.
-- Les migrations v7→v10 ne touchent qu'aux index. La v11 ajoute une table dédiée sans modifier les écoutes ni l'historique Panthéon classique; la réparation de démarrage ne recalcule que les deux caches Fastest.
+- **Schéma v12 (`MIGRATION_11_12`)** : ajoute `tracks.album_association_since`, borne temporelle des associations d'album trouvées par API. Le réattachement d'écoutes orphelines ne s'applique qu'à partir de cette date; les backups v2.5 la conservent et l'import garde les écoutes antérieures sans album.
+- Les migrations v7→v10 ne touchent qu'aux index. La v11 ajoute une table dédiée sans modifier les écoutes ni l'historique Panthéon classique; la v12 ajoute un seul champ nullable sans réécrire les écoutes existantes.
 - Les index simples `created_at` et `is_read` restent dédiés au tri récent et au filtrage de lecture.
 
 ## Flux de données

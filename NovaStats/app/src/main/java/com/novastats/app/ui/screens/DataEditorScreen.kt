@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.NovaStatsApp
+import com.novastats.app.data.api.AlbumMatchSuggestion
 import com.novastats.app.data.db.dao.RankedAlbum
 import com.novastats.app.data.db.dao.RankedTrack
 import com.novastats.app.data.db.dao.RecentScrobble
@@ -1245,7 +1246,7 @@ private val playFmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
 
 private fun editTypeEmoji(t: String) = when (t) {
     "RENAME" -> "✏️"; "MERGE", "LINK_VERSION" -> "🔗"; "DELETE_PLAY", "TRASH_PURGE" -> "🗑️"
-    "TRASH_RESTORE" -> "↩️"; "ARTIST_CHANGE" -> "🎤"; "ALBUM_CHANGE", "ALBUM_SHARED" -> "💿"
+    "TRASH_RESTORE" -> "↩️"; "ARTIST_CHANGE" -> "🎤"; "ALBUM_CHANGE", "ALBUM_SHARED", "API_ALBUM_MATCH", "API_ALBUM_CONFIRM" -> "💿"
     "COVER_CHANGE" -> "🖼️"; "GHOST_PURGE" -> "⚠️"
     "BATCH_ARTIST_CHANGE" -> "🎤"; "BATCH_ALBUM_CHANGE" -> "💿"; else -> "✅"
 }
@@ -1255,6 +1256,7 @@ private fun editTypeLabel(t: String) = when (t) {
     "DELETE_PLAY" -> "Mise à la corbeille"; "TRASH_RESTORE" -> "Restauration de corbeille"
     "TRASH_PURGE" -> "Purge définitive"; "ARTIST_CHANGE" -> "Changement d'artiste"
     "ALBUM_CHANGE" -> "Changement d'album"; "ALBUM_SHARED" -> "Marquage multi-artistes"
+    "API_ALBUM_MATCH" -> "Album associé automatiquement"; "API_ALBUM_CONFIRM" -> "Album confirmé"
     "COVER_CHANGE" -> "Modification d'image"; "REVIEWED" -> "Marqué comme correct"
     "REVIEW_IGNORE" -> "Correction ignorée"; "REVIEW_FIX" -> "Correction des métadonnées"
     "GHOST_PURGE" -> "Nettoyage définitif"
@@ -1324,13 +1326,50 @@ private fun EditorActionDialog(
     var pendingMergeFromSide by remember { mutableStateOf<DupSide?>(null) }
     var pendingMergeToSide by remember { mutableStateOf<DupSide?>(null) }
     var pendingMergeDescription by remember { mutableStateOf("") }
+    var albumSuggestions by remember { mutableStateOf<List<AlbumMatchSuggestion>>(emptyList()) }
+    var albumLookupLoading by remember { mutableStateOf(false) }
+    var albumLookupError by remember { mutableStateOf<String?>(null) }
+    var albumAlreadyLinked by remember { mutableStateOf(false) }
+    var albumLookupRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(action) {
         mode = "MENU"
         pick = ""
         pendingMerge = null
         pendingMergeFromSide = null
         pendingMergeToSide = null
+        albumSuggestions = emptyList()
+        albumLookupError = null
+        albumAlreadyLinked = false
+        albumLookupRequest = 0
         text = when (action) { is EditorAction.Track -> action.t.track.title; is EditorAction.Artist -> action.a.name; is EditorAction.Album -> action.al.album.title; is EditorAction.Play -> "" }
+    }
+    LaunchedEffect(action, mode, albumLookupRequest) {
+        if (action is EditorAction.Track && mode == "ALBUM_SUGGESTIONS") {
+            albumLookupLoading = true
+            albumLookupError = null
+            try {
+                val trackId = action.t.track.trackId
+                val result = withContext(Dispatchers.IO) {
+                    val current = app.database.trackDao().getById(trackId)
+                    if (current == null) return@withContext emptyList<AlbumMatchSuggestion>() to true
+                    val wasLinked = current.albumId != null || app.database.trackLinkDao().trackAlbumsForTrack(trackId).isNotEmpty() ||
+                        app.database.scrobbleDao().hasAlbumForTrack(trackId)
+                    val found = if (wasLinked) emptyList() else app.enricher.findTrackAlbumCandidates(trackId, forceRefresh = albumLookupRequest > 0)
+                    val updated = app.database.trackDao().getById(trackId)
+                    val linkedNow = updated?.albumId != null || app.database.trackLinkDao().trackAlbumsForTrack(trackId).isNotEmpty() ||
+                        app.database.scrobbleDao().hasAlbumForTrack(trackId)
+                    found to linkedNow
+                }
+                albumSuggestions = result.first
+                albumAlreadyLinked = result.second
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                albumLookupError = "Recherche impossible : ${error.message ?: error.javaClass.simpleName}"
+            } finally { albumLookupLoading = false }
+        } else {
+            albumLookupLoading = false
+        }
     }
     LaunchedEffect(action, mode, pick) {
         if (action is EditorAction.Track && mode == "MERGE") {
@@ -1376,6 +1415,7 @@ private fun EditorActionDialog(
                                 MenuItem("✏️ Renommer") { mode = "RENAME" }
                                 MenuItem("🎤 Changer l'artiste") { text = artists.firstOrNull { it.artistId == action.t.track.artistId }?.name ?: action.t.artistName; mode = "ARTIST" }
                                 MenuItem("💿 Changer l'album") { text = action.t.albumTitle ?: ""; mode = "ALBUM" }
+                                if (action.t.albumTitle == null) MenuItem("🔎 Rechercher l'album du morceau") { albumLookupRequest = 0; mode = "ALBUM_SUGGESTIONS" }
                                 MenuItem("🔗 Fusionner avec un autre titre") { mode = "MERGE" }
                                 MenuItem("✅ Marquer comme correct") { exec { editor.markReviewed(action.t.track.trackId) }; onDismiss() }
                             }
@@ -1421,6 +1461,71 @@ private fun EditorActionDialog(
                             else albums.filter { q.isNotEmpty() && it.album.title.lowercase().contains(q) }.take(5).map { it.album.title }
                             hints.forEach { h -> MenuItem("→ $h") { text = h } }
                         }
+                    }
+                    "ALBUM_SUGGESTIONS" -> {
+                        Text(
+                            "Recherche par titre, artiste, durée et listes de pistes. L'album annoncé par le lecteur n'est pas utilisé comme preuve.",
+                            color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                        )
+                        if (albumLookupLoading) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp), color = theme.accent)
+                            Text("Vérification des catalogues musicaux…", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                        }
+                        albumLookupError?.let { Text("⚠️ $it", color = Color(0xFFB3261E), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) }
+                        when {
+                            albumAlreadyLinked -> Text(
+                                "Ce morceau possède déjà une association d'album (ou des écoutes historiquement liées). Rien n'a été remplacé.",
+                                color = theme.textSecondary, modifier = Modifier.padding(top = 10.dp)
+                            )
+                            albumSuggestions.isEmpty() && !albumLookupLoading && albumLookupError == null -> Text(
+                                "Aucune proposition assez solide. L'album reste vide ; tu peux relancer la recherche plus tard.",
+                                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp)
+                            )
+                        }
+                        albumSuggestions.forEach { suggestion ->
+                            Column(
+                                Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp))
+                                    .background(theme.surface.copy(alpha = 0.72f)).padding(10.dp)
+                            ) {
+                                Text("💿 ${suggestion.albumTitle}", color = theme.text, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${suggestion.kind.label}${if (suggestion.isCompilation) " · compilation" else ""}" +
+                                        (suggestion.releaseDate?.let { " · $it" } ?: ""),
+                                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                                )
+                                Text("Confiance : ${suggestion.confidence} % · Sources : ${suggestion.sources.joinToString(", ")}", color = theme.accent, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    if (suggestion.tracklistVerified) "✅ Morceau et version trouvés dans une liste de pistes."
+                                    else "⚠️ Liste de pistes non vérifiable : proposition à contrôler manuellement.",
+                                    color = if (suggestion.tracklistVerified) theme.textSecondary else Color(0xFFB3261E),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                if (suggestion.reasons.isNotEmpty()) Text(
+                                    suggestion.reasons.joinToString(" · "), color = theme.textSecondary,
+                                    style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 3.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        val trackId = (action as? EditorAction.Track)?.t?.track?.trackId
+                                        if (trackId != null) {
+                                            exec {
+                                                check(app.enricher.confirmTrackAlbumSuggestion(trackId, suggestion)) {
+                                                    "L'association a changé entre-temps ; l'album n'a pas été remplacé."
+                                                }
+                                            }
+                                            onDismiss()
+                                        }
+                                    },
+                                    enabled = !albumLookupLoading,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = theme.accent)
+                                ) { Text("Associer cet album · prochaines écoutes seulement", color = theme.text) }
+                            }
+                        }
+                        if (!albumAlreadyLinked) TextButton(
+                            onClick = { albumLookupRequest++ }, enabled = !albumLookupLoading,
+                            modifier = Modifier.align(Alignment.End)
+                        ) { Text("↻ Actualiser les propositions", color = theme.primary) }
                     }
                     "MERGE" -> {
                         OutlinedTextField(value = pick, onValueChange = { pick = it }, label = { Text("Rechercher la cible…") }, singleLine = true, modifier = Modifier.fillMaxWidth())

@@ -1,6 +1,7 @@
 package com.novastats.app.data.api
 
 import android.util.Log
+import androidx.room.withTransaction
 import com.novastats.app.data.ApiKeys
 import com.novastats.app.data.api.HttpJson.HttpException
 import com.novastats.app.data.db.NovaDatabase
@@ -9,9 +10,13 @@ import com.novastats.app.data.db.entity.ApiCacheEntity
 import com.novastats.app.data.db.entity.ApiReliabilityEntity
 import com.novastats.app.data.db.entity.ArtistEntity
 import com.novastats.app.data.db.entity.EntityType
+import com.novastats.app.data.db.entity.EditHistoryEntity
+import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.domain.ApiSource
+import com.novastats.app.domain.AlbumReleaseKind
+import com.novastats.app.domain.AlbumReleasePolicy
 import com.novastats.app.domain.DataType
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.MetaCandidate
@@ -22,13 +27,57 @@ import com.novastats.app.domain.TitleNormalizer
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+/** Proposition d'album vérifiée pour un morceau; sérialisée dans api_cache pour l'afficher plus tard dans l'éditeur. */
+@Serializable
+data class AlbumMatchSuggestion(
+    val albumTitle: String,
+    val artistName: String,
+    val releaseKind: String,
+    val releaseDate: String? = null,
+    val coverUrl: String? = null,
+    val confidence: Int,
+    val sources: List<String> = emptyList(),
+    val tracklistVerified: Boolean = false,
+    val albumMbid: String? = null,
+    val isCompilation: Boolean = false,
+    val isShared: Boolean = false,
+    val reasons: List<String> = emptyList()
+) {
+    val kind: AlbumReleaseKind
+        get() = runCatching { AlbumReleaseKind.valueOf(releaseKind) }.getOrDefault(AlbumReleaseKind.UNKNOWN)
+}
+
+@Serializable
+private data class AlbumMatchSuggestionPayload(val candidates: List<AlbumMatchSuggestion>)
+
+private data class TrackAlbumEvidence(
+    val source: ApiSource,
+    val apiCandidate: MetaCandidate,
+    val albumTitle: String,
+    val trackTitle: String,
+    val trackArtist: String,
+    val durationMs: Long?,
+    val releaseDate: String?,
+    val coverUrl: String?,
+    val externalAlbumId: String?,
+    val albumMbid: String?,
+    val releaseType: String?,
+    val tracklistVerified: Boolean,
+    val score: Int
+)
 
 /** État observable de l'enrichissement (affiché dans Réglages → APIs). */
 object EnrichmentState {
@@ -118,7 +167,11 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
     /** 🟡 Correspondance acceptée avec flag (70-89) → notification discrète (branché par NovaStatsApp). */
     var onTrackFlagged: (suspend (trackId: Long, title: String, artist: String, proposal: String, score: Int) -> Unit)? = null
+    /** Invalidation du cache de résolution après l'association d'un album trouvé par cascade. */
+    var onAlbumLinked: (suspend (trackId: Long) -> Unit)? = null
 
+    private val albumMatchJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val albumMatchSources = listOf(ApiSource.MUSICBRAINZ, ApiSource.DEEZER, ApiSource.ITUNES, ApiSource.LASTFM, ApiSource.THEAUDIODB)
     private val musicBrainz = MusicBrainzApi()
     private val apis: Map<ApiSource, MusicApi> = listOf(
         ITunesApi(), DeezerApi(), musicBrainz, LastFmApi(), DiscogsApi(), GeniusApi(),
@@ -155,6 +208,357 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         tracklistCache.put(key, list ?: NONE)
         return list
     }
+
+    /**
+     * Recherche les albums d'un morceau sans utiliser l'album brut du lecteur. Une réponse en cache évite de
+     * rappeler les mêmes sources; [forceRefresh] est réservé à l'action explicite de l'utilisateur.
+     */
+    suspend fun findTrackAlbumCandidates(trackId: Long, forceRefresh: Boolean = false): List<AlbumMatchSuggestion> {
+        val track = db.trackDao().getById(trackId) ?: return emptyList()
+        if (track.albumId != null || db.trackLinkDao().trackAlbumsForTrack(trackId).isNotEmpty() || db.scrobbleDao().hasAlbumForTrack(trackId)) return emptyList()
+        if (forceRefresh) {
+            db.apiCacheDao().clearEntity(EntityType.TRACK, trackId, DataType.ALBUM_MATCH)
+        } else {
+            db.apiCacheDao().valid(EntityType.TRACK, trackId, DataType.ALBUM_MATCH)?.let { cached ->
+                if (cached.source == "NONE") return emptyList()
+                val decoded = runCatching {
+                    albumMatchJson.decodeFromString(AlbumMatchSuggestionPayload.serializer(), cached.cachedUrl.orEmpty()).candidates
+                }.getOrNull()
+                if (decoded != null) {
+                    val ranked = rankAlbumSuggestions(decoded)
+                    automaticAlbumSuggestion(ranked)?.let { suggestion ->
+                        if (applyTrackAlbumSuggestion(trackId, suggestion, automatic = true)) return emptyList()
+                    }
+                    return ranked
+                }
+                db.apiCacheDao().clearEntity(EntityType.TRACK, trackId, DataType.ALBUM_MATCH)
+            }
+        }
+        val artistName = db.artistDao().getById(track.artistId)?.name?.takeIf { it.isNotBlank() } ?: return emptyList()
+        val suggestions = discoverAlbumCandidates(track, artistName)
+        val automatic = automaticAlbumSuggestion(suggestions)
+        if (automatic != null && applyTrackAlbumSuggestion(trackId, automatic, automatic = true)) return emptyList()
+        val now = System.currentTimeMillis()
+        db.apiCacheDao().clearEntity(EntityType.TRACK, trackId, DataType.ALBUM_MATCH)
+        db.apiCacheDao().insert(
+            ApiCacheEntity(
+                entityType = EntityType.TRACK,
+                entityId = trackId,
+                source = if (suggestions.isEmpty()) "NONE" else "ALBUM_MATCH",
+                dataType = DataType.ALBUM_MATCH,
+                cachedUrl = suggestions.takeIf { it.isNotEmpty() }?.let {
+                    albumMatchJson.encodeToString(AlbumMatchSuggestionPayload.serializer(), AlbumMatchSuggestionPayload(it))
+                },
+                confidenceScore = suggestions.maxOfOrNull { it.confidence } ?: 0,
+                expiresAt = now + if (suggestions.isEmpty()) MetadataMatching.NEGATIVE_TTL_MS else 30L * 24 * 3_600_000
+            )
+        )
+        return suggestions
+    }
+
+    /** Applique une proposition vérifiée au morceau pour les prochaines écoutes seulement. */
+    suspend fun confirmTrackAlbumSuggestion(trackId: Long, suggestion: AlbumMatchSuggestion): Boolean =
+        applyTrackAlbumSuggestion(trackId, suggestion, automatic = false)
+
+    /** Sélection unique, vérifiée par liste de pistes et corroborée par deux catalogues minimum. */
+    private fun automaticAlbumSuggestion(suggestions: List<AlbumMatchSuggestion>): AlbumMatchSuggestion? {
+        val only = suggestions.singleOrNull() ?: return null
+        return only.takeIf {
+            it.confidence >= 95 && it.tracklistVerified && it.sources.distinct().size >= 2 &&
+                AlbumReleasePolicy.isAutoLinkable(it.kind)
+        }
+    }
+
+    private suspend fun applyTrackAlbumSuggestion(
+        trackId: Long,
+        suggestion: AlbumMatchSuggestion,
+        automatic: Boolean
+    ): Boolean {
+        val linkedAt = System.currentTimeMillis()
+        val albumId = db.withTransaction {
+            val track = db.trackDao().getById(trackId) ?: return@withTransaction null
+            if (track.albumId != null || db.trackLinkDao().trackAlbumsForTrack(trackId).isNotEmpty() || db.scrobbleDao().hasAlbumForTrack(trackId)) {
+                return@withTransaction null
+            }
+            val rawTitle = suggestion.albumTitle.trim()
+            val title = TitleNormalizer.normalizeAlbumTitle(rawTitle)
+            if (title.isBlank()) return@withTransaction null
+            val shared = suggestion.isShared || suggestion.isCompilation
+            val ownerId = if (shared) null else track.artistId
+            val existing = if (shared) db.albumDao().findShared(title) else db.albumDao().findByTitleAndArtist(title, track.artistId)
+            val linkedAlbumId = existing?.albumId ?: db.albumDao().insert(
+                AlbumEntity(
+                    title = title,
+                    titleRaw = rawTitle,
+                    artistId = ownerId,
+                    coverUrl = suggestion.coverUrl,
+                    coverSource = suggestion.coverUrl?.let { suggestion.sources.firstOrNull() },
+                    releaseDate = suggestion.releaseDate,
+                    isCompilation = suggestion.isCompilation,
+                    mbid = suggestion.albumMbid
+                )
+            )
+            if (existing != null) {
+                val enriched = existing.copy(
+                    coverUrl = existing.coverUrl ?: suggestion.coverUrl,
+                    coverSource = existing.coverSource ?: suggestion.coverUrl?.let { suggestion.sources.firstOrNull() },
+                    releaseDate = existing.releaseDate ?: suggestion.releaseDate,
+                    mbid = existing.mbid ?: suggestion.albumMbid,
+                    isCompilation = existing.isCompilation || suggestion.isCompilation
+                )
+                if (enriched != existing) db.albumDao().update(enriched)
+            }
+            db.trackDao().setAlbumAssociation(trackId, linkedAlbumId, linkedAt)
+            db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = trackId, albumId = linkedAlbumId))
+            db.editorDao().insertEdit(
+                EditHistoryEntity(
+                    type = if (automatic) "API_ALBUM_MATCH" else "API_ALBUM_CONFIRM",
+                    entityType = "TRACK",
+                    entityId = trackId,
+                    before = "Aucun album",
+                    after = title,
+                    extraData = "albumId=$linkedAlbumId;score=${suggestion.confidence};sources=${suggestion.sources.joinToString(",")};kind=${suggestion.releaseKind};futureOnly=1"
+                )
+            )
+            db.editorDao().trimTo50()
+            linkedAlbumId
+        } ?: return false
+        db.apiCacheDao().clearEntity(EntityType.TRACK, trackId, DataType.ALBUM_MATCH)
+        onAlbumLinked?.invoke(trackId)
+        EnrichmentState.log(
+            "💿 ${if (automatic) "Album associé" else "Album confirmé"} pour le titre #$trackId → « ${suggestion.albumTitle} » (${suggestion.confidence} %, prochaines écoutes uniquement)"
+        )
+        return albumId > 0L
+    }
+
+    private suspend fun discoverAlbumCandidates(track: TrackEntity, artistName: String): List<AlbumMatchSuggestion> {
+        val enabled = albumMatchSources.filter { hasKey(it) && apis.containsKey(it) }
+        val rawTrackTitle = track.titleRaw.takeIf { it.isNotBlank() } ?: track.title
+        val versionTags = audibleVersionTags(rawTrackTitle)
+        val searchTitle = if (versionTags.isNotEmpty()) rawTrackTitle else track.title
+        val comparableTitle = TitleNormalizer.normalizeTitle(rawTrackTitle).title
+        val directResults = mutableListOf<Pair<ApiSource, MetaCandidate>>()
+
+        for (group in enabled.chunked(3)) {
+            val results = coroutineScope {
+                group.map { source -> async {
+                    val result = runCatchingCancellable {
+                        withTimeoutOrNull(18_000L) {
+                            if (source == ApiSource.MUSICBRAINZ) musicBrainz.searchTrackAlbumCandidates(searchTitle, artistName)
+                            else apis.getValue(source).searchTrack(searchTitle, artistName)
+                        }
+                    }
+                    val found = result.getOrNull()
+                    when {
+                        result.isFailure -> EnrichmentState.error(source.label, result.exceptionOrNull()!!)
+                        found == null -> EnrichmentState.log("⚠️ ${source.label} : délai dépassé pour l'album de « ${track.title} »")
+                        else -> EnrichmentState.clearError(source.label)
+                    }
+                    source to found.orEmpty()
+                } }.map { it.await() }
+            }
+            results.forEach { (source, found) -> directResults += found.map { source to it } }
+        }
+
+        fun evidence(source: ApiSource, candidate: MetaCandidate): TrackAlbumEvidence? {
+            val albumTitle = candidate.album?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            if (!trackTitleMatchesForAlbum(track, candidate.name)) return null
+            val candidateTitle = TitleNormalizer.normalizeTitle(candidate.name).title
+            val score = preliminaryAlbumMatchScore(
+                comparableTitle, artistName, candidateTitle, candidate.artist, track.durationMs, candidate.durationMs
+            ) ?: return null
+            return TrackAlbumEvidence(
+                source = source,
+                apiCandidate = candidate,
+                albumTitle = albumTitle,
+                trackTitle = candidate.name,
+                trackArtist = candidate.artist.orEmpty(),
+                durationMs = candidate.durationMs,
+                releaseDate = candidate.releaseDate,
+                coverUrl = candidate.imageUrl,
+                externalAlbumId = candidate.externalAlbumId,
+                albumMbid = candidate.externalAlbumId.takeIf { source == ApiSource.MUSICBRAINZ },
+                releaseType = candidate.releaseType,
+                tracklistVerified = false,
+                score = (score - albumEditionPenalty(albumTitle)).coerceIn(0, 80)
+            )
+        }
+
+        val primaryEvidence = directResults.mapNotNull { (source, candidate) -> evidence(source, candidate) }
+        val candidates = primaryEvidence.toMutableList()
+
+        // Discogs ne fournit pas le titre de la piste dans sa recherche de sortie : il ne sert qu'à confirmer
+        // quelques albums déjà proposés par une source piste→album, jamais à les inventer seul.
+        if (hasKey(ApiSource.DISCOGS) && primaryEvidence.isNotEmpty()) {
+            val seeds = primaryEvidence.distinctBy { TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(it.albumTitle)) }
+                .sortedByDescending { it.score }.take(3)
+            val discogs = apis[ApiSource.DISCOGS] as? DiscogsApi
+            if (discogs != null) {
+                val discogsResults = coroutineScope {
+                    seeds.map { seed -> async {
+                        val result = runCatchingCancellable {
+                            withTimeoutOrNull(18_000L) { discogs.searchAlbum(seed.albumTitle, artistName) }
+                        }
+                        when {
+                            result.isFailure -> EnrichmentState.error(ApiSource.DISCOGS.label, result.exceptionOrNull()!!)
+                            result.getOrNull() == null -> EnrichmentState.log("⚠️ Discogs : délai dépassé pour « ${seed.albumTitle} »")
+                            else -> EnrichmentState.clearError(ApiSource.DISCOGS.label)
+                        }
+                        seed to result.getOrNull().orEmpty()
+                    } }.map { it.await() }
+                }.flatMap { (seed, found) -> found.map { seed to it } }
+                discogsResults.forEach { (seed, candidate) ->
+                    val sameAlbum = MetadataMatching.similarity(
+                        TitleNormalizer.normalizeAlbumTitle(candidate.name), TitleNormalizer.normalizeAlbumTitle(seed.albumTitle)
+                    ) >= 0.85
+                    if (sameAlbum) {
+                        val score = preliminaryAlbumMatchScore(
+                            comparableTitle, artistName, comparableTitle, artistName, track.durationMs, null
+                        ) ?: 0
+                        candidates += TrackAlbumEvidence(
+                            source = ApiSource.DISCOGS,
+                            apiCandidate = candidate,
+                            albumTitle = candidate.name,
+                            trackTitle = track.title,
+                            trackArtist = artistName,
+                            durationMs = null,
+                            releaseDate = candidate.releaseDate ?: seed.releaseDate,
+                            coverUrl = candidate.imageUrl ?: seed.coverUrl,
+                            externalAlbumId = candidate.externalAlbumId,
+                            albumMbid = null,
+                            releaseType = candidate.releaseType,
+                            tracklistVerified = false,
+                            score = (score - albumEditionPenalty(candidate.name)).coerceIn(0, 80)
+                        )
+                    }
+                }
+            }
+        }
+
+        val toVerify = candidates.distinctBy {
+            "${it.source.name}|${it.externalAlbumId ?: TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(it.albumTitle))}"
+        }.sortedByDescending { it.score }.take(18)
+        val verified = coroutineScope {
+            toVerify.map { item -> async {
+                val titles = if (item.externalAlbumId == null) null else runCatchingCancellable { tracklistOf(item.apiCandidate) }.getOrNull()
+                val present = titles?.any { title -> trackTitleMatchesForAlbum(track, title) } == true
+                if (titles != null && !present) null
+                else {
+                    val kind = AlbumReleasePolicy.classify(item.releaseType, item.albumTitle)
+                    val durationReason = item.durationMs?.let { duration ->
+                        val wantedDuration = track.durationMs
+                        if (wantedDuration == null) null else {
+                            val diff = kotlin.math.abs(duration - wantedDuration)
+                            when {
+                                diff <= MetadataMatching.EXACT_DURATION_MS -> "durée concordante"
+                                diff <= MetadataMatching.DURATION_TOLERANCE_MS -> "durée proche"
+                                else -> "durée différente"
+                            }
+                        }
+                    }
+                    val score = (item.score + if (present) 20 else 0).coerceIn(0, 100)
+                    item.copy(tracklistVerified = present, score = score) to listOfNotNull(
+                        "titre et artiste concordants",
+                        durationReason,
+                        if (present) "titre et version présents dans la liste de pistes" else "liste de pistes non vérifiable",
+                        kind.label
+                    )
+                }
+            } }.map { it.await() }
+        }.filterNotNull()
+
+        if (verified.isEmpty()) return emptyList()
+        val knownKinds = verified.groupBy {
+            TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(it.first.albumTitle))
+        }.mapValues { (_, rows) ->
+            rows.map { AlbumReleasePolicy.classify(it.first.releaseType, it.first.albumTitle) }
+                .filter { it != AlbumReleaseKind.UNKNOWN }.toSet()
+        }
+        val groupable = verified.filter { (item, _) ->
+            val kind = AlbumReleasePolicy.classify(item.releaseType, item.albumTitle)
+            kind != AlbumReleaseKind.UNKNOWN || knownKinds[
+                TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(item.albumTitle))
+            ].isNullOrEmpty()
+        }
+        val grouped = groupable.groupBy { (item, _) ->
+            val titleKey = TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(item.albumTitle))
+            val kind = AlbumReleasePolicy.classify(item.releaseType, item.albumTitle)
+            titleKey to kind
+        }
+        val suggestions = grouped.map { (key, rows) ->
+            val items = rows.map { it.first }
+            val best = items.maxByOrNull { it.score }!!
+            val sources = items.map { it.source.label }.distinct().sorted()
+            val kind = key.second
+            val score = (best.score + if (sources.size >= 2) 5 else 0).coerceAtMost(100)
+            val isCompilation = kind == AlbumReleaseKind.COMPILATION
+            AlbumMatchSuggestion(
+                albumTitle = best.albumTitle,
+                artistName = artistName,
+                releaseKind = kind.name,
+                releaseDate = items.mapNotNull { it.releaseDate }.minOrNull(),
+                coverUrl = best.coverUrl ?: items.firstNotNullOfOrNull { it.coverUrl },
+                confidence = score,
+                sources = sources,
+                tracklistVerified = items.any { it.tracklistVerified },
+                albumMbid = items.firstNotNullOfOrNull { it.albumMbid },
+                isCompilation = isCompilation,
+                isShared = isCompilation || TitleNormalizer.isSharedAlbum(best.albumTitle, null),
+                reasons = rows.flatMap { it.second }.distinct() + if (sources.size >= 2) "plusieurs sources concordent" else "source unique"
+            )
+        }
+        // Une sortie vérifiée de type Album/EP prévaut sur le single; compilation seulement en dernier recours.
+        val verifiedPriority = suggestions.filter { it.tracklistVerified }.minOfOrNull { it.kind.priority }
+        val preferred = if (verifiedPriority == null) suggestions else suggestions.filter { it.kind.priority == verifiedPriority }
+        return rankAlbumSuggestions(preferred)
+    }
+
+    private fun trackTitleMatchesForAlbum(track: TrackEntity, candidateTitle: String): Boolean {
+        val wantedRaw = track.titleRaw.takeIf { it.isNotBlank() } ?: track.title
+        if (!AlbumReleasePolicy.trackVersionsCompatible(wantedRaw, candidateTitle, track.isRemix)) return false
+        val wanted = TitleNormalizer.normalizeTitle(wantedRaw).title
+        val candidate = candidateTitle.replace(
+            Regex("""^\s*(?:[A-Z]\d+(?:-\d+)?|\d+(?:-\d+)*)(?:\s*[.)-]\s*|\s+)"""), ""
+        ).let { TitleNormalizer.normalizeTitle(it).title }
+        return MetadataMatching.titlesMatch(TitleNormalizer.normalizeKey(wanted), TitleNormalizer.normalizeKey(candidate))
+    }
+
+
+    private fun albumEditionPenalty(title: String): Int =
+        if (TitleNormalizer.normalizeKey(TitleNormalizer.normalizeAlbumTitle(title)) != TitleNormalizer.normalizeKey(title)) 6 else 0
+
+    private fun preliminaryAlbumMatchScore(
+        wantedTitle: String,
+        wantedArtist: String,
+        candidateTitle: String,
+        candidateArtist: String?,
+        wantedDuration: Long?,
+        candidateDuration: Long?
+    ): Int? {
+        val titleSimilarity = MetadataMatching.similarity(candidateTitle, wantedTitle)
+        val artistSimilarity = candidateArtist?.let { MetadataMatching.similarity(it, wantedArtist) } ?: 0.0
+        if (titleSimilarity < 0.85 || artistSimilarity < 0.85) return null
+        fun points(similarity: Double, max: Int): Int = when {
+            similarity >= 0.999 -> max
+            similarity >= 0.90 -> (max * 0.85).toInt()
+            else -> (max * 0.70).toInt()
+        }
+        var score = points(titleSimilarity, 35) + points(artistSimilarity, 35)
+        if (wantedDuration != null && candidateDuration != null) {
+            val diff = kotlin.math.abs(wantedDuration - candidateDuration)
+            score += when {
+                diff <= MetadataMatching.EXACT_DURATION_MS -> 10
+                diff <= MetadataMatching.DURATION_TOLERANCE_MS -> 6
+                diff > MetadataMatching.WRONG_DURATION_MS -> -15
+                else -> 0
+            }
+        }
+        return score.coerceIn(0, 80)
+    }
+
+    private fun rankAlbumSuggestions(suggestions: List<AlbumMatchSuggestion>): List<AlbumMatchSuggestion> =
+        suggestions.sortedWith(compareBy({ it.kind.priority }, { -it.confidence }, { it.releaseDate ?: "9999" }, { it.albumTitle.lowercase(Locale.ROOT) }))
+
 
     /** Titres connus de l'artiste candidat ; les sources « mbid » (Fanart, Wikidata, TheAudioDB, Last.fm) passent par MusicBrainz. */
     private suspend fun artistTitlesOf(c: MetaCandidate): List<String>? {
@@ -281,6 +685,18 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                 val ok = runCatchingCancellable { enrichAlbum(al, artist) }.getOrElse { EnrichmentState.log("⚠️ ${al.title} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)
             }
+            db.trackDao().missingAlbumAssociation(now, minOf(tracks, 5)).forEach { track ->
+                EnrichmentState.current("💿 Recherche d'album · ${track.title}")
+                val suggestions = runCatchingCancellable { findTrackAlbumCandidates(track.trackId) }
+                    .getOrElse { EnrichmentState.log("⚠️ Album de ${track.title} : ${it.message}"); emptyList() }
+                val linked = db.trackDao().getById(track.trackId)?.albumId != null
+                if (!linked && suggestions.isNotEmpty()) {
+                    val preview = suggestions.take(3).joinToString(" · ") { "${it.albumTitle} (${it.confidence} %)" }
+                    EnrichmentState.log("🔎 Propositions d'album pour « ${track.title} » : $preview${if (suggestions.size > 3) " · …" else ""} — confirmation requise")
+                }
+                val ok = linked || suggestions.isNotEmpty()
+                processed++; if (ok) found++; EnrichmentState.done(ok)
+            }
             db.trackDao().missingCover(now, tracks).forEach { t ->
                 val artist = db.artistDao().getById(t.artistId)?.name ?: return@forEach
                 val album = t.albumId?.let { db.albumDao().getById(it) }
@@ -292,7 +708,8 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             EnrichmentState.stop()
         }
         val later = System.currentTimeMillis()
-        val remaining = db.artistDao().missingPhoto(later, 1).size + db.albumDao().missingCover(later, 1).size + db.trackDao().missingCover(later, 1).size
+        val remaining = db.artistDao().missingPhoto(later, 1).size + db.albumDao().missingCover(later, 1).size +
+            db.trackDao().missingCover(later, 1).size + db.trackDao().missingAlbumAssociation(later, 1).size
         EnrichmentState.log("Lot terminé : $processed traités, $found enrichis${if (remaining > 0) ", suite à venir" else ""}")
         return BatchResult(processed, found, remaining)
     }

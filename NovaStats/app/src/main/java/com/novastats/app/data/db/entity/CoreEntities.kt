@@ -34,6 +34,8 @@ data class TrackEntity(
     @ColumnInfo(name = "title_raw") val titleRaw: String,
     @ColumnInfo(name = "artist_id") val artistId: Long,
     @ColumnInfo(name = "album_id") val albumId: Long? = null,
+    /** Date à partir de laquelle le lien d'album est valable; null pour les associations historiques. */
+    @ColumnInfo(name = "album_association_since") val albumAssociationSince: Long? = null,
     @ColumnInfo(name = "duration_ms") val durationMs: Long? = null,
     val genre: String? = null,
     @ColumnInfo(name = "cover_url") val coverUrl: String? = null,
