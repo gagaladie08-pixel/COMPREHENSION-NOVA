@@ -396,7 +396,7 @@ fun LoadMoreButton(remaining: Int, onClick: () -> Unit) {
     }
 }
 
-/** Libellé lisible d'une période Stats (Daily = aujourd'hui, Weekly = 7 jours glissants, …). */
+/** Libellé lisible d'une période Stats (jour courant, semaine calendaire en cours, mois, année ou global). */
 fun periodCaption(period: Period, range: com.novastats.app.domain.DateRange): String {
     val f = java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
     return when (period) {

@@ -78,6 +78,12 @@ data class PeriodSummary(
     @androidx.room.ColumnInfo(name = "active_days") val activeDays: Int
 )
 
+data class StatsTrendBucket(
+    @androidx.room.ColumnInfo(name = "bucket") val bucket: String,
+    @androidx.room.ColumnInfo(name = "play_count") val playCount: Long,
+    @androidx.room.ColumnInfo(name = "total_duration_ms") val totalDurationMs: Long
+)
+
 /** ⚠️ À corriger — un groupe = un titre dont au moins une écoute est à réviser. */
 data class ReviewGroup(
     @androidx.room.ColumnInfo(name = "track_id") val trackId: Long,
@@ -310,6 +316,20 @@ interface ScrobbleDao {
         """
     )
     fun summary(fromMs: Long, toMs: Long): Flow<PeriodSummary>
+
+    /** Répartition de la journée par heure locale, pour le graphique détaillé de Stats. */
+    @Query(
+        """
+        SELECT IFNULL(strftime('%H', started_at / 1000, 'unixepoch', 'localtime'), '00') AS bucket,
+               COUNT(*) AS play_count,
+               IFNULL(SUM(duration_listened_ms), 0) AS total_duration_ms
+        FROM scrobbles
+        WHERE status = 'CONFIRMED' AND started_at BETWEEN :fromMs AND :toMs
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        """
+    )
+    fun hourlyStatsTrend(fromMs: Long, toMs: Long): Flow<List<StatsTrendBucket>>
 
     /** Page chronologique confirmée, avec les versions d'un titre rabattues sur leur titre racine. */
     @Query(
@@ -570,6 +590,34 @@ interface DailyStatsDao {
     /** Les journées depuis :fromIso inclus, en ordre chronologique (sparkline d'activité de l'Accueil). */
     @Query("SELECT * FROM daily_stats WHERE date >= :fromIso ORDER BY date ASC")
     fun since(fromIso: String): Flow<List<DailyStatsEntity>>
+
+    /** Totaux par jour pour les périodes courtes de Stats. */
+    @Query(
+        """
+        SELECT date AS bucket,
+               IFNULL(SUM(play_count), 0) AS play_count,
+               IFNULL(SUM(total_duration_ms), 0) AS total_duration_ms
+        FROM daily_stats
+        WHERE date BETWEEN :fromIso AND :toIso
+        GROUP BY date
+        ORDER BY date ASC
+        """
+    )
+    fun dayStatsTrend(fromIso: String, toIso: String): Flow<List<StatsTrendBucket>>
+
+    /** Totaux par mois, sans charger une ligne par journée pour l'année ou l'historique global. */
+    @Query(
+        """
+        SELECT substr(date, 1, 7) AS bucket,
+               IFNULL(SUM(play_count), 0) AS play_count,
+               IFNULL(SUM(total_duration_ms), 0) AS total_duration_ms
+        FROM daily_stats
+        WHERE date BETWEEN :fromIso AND :toIso
+        GROUP BY substr(date, 1, 7)
+        ORDER BY bucket ASC
+        """
+    )
+    fun monthStatsTrend(fromIso: String, toIso: String): Flow<List<StatsTrendBucket>>
 
     @Query("DELETE FROM daily_stats")
     suspend fun clear()

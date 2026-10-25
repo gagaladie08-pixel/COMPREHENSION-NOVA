@@ -46,7 +46,7 @@ object Dates {
     fun isoWeekNumber(date: LocalDate): Int = date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
 
     /**
-     * Intervalle de l'onglet Stats : Daily = aujourd'hui, Weekly = 7 derniers jours (glissant),
+     * Intervalle de l'onglet Stats : Daily = aujourd'hui, Weekly = lundi jusqu'à aujourd'hui,
      * Monthly = mois calendaire, Yearly = année calendaire, Global = tout.
      */
     fun statsRangeFor(period: Period, anchor: LocalDate = today()): DateRange = when (period) {

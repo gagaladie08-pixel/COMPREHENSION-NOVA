@@ -54,27 +54,32 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.NovaStatsApp
 import com.novastats.app.data.db.dao.PeriodSummary
+import com.novastats.app.data.db.dao.StatsTrendBucket
+import com.novastats.app.domain.DateRange
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.Period
-import com.novastats.app.domain.TitleNormalizer
 import com.novastats.app.domain.StatsTopNRecordRules
+import com.novastats.app.domain.TitleNormalizer
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.flow.first
 import com.novastats.app.ui.theme.Nova
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
+import java.util.Locale
+import kotlin.math.roundToInt
 
 private val statsTabs = listOf("Titres", "Artistes", "Albums")
 private const val TOP_LIMIT = StatsTopNRecordRules.STATS_TOP_LIMIT
 
 /**
  * 📊 Stats — 3 sous-onglets Titres / Artistes / Albums + icône recherche (temps réel, portée = sous-onglet actif).
- * Sélecteur de période commun : Daily = aujourd'hui · Weekly = 7 derniers jours (glissant) · Monthly = mois
- * calendaire · Yearly = année calendaire · Global. Top 300, tri écoutes puis temps cumulé.
- * Positions : 🥇🥈🥉 #1-3 · 🔥 #4-#10 · "#11" · "—" non classé · "▼ 300+".
- * Appui long sur une ligne → popup de détail (chanson / artiste / album) **sur la période choisie**.
+ * Périodes : jour · semaine calendaire en cours · mois · année · global. Résumé compact + courbe temporelle
+ * interactive (heure, jour ou mois selon la période), puis classement Titres / Artistes / Albums.
+ * Top 300, tri écoutes puis temps cumulé. Appui long sur une ligne → popup de détail sur la période choisie.
  *
- * Mise en page : périodes + bandeau défilent avec la liste ; la rangée Titres / Artistes / Albums reste collée en haut
- * (stickyHeader) dès qu'on fait défiler → elle vient se coller sous les onglets principaux.
+ * Mise en page : périodes et résumé défilent; les sous-onglets, la recherche et le tri restent collés en haut.
  * Classement : Top 25 affiché, bouton « Voir plus » = +20 à chaque appui (jusqu'à 300).
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -121,6 +126,44 @@ fun StatsScreen() {
 
     // ▶ écoutes / ⏱ durées : même classement, autre ordre — le tri par minutes révèle d'autres gagnants.
     var byDuration by remember { mutableStateOf(false) }
+    var trendMetric by remember { mutableStateOf(StatsTrendMetric.PLAYS) }
+    var selectedTrendIndex by remember(period) { mutableIntStateOf(-1) }
+
+    val trendEnd = minOf(range.to, Dates.today())
+    val trendToIso = trendEnd.format(Dates.ISO)
+    val trendBuckets by remember(period, range, trendToIso) {
+        when (period) {
+            Period.DAILY -> db.scrobbleDao().hourlyStatsTrend(range.fromMs, range.toMs)
+            Period.WEEKLY, Period.MONTHLY -> db.dailyStatsDao().dayStatsTrend(range.fromIso, trendToIso)
+            Period.YEARLY, Period.GLOBAL -> db.dailyStatsDao().monthStatsTrend(range.fromIso, trendToIso)
+        }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val trendPoints = remember(period, range, trendBuckets, trendEnd) {
+        buildStatsTrendPoints(period, range, trendBuckets, trendEnd)
+    }
+    val trendValues = remember(trendPoints, trendMetric) {
+        trendPoints.map { point ->
+            if (trendMetric == StatsTrendMetric.PLAYS) point.playCount.toFloat()
+            else point.totalDurationMs / 3_600_000f
+        }
+    }
+    val trendMax = trendValues.maxOrNull() ?: 0f
+    val trendGrid = when {
+        trendMax <= 0f -> listOf(0f)
+        trendMetric == StatsTrendMetric.PLAYS && trendMax < 4f -> listOf(0f, trendMax)
+        else -> listOf(0f, trendMax / 2f, trendMax).distinct()
+    }
+    val defaultTrendIndex = if (period == Period.DAILY) java.time.LocalTime.now(Dates.zone).hour else trendPoints.lastIndex
+    val effectiveTrendIndex = selectedTrendIndex.takeIf { it in trendPoints.indices }
+        ?: defaultTrendIndex.coerceIn(0, (trendPoints.lastIndex).coerceAtLeast(0))
+    val dominanceInsight = remember(q, tracks, summary) {
+        if (q.isNotBlank() || summary.playCount <= 0L) null
+        else tracks.firstOrNull()?.let { top ->
+            val share = (top.periodPlays.toLong() * 100L / summary.playCount).toInt()
+            if (share >= 10) "🎯 « ${top.track.title} » pèse $share % de tes écoutes sur la période" else null
+        }
+    }
+
     val filteredTracks = remember(tracks, q, byDuration) { (if (byDuration) tracks.sortedByDescending { it.periodDurationMs } else tracks).mapIndexed { i, t -> i + 1 to t }.filter { (_, t) -> matches(t.track.title, t.artistName, t.albumTitle) } }
     val filteredArtists = remember(artists, q, byDuration) { (if (byDuration) artists.sortedByDescending { it.periodDurationMs } else artists).mapIndexed { i, a -> i + 1 to a }.filter { (_, a) -> matches(a.artist.name) } }
     val filteredAlbums = remember(albums, q, byDuration) { (if (byDuration) albums.sortedByDescending { it.periodDurationMs } else albums).mapIndexed { i, al -> i + 1 to al }.filter { (_, al) -> matches(al.album.title, al.artistName) } }
@@ -145,52 +188,48 @@ fun StatsScreen() {
 
     ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
-        /* ---------- En-tête défilant : périodes → bandeau → légende ---------- */
+        /* ---------- Résumé compact : périodes → deux chiffres clés → repères secondaires ---------- */
         item(key = "header") {
             Column(Modifier.fillMaxWidth()) {
                 PeriodSegment(period) { period = it }
                 val days = if (period == Period.GLOBAL) summary.activeDays else elapsedDays(range)
                 val avg = if (days > 0) summary.playCount.toFloat() / days else 0f
                 SummaryStrip(
-                    listOf(
+                    cells = listOf(
                         StripCell(formatCount(summary.playCount), "Écoutes"),
-                        StripCell(formatDuration(summary.totalDurationMs), "Temps"),
-                        StripCell("${summary.distinctTracks}", "Titres"),
-                        StripCell("${summary.distinctArtists}", "Artistes"),
-                        StripCell(formatAverage(avg), "Moy/jour")
-                    )
+                        StripCell(formatDuration(summary.totalDurationMs), "Temps écouté")
+                    ),
+                    content = {
+                        Text(
+                            "${formatCount(summary.distinctTracks)} titres · ${formatCount(summary.distinctArtists)} artistes · ${formatAverage(avg)} écoutes/j",
+                            color = theme.textSecondary, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+                            maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 )
                 Text(
-                    periodCaption(period, range) + if (period == Period.GLOBAL) " · Top $TOP_LIMIT ${if (byDuration) "par durées" else "par écoutes"}" else "",
+                    periodCaption(period, range),
                     color = theme.textSecondary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), textAlign = TextAlign.Center
                 )
-                // 🎯 Dominance du n°1 : quand un titre écrase la période, on le dit.
-                if (q.isBlank() && summary.playCount > 0) {
-                    val t1 = tracks.firstOrNull()
-                    val share = if (t1 != null) t1.periodPlays * 100 / summary.playCount else 0
-                    if (t1 != null && share >= 10) Text(
-                        "🎯 « ${t1.track.title} » pèse $share % de tes écoutes sur la période",
-                        color = theme.textSecondary.copy(alpha = 0.9f), style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp), textAlign = TextAlign.Center
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
-                        .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.30f), theme.secondary.copy(alpha = 0.22f), Color.Transparent)))
-                        .clickable { versus = true }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("⚔️", fontSize = 20.sp)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Comparer deux titres ou artistes", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text("Face à face : écoutes, temps, régularité, certification…", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text("›", color = theme.primary, fontSize = 22.sp)
-                }
             }
+        }
+
+        /* ---------- Courbe d'activité, action de comparaison intégrée à l'en-tête ---------- */
+        item(key = "trend") {
+            StatsTrendCard(
+                period = period,
+                points = trendPoints,
+                values = trendValues,
+                gridValues = trendGrid,
+                metric = trendMetric,
+                selectedIndex = effectiveTrendIndex,
+                dominanceInsight = dominanceInsight,
+                onMetricChange = { trendMetric = it },
+                onPointSelected = { selectedTrendIndex = it },
+                onCompare = { versus = true }
+            )
         }
 
         /* ---------- Sous-onglets collants : Titres / Artistes / Albums + loupe (+ champ de recherche) ---------- */
@@ -292,6 +331,181 @@ fun StatsScreen() {
     }
     }
 
+}
+
+private enum class StatsTrendMetric { PLAYS, DURATION }
+
+private data class StatsTrendPoint(
+    val detailLabel: String,
+    val axisLabel: String?,
+    val playCount: Long,
+    val totalDurationMs: Long
+)
+
+private fun buildStatsTrendPoints(
+    period: Period,
+    range: DateRange,
+    buckets: List<StatsTrendBucket>,
+    today: java.time.LocalDate
+): List<StatsTrendPoint> {
+    val byBucket = buckets.associateBy { it.bucket }
+    fun point(bucket: String, detailLabel: String, axisLabel: String?) = StatsTrendPoint(
+        detailLabel = detailLabel,
+        axisLabel = axisLabel,
+        playCount = byBucket[bucket]?.playCount ?: 0L,
+        totalDurationMs = byBucket[bucket]?.totalDurationMs ?: 0L
+    )
+    fun monthPoints(start: YearMonth, end: YearMonth): List<StatsTrendPoint> {
+        if (end.isBefore(start)) return emptyList()
+        val count = ChronoUnit.MONTHS.between(start, end).toInt() + 1
+        return (0 until count).map { index ->
+            val month = start.plusMonths(index.toLong())
+            val bucket = month.toString()
+            val axisLabel = if (index == 0 || index == (count - 1) / 2 || index == count - 1) {
+                month.format(DateTimeFormatter.ofPattern(if (period == Period.GLOBAL) "MMM yy" else "MMM", Locale.FRANCE))
+            } else null
+            val detail = month.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE))
+                .replaceFirstChar { it.titlecase(Locale.FRANCE) }
+            point(bucket, detail, axisLabel)
+        }
+    }
+
+    return when (period) {
+        Period.DAILY -> (0..23).map { hour ->
+            val bucket = hour.toString().padStart(2, '0')
+            val axisLabel = if (hour == 0 || hour == 11 || hour == 23) "$bucket h" else null
+            point(bucket, "$bucket h", axisLabel)
+        }
+        Period.WEEKLY, Period.MONTHLY -> {
+            val end = minOf(range.to, today)
+            if (end.isBefore(range.from)) emptyList()
+            else {
+                val count = ChronoUnit.DAYS.between(range.from, end).toInt() + 1
+                (0 until count).map { index ->
+                    val date = range.from.plusDays(index.toLong())
+                    val axisLabel = if (index == 0 || index == (count - 1) / 2 || index == count - 1) {
+                        date.format(DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE))
+                    } else null
+                    val detail = date.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRANCE))
+                        .replaceFirstChar { it.titlecase(Locale.FRANCE) }
+                    point(date.format(Dates.ISO), detail, axisLabel)
+                }
+            }
+        }
+        Period.YEARLY -> monthPoints(YearMonth.from(range.from), YearMonth.from(minOf(range.to, today)))
+        Period.GLOBAL -> {
+            val end = YearMonth.from(minOf(range.to, today))
+            val start = buckets.mapNotNull { runCatching { YearMonth.parse(it.bucket) }.getOrNull() }.minOrNull()
+            if (start == null) emptyList() else monthPoints(start, end)
+        }
+    }
+}
+
+@Composable
+private fun StatsTrendCard(
+    period: Period,
+    points: List<StatsTrendPoint>,
+    values: List<Float>,
+    gridValues: List<Float>,
+    metric: StatsTrendMetric,
+    selectedIndex: Int,
+    dominanceInsight: String?,
+    onMetricChange: (StatsTrendMetric) -> Unit,
+    onPointSelected: (Int) -> Unit,
+    onCompare: () -> Unit
+) {
+    val theme = Nova.theme
+    val selectedPoint = points.getOrNull(selectedIndex)
+    val hasActivity = points.any { it.playCount > 0L }
+
+    NovaCard {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Évolution dans le temps", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        when (period) {
+                            Period.DAILY -> "Par heure"
+                            Period.WEEKLY, Period.MONTHLY -> "Par jour"
+                            Period.YEARLY, Period.GLOBAL -> "Par mois"
+                        },
+                        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Row(
+                    Modifier.clip(RoundedCornerShape(12.dp)).background(theme.primary.copy(alpha = 0.12f))
+                        .clickable(onClick = onCompare).padding(horizontal = 11.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("⚔️", fontSize = 14.sp)
+                    Spacer(Modifier.width(5.dp))
+                    Text("Comparer", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NovaFilterChip(
+                    selected = metric == StatsTrendMetric.PLAYS,
+                    onClick = { onMetricChange(StatsTrendMetric.PLAYS) },
+                    label = { Text("Écoutes") }, flagKey = "stats-trend-plays"
+                )
+                NovaFilterChip(
+                    selected = metric == StatsTrendMetric.DURATION,
+                    onClick = { onMetricChange(StatsTrendMetric.DURATION) },
+                    label = { Text("Durée") }, flagKey = "stats-trend-duration"
+                )
+            }
+            if (hasActivity) selectedPoint?.let { point ->
+                Text(
+                    "${point.detailLabel} · ${formatCount(point.playCount)} écoutes · ${formatDuration(point.totalDurationMs)}",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                )
+            }
+            if (hasActivity && values.isNotEmpty()) {
+                NovaCurveChart(
+                    values = values,
+                    modifier = Modifier.fillMaxWidth().height(142.dp),
+                    color = theme.primary,
+                    yLabel = { value -> formatTrendAxisValue(metric, value) },
+                    gridValues = gridValues,
+                    showPoints = points.size <= 12,
+                    xLabels = points.map { it.axisLabel },
+                    selectedIndex = selectedIndex.takeIf { it in points.indices },
+                    onPointSelected = onPointSelected
+                )
+            } else {
+                Text(
+                    "Le graphique apparaîtra dès que cette période contiendra des écoutes.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), textAlign = TextAlign.Center
+                )
+            }
+            if (dominanceInsight != null) {
+                Text(
+                    dominanceInsight, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+private fun formatTrendAxisValue(metric: StatsTrendMetric, value: Float): String = when (metric) {
+    StatsTrendMetric.PLAYS -> when {
+        value >= 1_000_000f -> "${(value / 1_000_000f).roundToInt()}M"
+        value >= 1_000f -> "${(value / 1_000f).roundToInt()}k"
+        else -> value.roundToInt().toString()
+    }
+    StatsTrendMetric.DURATION -> {
+        val minutes = (value * 60f).roundToInt()
+        when {
+            minutes < 60 -> "${minutes}m"
+            value < 10f -> "${String.format(Locale.FRANCE, "%.1f", value).removeSuffix(",0")}h"
+            else -> "${value.roundToInt()}h"
+        }
+    }
 }
 
 private data class PodiumItem(
