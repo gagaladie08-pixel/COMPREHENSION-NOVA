@@ -188,6 +188,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _history = MutableStateFlow<EntityHistory?>(null)
     val history: StateFlow<EntityHistory?> = _history
+    private var historyRequestId = 0
+    private var compareRequestId = 0
 
     init {
         // Publie les snapshots manquants (nouveau jour / nouvelle semaine) — la période en cours n'a pas de snapshot
@@ -228,9 +230,13 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleMovementFilter(f: MovementFilter) { movementFilter.value = if (movementFilter.value == f) null else f }
 
     fun openHistory(item: ChartItem) {
+        val requestId = ++historyRequestId
+        compareRequestId++
+        _compare.value = null
         val c = chart.value; val p = period.value
         viewModelScope.launch {
             val (rows, extras) = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) to loadExtras(c, item.entityId) }
+            if (requestId != historyRequestId) return@launch
             val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
             val first = appearances.minOfOrNull { it.date } ?: anchor.value
             val anchors = BillboardDates.allAnchors(p, first, Dates.today())
@@ -274,9 +280,11 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** ⚔️ Seconde courbe : charge l'historique de l'entité choisie. */
     fun compareWith(item: ChartItem) {
+        val requestId = ++compareRequestId
         val c = chart.value; val p = period.value
         viewModelScope.launch {
             val rows = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) }
+            if (requestId != compareRequestId) return@launch
             val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
             val first = appearances.minOfOrNull { it.date } ?: anchor.value
             val anchors = BillboardDates.allAnchors(p, first, Dates.today())
@@ -284,7 +292,10 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun clearCompare() { _compare.value = null }
+    fun clearCompare() {
+        compareRequestId++
+        _compare.value = null
+    }
 
     /** 📤 Rend la carte du parcours (+ face-à-face) et ouvre la feuille de partage. */
     fun shareHistory(theme: com.novastats.app.ui.theme.NovaTheme) {
@@ -298,7 +309,10 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun closeHistory() { _history.value = null }
+    fun closeHistory() {
+        historyRequestId++
+        _history.value = null
+    }
 
     /* ------------------------------ data ------------------------------ */
 

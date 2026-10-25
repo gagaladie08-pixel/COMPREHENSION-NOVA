@@ -128,18 +128,29 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         state.movementFilter?.let { vm.toggleMovementFilter(it) }
         vm.selectChart(f.chart)
         vm.selectPeriod(f.period)
+        f.anchor?.let(vm::goToDate)
         pendingFocus = f
         BillboardFocus.consume()
     }
-    LaunchedEffect(pendingFocus, state.items) {
+    LaunchedEffect(pendingFocus, state.items, state.anchor, state.chart, state.period, state.query, state.movementFilter, state.sortDuration) {
         val f = pendingFocus ?: return@LaunchedEffect
+        if (state.chart != f.chart || state.period != f.period) return@LaunchedEffect
+        if (f.anchor != null && state.anchor != BillboardDates.anchor(f.period, f.anchor)) return@LaunchedEffect
+        if (state.query.isNotBlank() || state.movementFilter != null) return@LaunchedEffect
         if (state.items.isEmpty()) return@LaunchedEffect
-        val idx = state.items.indexOfFirst { it.entityId == f.entityId }
-        if (idx < 0) { pendingFocus = null; return@LaunchedEffect }
+        val snapshotItem = state.items.firstOrNull { it.entityId == f.entityId }
+        if (f.expectedPosition != null && snapshotItem?.position != f.expectedPosition) return@LaunchedEffect
+        if (f.expectedPlays != null && snapshotItem?.plays != f.expectedPlays) return@LaunchedEffect
+        val idx = state.filtered.indexOfFirst { it.entityId == f.entityId }
+        if (idx < 0) {
+            if (f.expectedPosition == null) pendingFocus = null
+            return@LaunchedEffect
+        }
         if (visible < idx + 1) visible = idx + 1
         highlightId = f.entityId
         kotlinx.coroutines.delay(80)
-        listState.scrollToItem(2 + idx)
+        val dividersBefore = if (state.query.isBlank()) state.filtered.take(idx).count { it.position == 10 } else 0
+        listState.scrollToItem(2 + idx + dividersBefore)
         pendingFocus = null
     }
     LaunchedEffect(highlightId) {
@@ -309,11 +320,24 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         ) { DatePicker(state = pickerState, showModeToggle = false) }
     }
 
-    history?.let {
+    history?.let { h ->
         ChartHistoryDialog(
-            it, onDismiss = { vm.clearCompare(); vm.closeHistory() },
-            compare = compare, candidates = state.items,
-            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = { vm.shareHistory(theme) }
+            h, onDismiss = { vm.clearCompare(); vm.closeHistory() },
+            compare = compare, candidates = state.items, navigationCandidates = rows.take(shown),
+            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = { vm.shareHistory(theme) },
+            onNavigate = { item -> vm.clearCompare(); vm.openHistory(item) },
+            onViewPeriod = { date ->
+                h.appearances.firstOrNull { it.date == date }?.let { appearance ->
+                    vm.clearCompare()
+                    vm.closeHistory()
+                    BillboardFocus.request(
+                        BillboardFocus.Focus(
+                            chart = h.chart, period = h.period, entityId = h.item.entityId,
+                            anchor = date, expectedPosition = appearance.position, expectedPlays = appearance.playCount
+                        )
+                    )
+                }
+            }
         )
     }
 }

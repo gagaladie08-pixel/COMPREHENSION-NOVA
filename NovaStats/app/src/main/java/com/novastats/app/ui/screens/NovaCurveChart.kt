@@ -1,8 +1,11 @@
 package com.novastats.app.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -14,6 +17,7 @@ import com.novastats.app.ui.theme.NovaColors
 import com.novastats.app.ui.theme.drawNovaCurve
 import com.novastats.app.ui.theme.rememberCurveAnim
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * POPUPS.md — graphique courbe unique, paramétrable, utilisé par Billboard, Certifications, Panthéon et Hall of Fame.
@@ -47,7 +51,11 @@ fun NovaCurveChart(
     showPoints: Boolean = false,
     endDot: Boolean = !invertY,
     /** Libellés de l'axe X alignés sur [values] (dates des périodes). null = pas de libellé. */
-    xLabels: List<String?> = emptyList()
+    xLabels: List<String?> = emptyList(),
+    /** Index sélectionné au toucher (curseur vertical + point accentué). */
+    selectedIndex: Int? = null,
+    /** Active le toucher et le balayage horizontal pour sélectionner une période. */
+    onPointSelected: ((Int) -> Unit)? = null
 ) {
     val theme = Nova.theme
     val textColor = theme.textSecondary
@@ -60,8 +68,48 @@ fun NovaCurveChart(
     val lo = minY ?: (if (invertY) 1f else 0f).coerceAtMost(dataLo)
     val hi = maxY ?: maxOf(dataHi, lo + 1f) + (dataHi - lo).coerceAtLeast(1f) * 0.06f
     val stroke = color ?: theme.chart.stroke?.let { theme.color(it) } ?: theme.primary
+    val canvasModifier = if (onPointSelected == null) modifier else {
+        val selectPoint = requireNotNull(onPointSelected)
+        modifier
+            .pointerInput(values.size, xLabels.any { it != null }, selectPoint) {
+                val padL = 36.dp.toPx()
+                val padT = 12.dp.toPx()
+                val padB = if (xLabels.any { it != null }) 17.dp.toPx() else 8.dp.toPx()
+                fun selectAt(position: Offset) {
+                    val width = size.width.toFloat()
+                    val height = size.height.toFloat()
+                    if (position.x < padL || position.x > width || position.y < padT || position.y > height - padB) return
+                    val plotW = (width - padL).coerceAtLeast(1f)
+                    val fraction = ((position.x - padL) / plotW).coerceIn(0f, 1f)
+                    val index = if (values.size <= 1) 0 else (fraction * (values.size - 1)).roundToInt()
+                    selectPoint(index.coerceIn(0, values.lastIndex))
+                }
+                detectTapGestures(onTap = ::selectAt)
+            }
+            .pointerInput(values.size, xLabels.any { it != null }, selectPoint) {
+                val padL = 36.dp.toPx()
+                val padT = 12.dp.toPx()
+                val padB = if (xLabels.any { it != null }) 17.dp.toPx() else 8.dp.toPx()
+                fun selectAt(position: Offset) {
+                    val width = size.width.toFloat()
+                    val height = size.height.toFloat()
+                    if (position.x < padL || position.x > width || position.y < padT || position.y > height - padB) return
+                    val plotW = (width - padL).coerceAtLeast(1f)
+                    val fraction = ((position.x - padL) / plotW).coerceIn(0f, 1f)
+                    val index = if (values.size <= 1) 0 else (fraction * (values.size - 1)).roundToInt()
+                    selectPoint(index.coerceIn(0, values.lastIndex))
+                }
+                detectHorizontalDragGestures(
+                    onDragStart = ::selectAt,
+                    onHorizontalDrag = { change, _ ->
+                        selectAt(change.position)
+                        change.consume()
+                    }
+                )
+            }
+    }
 
-    Canvas(modifier) {
+    Canvas(canvasModifier) {
         val w = size.width; val h = size.height
         val padL = 36.dp.toPx(); val padT = 12.dp.toPx(); val padB = if (xLabels.any { it != null }) 17.dp.toPx() else 8.dp.toPx()
         val plotW = w - padL; val plotH = h - padT - padB
@@ -151,6 +199,21 @@ fun NovaCurveChart(
             val c = Offset(x(i), y(v))
             val mp = android.graphics.Paint().apply { textSize = 12.sp.toPx(); textAlign = android.graphics.Paint.Align.CENTER; isAntiAlias = true }
             drawContext.canvas.nativeCanvas.drawText(emoji, c.x, c.y - 8.dp.toPx(), mp)
+        }
+
+        // Curseur de sélection : utile aussi sur les périodes où la valeur est absente (point hors chart).
+        selectedIndex?.takeIf { it in values.indices }?.let { i ->
+            val selectedX = x(i)
+            drawLine(
+                stroke.copy(alpha = 0.55f), Offset(selectedX, padT), Offset(selectedX, baseline),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()), 0f)
+            )
+            values[i]?.let { v ->
+                val point = Offset(selectedX, y(v))
+                drawCircle(theme.background, radius = 7.dp.toPx(), center = point)
+                drawCircle(stroke, radius = 4.dp.toPx(), center = point)
+            }
         }
 
         /* ---- Axe X : première période, milieu, dernière ---- */

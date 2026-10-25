@@ -38,6 +38,7 @@ import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -101,16 +102,21 @@ fun ChartHistoryDialog(
     h: EntityHistory, onDismiss: () -> Unit,
     compare: EntityHistory? = null,
     candidates: List<ChartItem> = emptyList(),
+    navigationCandidates: List<ChartItem> = emptyList(),
     onCompare: (ChartItem) -> Unit = {},
     onClearCompare: () -> Unit = {},
-    onShare: () -> Unit = {}
+    onShare: () -> Unit = {},
+    onNavigate: (ChartItem) -> Unit = {},
+    onViewPeriod: (LocalDate) -> Unit = {}
 ) {
     val theme = Nova.theme
     val s = h.stats
     val unit = { n: Int -> chartPeriodUnit(h.period, n) }
     var playsMode by remember { mutableStateOf(false) }
     var windowed by remember { mutableStateOf(false) }
-    var picking by remember { mutableStateOf(false) }
+    var picking by remember(h) { mutableStateOf(false) }
+    var selectedPoint by remember(h, windowed, playsMode) { mutableStateOf<Int?>(null) }
+    val currentCandidateIndex = navigationCandidates.indexOfFirst { it.entityId == h.item.entityId }
 
     val byDate = remember(h) { h.appearances.associateBy { it.date } }
     val anchorsAll = remember(h) { h.anchors.filter { a -> !a.isBefore(s.firstEntry?.date ?: a) } }
@@ -143,6 +149,8 @@ fun ChartHistoryDialog(
             anchors.map { m[it]?.position?.toFloat() }
         }
     }
+    val selectedDate = selectedPoint?.let { anchors.getOrNull(it) }
+    val selectedAppearance = selectedDate?.let { byDate[it] }
 
     NovaPopupCard(
         borderColor = Gold, onDismiss = onDismiss, glowDp = 18, backdropUrl = h.item.coverUrl,
@@ -171,6 +179,25 @@ fun ChartHistoryDialog(
             }
         }
     ) {
+        if (currentCandidateIndex >= 0 && navigationCandidates.size > 1) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = { onNavigate(navigationCandidates[currentCandidateIndex - 1]) },
+                    enabled = currentCandidateIndex > 0,
+                    modifier = Modifier.weight(1f)
+                ) { Text("‹ Précédent", color = if (currentCandidateIndex > 0) Gold else Gold.copy(alpha = 0.4f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                Text(
+                    "${currentCandidateIndex + 1} / ${navigationCandidates.size}",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
+                TextButton(
+                    onClick = { onNavigate(navigationCandidates[currentCandidateIndex + 1]) },
+                    enabled = currentCandidateIndex < navigationCandidates.lastIndex,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Suivant ›", color = if (currentCandidateIndex < navigationCandidates.lastIndex) Gold else Gold.copy(alpha = 0.4f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+        }
+
         // Sélecteurs : lecture (# / ▶) + fenêtre (tout / 12 dernières)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SelPill("#", !playsMode) { playsMode = false }
@@ -188,8 +215,38 @@ fun ChartHistoryDialog(
             gridValues = if (playsMode) emptyList() else listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos),
             peakIndex = peakIdx, showPoints = true, markers = markers,
             overlay = overlay, overlayColor = NovaColors.Silver,
-            xLabels = anchors.map { it.format(axisFmt) }
+            xLabels = anchors.map { it.format(axisFmt) },
+            selectedIndex = selectedPoint,
+            onPointSelected = { selectedPoint = it }
         )
+        if (selectedDate != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp)
+                    .clip(RoundedCornerShape(10.dp)).background(theme.surface.copy(alpha = 0.82f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(BillboardDates.label(h.period, selectedDate), color = Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                    val pointSummary = selectedAppearance?.let { appearance ->
+                        if (playsMode) "${formatCount(appearance.playCount)} écoutes · #${appearance.position}"
+                        else "#${appearance.position} · ${formatCount(appearance.playCount)} écoutes"
+                    } ?: "Hors classement sur cette période"
+                    Text(pointSummary, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                }
+                if (selectedAppearance != null) {
+                    TextButton(onClick = { onViewPeriod(selectedDate) }) {
+                        Text("Voir ce classement", color = Gold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        } else {
+            Text(
+                "Touchez ou faites glisser sur la courbe pour explorer les périodes.",
+                color = theme.textSecondary, style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            )
+        }
         if (compare != null && overlay != null) {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
