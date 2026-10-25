@@ -1,6 +1,7 @@
 package com.novastats.app.ui.screens
 
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -20,10 +21,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
@@ -40,10 +43,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,17 +70,15 @@ import com.novastats.app.ui.navigation.NovaTab
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import com.novastats.app.ui.theme.NovaTheme
+import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * 🏠 Accueil — 8 sections (scroll vertical), cahier des charges :
- * 1 En cours de lecture (pochette, barre de progression, app source, statut PENDING/VALIDATED)
- * 2 Aujourd'hui · 3 Top du moment (#1 titre / artiste / album du jour)
- * 4 Dernières actualités (certifications, statuts Panthéon, entrées Hall of Fame — "il y a Xh")
- * 5 Prochaines certifications (5 titres/albums les plus proches du palier suivant, barre + écoutes restantes)
- * 6 Records récents · 7 Récemment écouté (pochette + titre + heure) · 8 Streak (actuel + record)
+ * 🏠 Accueil — cockpit musical : artiste de la semaine, lecture en cours, chiffres essentiels et
+ * raccourcis visibles d'emblée; classements, actualités, paliers et historique restent accessibles au scroll.
+ * La vue de premier contact guide séparément l'activation du service et l'import de l'historique.
  */
 @Composable
 fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
@@ -87,7 +91,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     val nowPlaying by db.nowPlayingDao().observe().collectAsStateWithLifecycle(initialValue = null)
     val thresholdSec by app.settings.thresholdSec.collectAsStateWithLifecycle(initialValue = ScrobbleRules.DEFAULT_THRESHOLD_SEC)
     val todayStats by db.dailyStatsDao().forDate(todayIso).collectAsStateWithLifecycle(initialValue = null)
-    // Top 5 par catégorie : le #1 seul était trop pauvre pour un écran qui se veut premium.
+    // On charge quelques positions, mais n'en montre que trois avant le raccourci vers Billboard.
     val topTrack by db.trackDao().topForPeriod(todayIso, todayIso, 5).collectAsStateWithLifecycle(initialValue = emptyList())
     val topArtist by db.artistDao().topForPeriod(todayIso, todayIso, 5).collectAsStateWithLifecycle(initialValue = emptyList())
     val topAlbum by db.albumDao().topForPeriod(todayIso, todayIso, 5).collectAsStateWithLifecycle(initialValue = emptyList())
@@ -106,8 +110,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     DetailPopupHost(detail) { detail = null }
 
-    // 🎨 Fond artistique + en-tête : photo ET nom de ton artiste du moment (7 derniers jours),
-    // sinon pochette de ton titre du jour. Une seule requête pour les deux usages.
+    // 🎨 Fond et accroche : artiste en tête sur les 7 derniers jours, ou pochette du titre #1 de la semaine.
     val week = remember { Dates.statsRangeFor(Period.WEEKLY) }
     val weekHero by produceState<Pair<String?, String?>>(initialValue = null to null) {
         value = runCatching {
@@ -129,7 +132,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     val yesterdayStats by db.dailyStatsDao().forDate(today.minusDays(1).format(Dates.ISO)).collectAsStateWithLifecycle(initialValue = null)
 
     if (totalScrobbles == 0 && nowPlaying?.rawTitle == null) {
-        FirstContactHome()
+        FirstContactHome(onOpenSettings = { onOpenTab(NovaTab.SETTINGS) })
         return
     }
 
@@ -138,7 +141,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 1f, scrim = 0.70f)
         RewindParticles(theme, Modifier.fillMaxSize())
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        /* ---------- 0. En-tête personnalisé ---------- */
+        /* ---------- Accroche personnalisée + raccourcis ---------- */
         item {
             val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
             val greet = when (hour) {
@@ -148,18 +151,16 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                 else -> "Bonne nuit"
             }
             val dateLabel = today.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRANCE))
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
                 Text("$greet ✨", style = MaterialTheme.typography.headlineMedium, color = theme.text, fontWeight = FontWeight.Black)
                 Text(dateLabel.replaceFirstChar { it.uppercase() }, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
-                weekArtistName?.let {
-                    Spacer(Modifier.height(4.dp))
-                    Text("🎤 Artiste du moment : $it", color = theme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                }
             }
+            HomeSpotlightCard(artUrl, weekArtistName) { onOpenTab(NovaTab.BILLBOARD) }
+            Spacer(Modifier.height(4.dp))
+            HomeQuickActions(onOpenTab)
         }
 
-        /* Le Rewind n'est plus ici : il vit dans l'onglet Ton année (décision utilisateur).
-           L'Accueil se concentre sur aujourd'hui. */
+        /* Le Rewind n'est plus ici : il vit dans l'onglet Ton année (décision utilisateur). */
 
         /* ---------- 1. En cours de lecture ---------- */
         item {
@@ -233,42 +234,48 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             StatGlass(
                 plays = todayStats?.playCount ?: 0,
                 durationMs = todayStats?.totalDurationMs ?: 0L,
-                extras = listOf("${todayStats?.distinctTracks ?: 0}" to "titres", "${todayStats?.distinctArtists ?: 0}" to "artistes"),
+                extras = listOf(
+                    "${todayStats?.distinctTracks ?: 0}" to "titres",
+                    "${todayStats?.distinctArtists ?: 0}" to "artistes",
+                    "${todayStats?.distinctAlbums ?: 0}" to "albums"
+                ),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
-            // Même bandeau que l'onglet Stats
-            SummaryStrip(
-                listOf(
-                    StripCell(formatCount(todayStats?.playCount ?: 0), "Écoutes"),
-                    StripCell(formatDuration(todayStats?.totalDurationMs ?: 0), "Temps"),
-                    StripCell("${todayStats?.distinctTracks ?: 0}", "Titres"),
-                    StripCell("${todayStats?.distinctArtists ?: 0}", "Artistes"),
-                    StripCell("${todayStats?.distinctAlbums ?: 0}", "Albums")
-                )
             )
             // 📈 L'activité de la semaine, d'un coup d'œil — et où en est aujourd'hui par rapport à hier
             val tPlays = todayStats?.playCount ?: 0
             val yPlays = yesterdayStats?.playCount ?: 0
-            // Comparaison factuelle : hier est une journée complète, aujourd'hui est en cours —
-            // on ne compare donc pas « à la même heure », on mesure l'écart au total d'hier.
+            // La journée en cours est comparée au total d'hier; le libellé le précise pour éviter une fausse comparaison à heure égale.
             val insight = when {
-                tPlays > 0 && yPlays > 0 -> {
-                    val delta = tPlays - yPlays
-                    if (delta >= 0) "déjà devant hier : ${formatCount(tPlays)} écoutes contre ${formatCount(yPlays)} 🔥"
-                    else "${formatCount(tPlays)} écoute${if (tPlays > 1) "s" else ""} aujourd'hui — encore ${-delta} pour égaler hier"
-                }
+                tPlays > 0 && yPlays > 0 -> "${formatCount(tPlays)} aujourd'hui · ${formatCount(yPlays)} hier sur la journée complète 🔥"
                 tPlays > 0 -> "${formatCount(tPlays)} écoute${if (tPlays > 1) "s" else ""} — la journée est lancée 🔥"
                 yPlays > 0 -> "rien aujourd'hui, contre ${formatCount(yPlays)} hier — à toi de jouer 🎧"
                 else -> "le compteur attend ta première écoute de la journée"
             }
             Spacer(Modifier.height(8.dp))
             NovaCard {
+                val currentStreak = streak?.currentStreak ?: 0
+                val bestStreak = streak?.bestStreak ?: 0
                 Column(Modifier.padding(16.dp)) {
                     Text("Tes 7 derniers jours", color = theme.text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(insight, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(12.dp))
                     WeekSparkline(weekStats, todayIso, theme)
+                    Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(1.dp).background(theme.textSecondary.copy(alpha = 0.14f)))
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("🔥 $currentStreak jour${if (currentStreak == 1) "" else "s"}", color = theme.primary, fontWeight = FontWeight.Bold)
+                            Text("Série actuelle", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("🏆 $bestStreak jour${if (bestStreak == 1) "" else "s"}", color = theme.accent, fontWeight = FontWeight.Bold)
+                            Text(streak?.bestStreakDate?.let { "Record · ${shortDate(it)}" } ?: "Record personnel", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
                 }
             }
         }
@@ -303,19 +310,24 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                     Column(Modifier.padding(vertical = 6.dp)) {
                         when (topTab) {
                             0 -> if (topTrack.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
-                            else topTrack.forEachIndexed { i, it ->
+                            else topTrack.take(3).forEachIndexed { i, it ->
                                 RankRow(i + 1, it.track.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.track.coverUrl, onClick = { detail = DetailTarget.Track(it.track.trackId) })
                             }
                             1 -> if (topArtist.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
-                            else topArtist.forEachIndexed { i, it ->
+                            else topArtist.take(3).forEachIndexed { i, it ->
                                 RankRow(i + 1, it.artist.name, "Artiste du jour", it.periodPlays, it.periodDurationMs, it.artist.photoUrl, circle = true, onClick = { detail = DetailTarget.Artist(it.artist.artistId) })
                             }
                             else -> if (topAlbum.isEmpty()) Text("Pas encore d'écoute aujourd'hui", color = theme.textSecondary, modifier = Modifier.padding(16.dp))
-                            else topAlbum.forEachIndexed { i, it ->
+                            else topAlbum.take(3).forEachIndexed { i, it ->
                                 RankRow(i + 1, it.album.title, it.artistName ?: "—", it.periodPlays, it.periodDurationMs, it.album.coverUrl, onClick = { detail = DetailTarget.Album(it.album.albumId) })
                             }
                         }
                     }
+                    Text(
+                        "Ouvrir Billboard →", color = theme.primary, fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.End,
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenTab(NovaTab.BILLBOARD) }.padding(horizontal = 16.dp, vertical = 12.dp)
+                    )
                 }
             }
         }
@@ -323,6 +335,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
         /* ---------- 4. Dernières actualités ---------- */
         item {
             SectionTitle("Dernières actualités")
+            var expandedNews by remember { mutableStateOf(false) }
             val now = System.currentTimeMillis()
             val news = remember(certNews, pantheonNews, hofNews, notificationEvents) {
                 buildList {
@@ -356,7 +369,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             NovaCard {
                 Column(Modifier.padding(vertical = 6.dp)) {
                     if (news.isEmpty()) Text("Aucune actualité pour l'instant — récompenses, charts et nouveautés apparaîtront ici.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
-                    news.forEach { n ->
+                    news.take(if (expandedNews) news.size else 4).forEach { n ->
                         Row(
                             Modifier.fillMaxWidth().clickable {
                                 when {
@@ -381,6 +394,14 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                             }
                             Text(elapsedLabel(now - n.at), color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                         }
+                    }
+                    if (news.size > 4) {
+                        Text(
+                            if (expandedNews) "Réduire les actualités" else "Voir les ${news.size - 4} autres",
+                            color = theme.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth().clickable { expandedNews = !expandedNews }.padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
                     }
                 }
             }
@@ -407,7 +428,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             NovaCard {
                 Column(Modifier.padding(vertical = 6.dp)) {
                     if (upcoming.isEmpty()) Text("Écoute encore un peu : le radar des certifications s'allume dès les premières écoutes.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
-                    upcoming.forEach { u ->
+                    upcoming.take(3).forEach { u ->
                         Column(Modifier.fillMaxWidth().clickable { detail = u.target }.padding(horizontal = 16.dp, vertical = 8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 CoverArt(u.coverUrl, u.title, size = 40)
@@ -429,17 +450,21 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                             Text("${u.plays} / ${u.need}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                         }
                     }
+                    Text(
+                        "Voir toutes les certifications →", color = theme.primary, fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.End,
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenTab(NovaTab.CERTIFICATIONS) }.padding(horizontal = 16.dp, vertical = 12.dp)
+                    )
                 }
             }
         }
 
-        /* ---------- 6. Records récents ---------- */
+        /* ---------- 6. Records personnels ---------- */
         item {
-            SectionTitle("Records récents")
+            SectionTitle("Records personnels")
             val records = buildList {
                 bestDay?.let { add(RecordItem("📅", "Journée record", "${formatCount(it.playCount)} écoutes · ${formatDuration(it.totalDurationMs)}", it.date)) }
                 bestTrackDay?.let { add(RecordItem("🔁", "Titre le plus joué en un jour", "${it.title} · ${it.daily.playCount} écoutes", it.daily.date)) }
-                streak?.takeIf { it.bestStreak > 0 }?.let { add(RecordItem("🔥", "Meilleur streak", "${it.bestStreak} jours consécutifs", it.bestStreakDate ?: it.date)) }
             }.sortedByDescending { it.date }
             NovaCard {
                 Column(Modifier.padding(vertical = 6.dp)) {
@@ -459,9 +484,14 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
             }
         }
 
-        /* ---------- 7. Récemment écouté ---------- */
-        item { SectionTitle("Récemment écouté") }
-        items(recent, key = { it.scrobble.scrobbleId }) { s ->
+        /* ---------- Écoutes récentes : aperçu compact ---------- */
+        item {
+            SectionTitle("Écoutes récentes")
+            if (recent.isEmpty()) {
+                Text("Les écoutes confirmées apparaîtront ici.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            }
+        }
+        items(recent.take(5), key = { it.scrobble.scrobbleId }) { s ->
             val time = SimpleDateFormat("HH:mm · dd MMM", Locale.FRANCE).format(Date(s.scrobble.startedAt))
             Row(
                 Modifier.fillMaxWidth().clickable { detail = DetailTarget.Track(s.scrobble.trackId) }.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -476,25 +506,105 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                 Text(time, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
-
-        /* ---------- 8. Streak ---------- */
-        item {
-            SectionTitle("Streak")
-            NovaCard {
-                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceAround, verticalAlignment = Alignment.CenterVertically) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🔥 ${streak?.currentStreak ?: 0}", fontSize = 36.sp, fontWeight = FontWeight.Black, color = theme.primary)
-                        Text("jours consécutifs", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🏆 ${streak?.bestStreak ?: 0}", style = MaterialTheme.typography.titleMedium, color = theme.textSecondary)
-                        Text(streak?.bestStreakDate?.let { "record personnel · ${shortDate(it)}" } ?: "record personnel", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
+        if (recent.isNotEmpty()) {
+            item {
+                Text(
+                    "Explorer les statistiques →", color = theme.primary, fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.End,
+                    modifier = Modifier.fillMaxWidth().clickable { onOpenTab(NovaTab.STATS) }.padding(horizontal = 16.dp, vertical = 10.dp)
+                )
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
     }
+    }
+}
+
+@Composable
+private fun HomeSpotlightCard(artUrl: String?, artistName: String?, onOpenCharts: () -> Unit) {
+    val theme = Nova.theme
+    val shape = Nova.cardShape
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).height(178.dp)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(theme.surface, theme.primary.copy(alpha = 0.45f), theme.secondary.copy(alpha = 0.32f))))
+    ) {
+        if (!artUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = artUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        0.34f to theme.background.copy(alpha = 0.22f),
+                        1f to theme.background.copy(alpha = 0.96f)
+                    )
+                )
+            )
+        )
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(14.dp).clip(RoundedCornerShape(50))
+                .background(theme.surface.copy(alpha = 0.86f)).padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text("7 JOURS", color = theme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        }
+        Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text(
+                if (artistName != null) "ARTISTE DE LA SEMAINE" else "TA SEMAINE EN MUSIQUE",
+                color = theme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp
+            )
+            Text(
+                artistName ?: "Ton univers musical",
+                color = theme.text, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (artistName != null) "Au sommet de tes écoutes" else "Tes artistes et titres prennent vie ici",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Voir les charts →", color = theme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(onClick = onOpenCharts)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickActions(onOpenTab: (NovaTab) -> Unit) {
+    val theme = Nova.theme
+    val actions = listOf(
+        "Stats" to NovaTab.STATS,
+        "Certifs" to NovaTab.CERTIFICATIONS,
+        "Records" to NovaTab.RECORDS
+    )
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        actions.forEach { (label, tab) ->
+            Row(
+                Modifier.clip(RoundedCornerShape(18.dp)).background(theme.surface.copy(alpha = 0.92f))
+                    .clickable { onOpenTab(tab) }.padding(horizontal = 13.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(tab.icon, contentDescription = null, tint = theme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(7.dp))
+                Text(label, color = theme.text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            }
+        }
     }
 }
 
@@ -643,7 +753,7 @@ fun sourceAppName(pkg: String?): String = when (pkg) {
 
 /* ---------- Accueil vide — premier contact (avant la première écoute) ---------- */
 @Composable
-private fun FirstContactHome() {
+private fun FirstContactHome(onOpenSettings: () -> Unit) {
     val theme = Nova.theme
     val context = LocalContext.current
     var listenerOk by remember { mutableStateOf(com.novastats.app.service.NovaListenerService.isEnabled(context)) }
@@ -690,6 +800,19 @@ private fun FirstContactHome() {
             Column(Modifier.padding(16.dp)) {
                 Text("🔥 0 jour", color = Color(0xFFE74C3C), fontWeight = FontWeight.Black, fontSize = 22.sp)
                 Text("Ton premier jour commence dès ta première écoute", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(18.dp)).background(theme.primary.copy(alpha = 0.14f))
+                .clickable(onClick = onOpenSettings).padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(NovaTab.SETTINGS.icon, contentDescription = null, tint = theme.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(if (listenerOk) "Ouvrir les réglages" else "Activer la détection", color = theme.primary, fontWeight = FontWeight.Bold)
+                Text("Service, autorisations et import d'historique", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
         Spacer(Modifier.height(12.dp))
