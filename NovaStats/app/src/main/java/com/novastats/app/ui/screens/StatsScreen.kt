@@ -58,12 +58,13 @@ import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.TitleNormalizer
+import com.novastats.app.domain.StatsTopNRecordRules
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.flow.first
 import com.novastats.app.ui.theme.Nova
 
 private val statsTabs = listOf("Titres", "Artistes", "Albums")
-private const val TOP_LIMIT = 300
+private const val TOP_LIMIT = StatsTopNRecordRules.STATS_TOP_LIMIT
 
 /**
  * 📊 Stats — 3 sous-onglets Titres / Artistes / Albums + icône recherche (temps réel, portée = sous-onglet actif).

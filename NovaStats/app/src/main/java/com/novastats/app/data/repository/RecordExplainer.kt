@@ -17,6 +17,7 @@ import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
 import com.novastats.app.domain.RecordDef
 import com.novastats.app.domain.RecordMath
+import com.novastats.app.domain.StatsTopNRecordRules
 import kotlinx.coroutines.flow.first
 import java.time.format.DateTimeFormatter
 import java.time.LocalDate
@@ -27,8 +28,8 @@ import java.util.Locale
 /**
  * 🏅 « Pourquoi cet élément est là ? » — construit, pour chaque record, une fiche spécifique :
  * un titre, un récit en français, des faits chiffrés, une frise des périodes concernées et les éléments impliqués
- * (titres d'un artiste, certifications, entrées Hall of Fame…). Tout est recalculé à partir des snapshots Billboard,
- * exactement comme le moteur des records, pour que l'explication colle à la valeur affichée.
+ * (titres contributifs, certifications, entrées Hall of Fame…). Les records Billboard repartent des snapshots;
+ * les nouveaux Top N d'écoute reprennent les mêmes classements all-time locaux que l'onglet Stats.
  */
 class RecordExplainer(private val db: NovaDatabase) {
 
@@ -877,12 +878,116 @@ class RecordExplainer(private val db: NovaDatabase) {
             "FASTEST_CERT" -> fastestCert(cat, sub, id, name)
             "FASTEST_PANTHEON" -> fastestPantheon(sub, id, name)
             "FASTEST_LISTEN_MILESTONE" -> fastestListeningMilestone(cat, sub, id, name, value)
+            "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N", "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N", "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N" ->
+                statsTopNStory(def, sub, id, name)
             "MOST_CERTIFICATIONS" -> mostCertifications(cat, sub, id, name)
             "MOST_HOF", "MOST_GLOBAL" -> hallOfFame(def, cat, sub, id, name)
             "MULTI_CHART" -> multiChart(cat, sub, id, name)
             else -> Story(def.title, def.description)
         }
     }.getOrElse { e -> Story(def.title, "Impossible de reconstruire l'explication : ${e.message ?: e.javaClass.simpleName}") }
+
+    /** Explication bâtie sur les classements Stats all-time courants, sans historique des sorties du Top N. */
+    private suspend fun statsTopNStory(def: RecordDef, sub: String?, id: Long, name: String): Story {
+        val topN = sub?.removePrefix("TOP")?.toIntOrNull()
+            ?.takeIf { it in StatsTopNRecordRules.thresholds }
+            ?: StatsTopNRecordRules.thresholds.first()
+        val rankedTracks = db.trackDao().topAllTime(StatsTopNRecordRules.STATS_TOP_LIMIT).first()
+        val topTracks = rankedTracks.take(topN)
+        val topTrackIds = topTracks.mapTo(HashSet()) { it.track.trackId }
+        val creditsByTrack = HashMap<Long, MutableSet<Long>>()
+        db.trackLinkDao().allTrackArtists().forEach { link ->
+            if (link.trackId in topTrackIds) creditsByTrack.getOrPut(link.trackId) { LinkedHashSet() }.add(link.artistId)
+        }
+        topTracks.forEach { ranked ->
+            creditsByTrack.getOrPut(ranked.track.trackId) { LinkedHashSet() }.add(ranked.track.artistId)
+        }
+        val trackEntries = rankedTracks.map { ranked ->
+            StatsTopNRecordRules.RankedTrack(
+                trackId = ranked.track.trackId,
+                albumId = ranked.track.albumId,
+                artistIds = creditsByTrack[ranked.track.trackId].orEmpty()
+            )
+        }
+
+        val rankedAlbums = if (def.id == "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N") {
+            db.albumDao().topAllTime(StatsTopNRecordRules.STATS_TOP_LIMIT).first()
+        } else emptyList()
+        val albumEntries = rankedAlbums.map { ranked ->
+            StatsTopNRecordRules.RankedAlbum(ranked.album.albumId, ranked.album.artistId)
+        }
+        val albumIds = if (def.id == "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N") {
+            db.albumDao().all().mapTo(HashSet()) { it.albumId }
+        } else emptySet()
+
+        val count = when (def.id) {
+            "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N" -> StatsTopNRecordRules.artistTrackCounts(trackEntries, topN)[id] ?: 0
+            "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" -> StatsTopNRecordRules.artistAlbumCounts(albumEntries, topN)[id] ?: 0
+            else -> StatsTopNRecordRules.albumTrackCounts(trackEntries, topN, albumIds)[id] ?: 0
+        }
+        val unit = if (def.id == "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N") "album${if (count == 1) "" else "s"}" else "titre${if (count == 1) "" else "s"}"
+        val items = when (def.id) {
+            "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N" -> topTracks.mapIndexedNotNull { index, ranked ->
+                val track = ranked.track
+                if (id !in creditsByTrack[track.trackId].orEmpty()) null else Item(
+                    type = EntityType.TRACK,
+                    id = track.trackId,
+                    name = track.title,
+                    detail = "#${index + 1} dans le Top $topN global · ${ranked.periodPlays} écoute${if (ranked.periodPlays == 1) "" else "s"} · artiste crédité",
+                    imageUrl = track.coverUrl,
+                    highlight = true
+                )
+            }
+            "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" -> rankedAlbums.take(topN).mapIndexedNotNull { index, ranked ->
+                val album = ranked.album
+                if (album.artistId != id) null else Item(
+                    type = EntityType.ALBUM,
+                    id = album.albumId,
+                    name = album.title,
+                    detail = "#${index + 1} dans le Top $topN global albums · ${ranked.periodPlays} écoute${if (ranked.periodPlays == 1) "" else "s"} · propriétaire",
+                    imageUrl = album.coverUrl,
+                    highlight = true
+                )
+            }
+            else -> topTracks.mapIndexedNotNull { index, ranked ->
+                val track = ranked.track
+                if (track.albumId != id || id !in albumIds) null else Item(
+                    type = EntityType.TRACK,
+                    id = track.trackId,
+                    name = track.title,
+                    detail = "#${index + 1} dans le Top $topN global des titres · ${ranked.periodPlays} écoute${if (ranked.periodPlays == 1) "" else "s"}",
+                    imageUrl = track.coverUrl,
+                    highlight = true
+                )
+            }
+        }
+        val source = if (def.id == "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N") "albums" else "titres"
+        val attribution = when (def.id) {
+            "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N" -> "Tous les artistes crédités comptent, collaborations comprises."
+            "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" -> "Chaque album revient uniquement à son artiste propriétaire; les compilations sont exclues comme dans Stats."
+            else -> "Les titres sont pris dans le Top global des titres, jamais dans un classement interne à l'album; les albums-compilations peuvent aussi compter leurs titres."
+        }
+        val narrative = when (def.id) {
+            "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N" -> "$name est crédité sur $count titre${if (count == 1) "" else "s"} distinct${if (count == 1) "" else "s"} du Top $topN global des titres les plus écoutés de Stats. $attribution"
+            "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" -> "$name possède $count album${if (count == 1) "" else "s"} parmi les $topN albums les plus écoutés de Stats, sur tout l'historique. $attribution"
+            else -> "« $name » place $count titre${if (count == 1) "" else "s"} dans le Top $topN global des titres les plus écoutés de Stats, sur tout l'historique. $attribution"
+        }
+        return Story(
+            headline = "$count $unit dans le Top $topN Stats",
+            narrative = "$narrative\n\nLe classement est recalculé à partir des écoutes all-time actuelles : seuls les $topN premiers éléments comptent, sans élargir le seuil en cas d'égalité. Un titre ou un album qui en sort cesse donc immédiatement de contribuer au prochain recalcul.",
+            facts = listOf(
+                "Période" to "All-time · tout l'historique",
+                "Classement source" to "Top $topN global $source par écoutes",
+                "Valeur actuelle" to "$count $unit",
+                "Attribution" to attribution
+            ),
+            itemsTitle = buildString {
+                append(if (def.id == "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N") "Albums contributeurs" else "Titres contributeurs")
+                if (items.size > 20) append(" · 20 premiers sur ${items.size}")
+            },
+            items = items.take(20)
+        )
+    }
 
     /* ---------------- contexte unique à l'élément (ajouté à chaque fiche) ---------------- */
 
@@ -895,7 +1000,12 @@ class RecordExplainer(private val db: NovaDatabase) {
             com.novastats.app.domain.RecordUnit.PLAYS -> "$n ${plural(n, "écoute")}"
             com.novastats.app.domain.RecordUnit.TIMES -> "$n fois"
             com.novastats.app.domain.RecordUnit.DURATION_MS -> if (def.id in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "FASTEST_LISTEN_MILESTONE")) RecordCatalog.formatFastDuration(v.toLong()) else RecordCatalog.formatDurationAdaptive(v.toLong())
-            com.novastats.app.domain.RecordUnit.COUNT -> if (def.id == "SIMULTANEOUS_NO1_DEBUT") "$n ${plural(n, "période")}" else "$n"
+            com.novastats.app.domain.RecordUnit.COUNT -> when (def.id) {
+                "SIMULTANEOUS_NO1_DEBUT" -> "$n ${plural(n, "période")}"
+                "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N", "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N" -> "$n ${plural(n, "titre")}"
+                "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" -> "$n ${plural(n, "album")}"
+                else -> "$n"
+            }
             else -> "$n"
         }
     }

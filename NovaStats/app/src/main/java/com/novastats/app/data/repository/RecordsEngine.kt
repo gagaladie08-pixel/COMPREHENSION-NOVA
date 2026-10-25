@@ -16,6 +16,8 @@ import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
 import com.novastats.app.domain.RecordMath
 import com.novastats.app.domain.RecordResult
+import com.novastats.app.domain.StatsTopNRecordRules
+import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 
 /**
@@ -26,6 +28,11 @@ import java.time.LocalDate
 class RecordsEngine(private val db: NovaDatabase) {
 
     private val chartPeriods = listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY)
+    private val statsTopNRecordTypes = setOf(
+        "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N",
+        "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N",
+        "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N"
+    )
 
     /** Owner map : track → artistes (main + featured), track → album, album → artiste. */
     private class Links(
@@ -56,6 +63,15 @@ class RecordsEngine(private val db: NovaDatabase) {
             db.recordDao().clearType("MOST_RECORDS")
             (out + palmares).chunked(500).forEach { db.recordDao().insertAll(it) }
         }
+    }
+
+    /** Répare les trois nouveaux classements Stats et le palmarès qui dépend de leurs détenteurs. */
+    suspend fun rebuildStatsTopNRecordsOnly() {
+        val links = loadLinks()
+        val out = ArrayList<RecordCacheEntity>()
+        val now = System.currentTimeMillis()
+        statsTopNRecords(links, out, now)
+        replaceRecordFamiliesAndRefreshPalmares(statsTopNRecordTypes, out, now)
     }
 
     /** Recalcule uniquement Most Successive #1 après son nouveau seuil d'admissibilité. */
@@ -288,12 +304,59 @@ class RecordsEngine(private val db: NovaDatabase) {
         perfectAllKillRecords(out, now)
         onProgress("Records · séries d'écoute…")
         listeningStreaks(links, out, now)
+        onProgress("Records · classements Stats all-time…")
+        statsTopNRecords(links, out, now)
         onProgress("Records · palmarès…")
         mostRecords(out, now)
 
         db.withTransaction {
             db.recordDao().clear()
             out.chunked(500).forEach { db.recordDao().insertAll(it) }
+        }
+    }
+
+    /**
+     * Records all-time alignés sur les mêmes flux que Stats : Top 300 actuel, ordre écoutes puis durée.
+     * La requête LIMIT est celle des DAO Stats; les seuils n'ajoutent donc jamais les ex æquo à la frontière.
+     */
+    private suspend fun statsTopNRecords(links: Links, out: MutableList<RecordCacheEntity>, now: Long) {
+        val rankedTracks = db.trackDao().topAllTime(StatsTopNRecordRules.STATS_TOP_LIMIT).first()
+        val rankedAlbums = db.albumDao().topAllTime(StatsTopNRecordRules.STATS_TOP_LIMIT).first()
+        val trackEntries = rankedTracks.map { ranked ->
+            val track = ranked.track
+            StatsTopNRecordRules.RankedTrack(
+                trackId = track.trackId,
+                albumId = track.albumId,
+                artistIds = (links.trackArtists[track.trackId].orEmpty() + track.artistId).toSet()
+            )
+        }
+        val albumEntries = rankedAlbums.map { ranked ->
+            StatsTopNRecordRules.RankedAlbum(ranked.album.albumId, ranked.album.artistId)
+        }
+        // Le 3e record groupe les titres du Top global par album_id principal utilisé dans Stats;
+        // toutes les fiches d'album sont recevables ici (contrairement au classement Top N Albums).
+        val albumIds = db.albumDao().all().mapTo(HashSet()) { it.albumId }
+
+        for (topN in StatsTopNRecordRules.thresholds) {
+            val sub = "TOP$topN"
+            emit(
+                out, "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N", null, RecordCategory.ARTIST, sub,
+                StatsTopNRecordRules.artistTrackCounts(trackEntries, topN).map { (id, count) ->
+                    RecordResult(id, count.toDouble(), null)
+                }, now
+            )
+            emit(
+                out, "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N", null, RecordCategory.ARTIST, sub,
+                StatsTopNRecordRules.artistAlbumCounts(albumEntries, topN).map { (id, count) ->
+                    RecordResult(id, count.toDouble(), null)
+                }, now
+            )
+            emit(
+                out, "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N", null, RecordCategory.ALBUM, sub,
+                StatsTopNRecordRules.albumTrackCounts(trackEntries, topN, albumIds).map { (id, count) ->
+                    RecordResult(id, count.toDouble(), null)
+                }, now
+            )
         }
     }
 

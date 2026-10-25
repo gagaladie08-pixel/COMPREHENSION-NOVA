@@ -4562,6 +4562,8 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
             "MOST_SUCCESSIVE_1" -> "$n éléments distincts au #1"
             "MOST_SIMULTANEOUS" -> "$n simultané${if (n > 1) "s" else ""}"
             "SIMULTANEOUS_NO1_DEBUT" -> "$n période${if (n > 1) "s" else ""}"
+            "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N", "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N" -> "$n titre${if (n > 1) "s" else ""}"
+            "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" -> "$n album${if (n > 1) "s" else ""}"
             else -> "$n"
         }
     }

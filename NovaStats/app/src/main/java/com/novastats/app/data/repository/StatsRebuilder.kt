@@ -50,6 +50,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         RecordsEngine(db).rebuildSpeedRecords()
     }
 
+    /** Répare les records issus des Top N actuels de Stats et le palmarès Most Records dépendant. */
+    suspend fun rebuildStatsTopNRecordsOnly() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildStatsTopNRecordsOnly()
+    }
+
     /** Répare seulement le cache Most Successive #1, sans toucher aux autres records ni aux données sources. */
     suspend fun rebuildSuccessiveRecordsOnly() = rebuildMutex.withLock {
         RecordsEngine(db).rebuildSuccessiveRecordsOnly()

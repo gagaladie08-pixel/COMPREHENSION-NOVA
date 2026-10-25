@@ -148,6 +148,19 @@ object StartupRepair {
                         RebuildAudit.write(context, "⚠️ Amorçage Most Cumulative #1 en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
                     }
                 }
+
+                // Amorçage des trois records depuis les classements actuels all-time de Stats.
+                // La réparation ciblée ne touche qu'à ces familles et à Most Records, leur palmarès dépendant.
+                if (!prefs.getBoolean("stats_top_n_records_v1_done", false)) {
+                    try {
+                        RebuildAudit.write(context, "🎧 Amorçage ciblé des records Stats Top N (titres et albums all-time)")
+                        app.rebuilder.rebuildStatsTopNRecordsOnly()
+                        RebuildAudit.write(context, "✅ Records Stats Top N et palmarès Most Records recalculés")
+                        prefs.edit().putBoolean("stats_top_n_records_v1_done", true).apply()
+                    } catch (t: Throwable) {
+                        RebuildAudit.write(context, "⚠️ Amorçage des records Stats Top N en échec (${t.javaClass.simpleName}) — nouvel essai au prochain lancement")
+                    }
+                }
             }
         }
     }

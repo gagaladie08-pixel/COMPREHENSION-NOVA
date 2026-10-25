@@ -1,7 +1,7 @@
 package com.novastats.app.domain
 
 /*
- * 🏅 Les 37 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
+ * 🏅 Les 40 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
  * Kotlin pur : définitions + moteur de calcul sur des séries de positions, testable en JVM.
  */
 
@@ -15,6 +15,49 @@ data class RecordSub(val dbName: String, val label: String)
 
 /** Type d'unité pour l'affichage de la valeur. */
 enum class RecordUnit { PERIODS, COUNT, PLAYS, POSITIONS, DURATION_MS, TIMES, DAYS }
+
+/** Règles communes aux classements Top N all-time de l'onglet Stats et aux records qui en dépendent. */
+object StatsTopNRecordRules {
+    /** L'onglet Stats expose au maximum les 300 premiers éléments de chaque classement global. */
+    const val STATS_TOP_LIMIT = 300
+    val thresholds = listOf(10, 20, 40, 50, 70, 100, 150, 200, 250, 300)
+
+    /** Ligne du classement Stats des titres, enrichie des crédits et de l'album principal. */
+    data class RankedTrack(val trackId: Long, val albumId: Long?, val artistIds: Set<Long>)
+    /** Ligne du classement Stats des albums : l'album est attribué uniquement à son propriétaire. */
+    data class RankedAlbum(val albumId: Long, val ownerArtistId: Long?)
+
+    /** Titres distincts crédités à chaque artiste dans les N premières lignes déjà classées par Stats. */
+    fun artistTrackCounts(rankedTracks: List<RankedTrack>, topN: Int): Map<Long, Int> {
+        val tracksByArtist = LinkedHashMap<Long, MutableSet<Long>>()
+        for (track in rankedTracks.take(topN.coerceAtLeast(0))) {
+            for (artistId in track.artistIds) {
+                tracksByArtist.getOrPut(artistId) { LinkedHashSet() }.add(track.trackId)
+            }
+        }
+        return tracksByArtist.mapValues { (_, trackIds) -> trackIds.size }
+    }
+
+    /** Albums distincts du Top N Albums Stats, attribués à leur artiste propriétaire. */
+    fun artistAlbumCounts(rankedAlbums: List<RankedAlbum>, topN: Int): Map<Long, Int> {
+        val albumsByArtist = LinkedHashMap<Long, MutableSet<Long>>()
+        for (album in rankedAlbums.take(topN.coerceAtLeast(0))) {
+            val owner = album.ownerArtistId ?: continue
+            albumsByArtist.getOrPut(owner) { LinkedHashSet() }.add(album.albumId)
+        }
+        return albumsByArtist.mapValues { (_, albumIds) -> albumIds.size }
+    }
+
+    /** Titres du classement global Top N, groupés par leur album principal présent dans la bibliothèque. */
+    fun albumTrackCounts(rankedTracks: List<RankedTrack>, topN: Int, eligibleAlbumIds: Set<Long>): Map<Long, Int> {
+        val tracksByAlbum = LinkedHashMap<Long, MutableSet<Long>>()
+        for (track in rankedTracks.take(topN.coerceAtLeast(0))) {
+            val albumId = track.albumId?.takeIf { it in eligibleAlbumIds } ?: continue
+            tracksByAlbum.getOrPut(albumId) { LinkedHashSet() }.add(track.trackId)
+        }
+        return tracksByAlbum.mapValues { (_, trackIds) -> trackIds.size }
+    }
+}
 
 /**
  * Définition d'un record.
@@ -46,7 +89,7 @@ enum class RecordGroup(val emoji: String, val label: String, val description: St
     SPEED("⚡", "Vitesse", "Les écoutes, certifications et statuts Panthéon atteints le plus vite"),
     TOTALS("🧮", "Cumuls", "Les plus gros volumes : écoutes, certifications, Hall of Fame, Global, multi-charts et Perfect All Kill"),
     DOMINATION("🎼", "Domination", "Les artistes / albums qui occupent le chart avec plusieurs titres à la fois"),
-    LISTENING("🎧", "Écoute", "Les séries d'écoute, indépendantes des charts : jours consécutifs avec au moins une écoute")
+    LISTENING("🎧", "Écoute", "Les séries d'écoute et les classements all-time de titres / albums les plus écoutés dans Stats")
 }
 
 object RecordCatalog {
@@ -71,7 +114,10 @@ object RecordCatalog {
         "MOST_REENTRIES" to RecordGroup.MOVEMENT, "LONGEST_ABSENCE_RETURN" to RecordGroup.MOVEMENT,
         "LONGEST_LISTENING_STREAK" to RecordGroup.LISTENING,
         "PODIUM_SWEEP" to RecordGroup.DOMINATION,
-        "MOST_RECORDS" to RecordGroup.PALMARES
+        "MOST_RECORDS" to RecordGroup.PALMARES,
+        "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N" to RecordGroup.LISTENING,
+        "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N" to RecordGroup.LISTENING,
+        "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N" to RecordGroup.LISTENING
     )
     fun inGroup(g: RecordGroup): List<RecordDef> = groupOf.filterValues { it == g }.keys.mapNotNull { id -> ALL.firstOrNull { it.id == id } }
 
@@ -155,6 +201,7 @@ object RecordCatalog {
     fun sweepZoneOf(sub: String?): Int = zoneLimit(sub?.substringBefore("_"))
     fun sweepSolo(sub: String?): Boolean = sub?.endsWith("_SOLO") == true
     val globalSubs = listOf(RecordSub("TRIPLE_DEBUT", "🌍 Triple Debut"), RecordSub("ALL_KILL", "💥 All Kill"), RecordSub("LEGENDARY_RUN", "🏅 Legendary Run"), RecordSub("ALL", "🌍 All Global"))
+    private val statsTopNSubs = StatsTopNRecordRules.thresholds.map { RecordSub("TOP$it", "Top $it") }
 
     val ALL: List<RecordDef> = listOf(
         RecordDef(1, "MOST_CUMULATIVE", "📆", "Most Cumulative", "Top 10 des éléments avec le plus de périodes dans le chart", chartPeriods, all3),
@@ -231,6 +278,21 @@ object RecordCatalog {
             37, "FASTEST_LISTEN_MILESTONE", "⏱️", "Fastest Listening Milestones",
             "Temps entre la première écoute NovaStats et les paliers de 25 écoutes par titre, 100 par artiste crédité et 50 par album. Un palier apparaît dès qu'au moins une entité de la section l'atteint.",
             emptyList(), all3, unit = RecordUnit.DURATION_MS, ascending = true, screen = "FASTEST"
+        ),
+        RecordDef(
+            38, "MOST_TRACKS_BY_ARTIST_IN_STATS_TOP_N", "🎤", "Most Tracks by Artist in Stats Top N",
+            "Titres distincts crédités à l'artiste dans le Top N global all-time des titres les plus écoutés de Stats. Collaborations comprises; classement actuel uniquement.",
+            emptyList(), listOf(RecordCategory.ARTIST), mapOf(RecordCategory.ARTIST to statsTopNSubs), RecordUnit.COUNT
+        ),
+        RecordDef(
+            39, "MOST_ALBUMS_BY_ARTIST_IN_STATS_TOP_N", "💿", "Most Albums by Artist in Stats Top N",
+            "Albums appartenant à l'artiste dans le Top N global all-time des albums les plus écoutés de Stats. Compilations exclues comme dans Stats; classement actuel uniquement.",
+            emptyList(), listOf(RecordCategory.ARTIST), mapOf(RecordCategory.ARTIST to statsTopNSubs), RecordUnit.COUNT
+        ),
+        RecordDef(
+            40, "MOST_TRACKS_BY_ALBUM_IN_STATS_TOP_N", "🎵", "Most Tracks from an Album in Stats Top N",
+            "Titres de l'album présents dans le Top N global all-time des titres les plus écoutés de Stats, et non dans un classement interne à l'album.",
+            emptyList(), listOf(RecordCategory.ALBUM), mapOf(RecordCategory.ALBUM to statsTopNSubs), RecordUnit.COUNT
         )
     )
 
