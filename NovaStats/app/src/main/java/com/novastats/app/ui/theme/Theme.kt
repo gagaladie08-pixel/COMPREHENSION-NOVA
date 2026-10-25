@@ -78,8 +78,9 @@ fun novaTypography(fonts: NovaFontSet, theme: NovaTheme): Typography {
         "Bebas Neue", "Anton", "Archivo Black", "Bungee", "Abril Fatface", "Audiowide", "Righteous", "Unica One", "DM Serif Display" -> FontWeight.Normal
         else -> FontWeight.Bold
     }
-    val titleSpacing = when (theme.titleFont) {
-        "Orbitron", "Bebas Neue", "Anton", "Cinzel" -> 1.2.sp
+    val titleSpacing = when {
+        theme.titleFont in setOf("Orbitron", "Bebas Neue", "Anton", "Cinzel") -> 1.2.sp
+        theme.id == "survivor" -> 0.55.sp
         else -> 0.sp
     }
     fun TextStyle.t(w: FontWeight = heavy) = copy(fontFamily = title, fontWeight = w, letterSpacing = titleSpacing)

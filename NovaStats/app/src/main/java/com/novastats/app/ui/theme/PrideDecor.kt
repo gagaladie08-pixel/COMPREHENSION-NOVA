@@ -163,27 +163,76 @@ fun Modifier.progressChevron(height: Dp = 24.dp, alpha: Float = 0.9f): Modifier 
  */
 @Composable
 fun PrideVeil(modifier: Modifier = Modifier) {
-    val t by rememberInfiniteTransition(label = "veil").animateFloat(0f, 1f, infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Restart), label = "va")
-    val pieces = remember { List(18) { floatArrayOf(Random.nextFloat(), Random.nextFloat(), 3f + Random.nextFloat() * 4f, Random.nextFloat() * 6.28f, Random.nextInt(NovaColors.PrideConfetti.size).toFloat()) } }
+    val theme = Nova.theme
+    val t by rememberInfiniteTransition(label = "veil").animateFloat(0f, 1f, infiniteRepeatable(tween(18000, easing = LinearEasing), RepeatMode.Restart), label = "va")
+    val pieces = remember { List(18) { index ->
+        floatArrayOf(
+            Random.nextFloat(),
+            if (index % 2 == 0) Random.nextFloat() * 0.18f else 0.82f + Random.nextFloat() * 0.18f,
+            2.5f + Random.nextFloat() * 3f,
+            Random.nextFloat() * 6.28f,
+            Random.nextInt(NovaColors.PrideCycle.size).toFloat()
+        )
+    } }
     val bands = NovaColors.PrideFlags.flatten()
     Canvas(modifier) {
-        // Bandes diagonales (−18°) sur toute la surface
-        val bandH = size.height / 10f
+        // Un lavis diagonal très léger conserve le spectre sans voiler les textes ni les pochettes.
+        val bandH = size.height / 12f
         rotate(-18f) {
             val total = bands.size
             for (i in -8 until total + 8) {
-                val c = bands[((i % total) + total) % total]
-                drawRect(c, Offset(-size.width, i * bandH * 0.45f + (t * bandH * 0.45f * 7)), Size(size.width * 3, bandH * 0.45f), alpha = 0.035f)
+                val color = bands[((i % total) + total) % total]
+                drawRect(color, Offset(-size.width, i * bandH * 0.45f + (t * bandH * 0.45f * 7)), Size(size.width * 3, bandH * 0.45f), alpha = 0.022f)
             }
         }
-        // Cœurs qui flottent
-        pieces.forEach { p ->
-            val y = ((p[1] - t) % 1f + 1f) % 1f
-            val x = p[0] + sin(t * 6.28f * 2 + p[3]) * 0.02f
-            val col = NovaColors.PrideConfetti[p[4].toInt()].copy(alpha = 0.10f + 0.08f * ((sin(t * 6.28f * 3 + p[3]) + 1f) / 2f))
-            drawHeart(Offset(x * size.width, y * size.height), p[2].dp.toPx(), col)
+
+        // Lumière de scène aux bords : aurora trans, violet et mint à l'intensité respirante.
+        val pulse = 0.5f + 0.5f * sin(t * 6.2831855f)
+        val glowRadius = size.width * 0.62f
+        listOf(
+            Offset(size.width * 0.02f, size.height * 0.16f) to theme.primary,
+            Offset(size.width * 0.98f, size.height * 0.50f) to theme.secondary,
+            Offset(size.width * 0.42f, size.height * 1.02f) to theme.glowSecondary
+        ).forEach { (center, color) ->
+            drawCircle(
+                Brush.radialGradient(
+                    listOf(color.copy(alpha = 0.075f + 0.035f * pulse), color.copy(alpha = 0.025f), Color.Transparent),
+                    center,
+                    glowRadius
+                ),
+                glowRadius,
+                center
+            )
+        }
+
+        // Quelques éclats prismatiques flottent près des bords, comme des bijoux sous un projecteur.
+        pieces.forEach { piece ->
+            val drift = sin(t * 6.2831855f * 2f + piece[3])
+            val x = piece[0] + drift * 0.012f
+            val y = (piece[1] + sin(t * 6.2831855f + piece[3]) * 0.012f).coerceIn(0f, 1f)
+            val twinkle = 0.5f + 0.5f * sin(t * 6.2831855f * 3f + piece[3])
+            val center = Offset(x * size.width, y * size.height)
+            val radius = (piece[2] * (0.55f + twinkle * 0.7f)).dp.toPx()
+            val color = NovaColors.PrideCycle[piece[4].toInt()].copy(alpha = 0.12f + 0.22f * twinkle)
+            drawPrismSparkle(center, radius, color)
+            drawCircle(Color.White.copy(alpha = 0.26f * twinkle), radius * 0.16f, center)
         }
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPrismSparkle(center: Offset, radius: Float, color: Color) {
+    val path = Path().apply {
+        moveTo(center.x, center.y - radius)
+        lineTo(center.x + radius * 0.24f, center.y - radius * 0.24f)
+        lineTo(center.x + radius, center.y)
+        lineTo(center.x + radius * 0.24f, center.y + radius * 0.24f)
+        lineTo(center.x, center.y + radius)
+        lineTo(center.x - radius * 0.24f, center.y + radius * 0.24f)
+        lineTo(center.x - radius, center.y)
+        lineTo(center.x - radius * 0.24f, center.y - radius * 0.24f)
+        close()
+    }
+    drawPath(path, color)
 }
 
 /** Petit cœur plein centré en [c], « rayon » [r]. */

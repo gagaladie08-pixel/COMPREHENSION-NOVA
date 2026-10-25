@@ -12,9 +12,9 @@ import androidx.compose.ui.text.googlefonts.isAvailableOnDevice
 import com.novastats.app.R
 
 /**
- * Polices des thèmes — chargées nativement via GoogleFont.Provider (Google Play Services Fonts).
- * Chaque famille enchaîne : graisses Google Fonts disponibles → police système la plus proche
- * (DeviceFontFamilyName) en secours si le téléchargement échoue ou si Play Services est absent.
+ * Polices des thèmes — familles sélectionnées embarquées dans l'APK, autres familles chargées via
+ * GoogleFont.Provider (Google Play Services Fonts). Pour ces dernières, une police système proche
+ * (DeviceFontFamilyName) prend le relais si le téléchargement échoue ou si Play Services est absent.
  */
 object NovaFonts {
     val provider = GoogleFont.Provider(
@@ -77,12 +77,31 @@ object NovaFonts {
         return ok
     }
 
-    /** Famille Google Fonts [name] avec repli système ; [online] = false force directement le repli. */
-    /** Polices embarquées dans l'APK (variables) : jamais de téléchargement, jamais de repli système. */
-    private val local: Map<String, Int> = mapOf("Inter" to R.font.inter, "Cinzel" to R.font.cinzel)
+    /** Les familles locales gardent leur identité même hors ligne ou sans Google Play Services Fonts. */
+    private data class LocalFont(
+        val resourceId: Int,
+        val weights: List<Int>,
+        val italicResourceId: Int? = null
+    )
+    private val local: Map<String, LocalFont> = mapOf(
+        "Inter" to LocalFont(R.font.inter, listOf(300, 400, 500, 600, 700, 800, 900)),
+        "Cinzel" to LocalFont(R.font.cinzel, listOf(400, 500, 600, 700, 800, 900)),
+        "Righteous" to LocalFont(R.font.righteous, listOf(400)),
+        "Nunito" to LocalFont(R.font.nunito, listOf(300, 400, 500, 600, 700, 800, 900), R.font.nunito_italic)
+    )
 
     fun family(name: String, online: Boolean = true): FontFamily {
-        local[name]?.let { res -> return cache.getOrPut(name) { FontFamily(listOf(300, 400, 500, 600, 700, 800, 900).map { w -> Font(res, FontWeight(w)) }) } }
+        local[name]?.let { localFont ->
+            return cache.getOrPut(name) {
+                val faces = localFont.weights.map { weight -> Font(localFont.resourceId, FontWeight(weight)) }.toMutableList()
+                localFont.italicResourceId?.let { italicResource ->
+                    localFont.weights.forEach { weight ->
+                        faces += Font(italicResource, FontWeight(weight), FontStyle.Italic)
+                    }
+                }
+                FontFamily(faces)
+            }
+        }
         val spec = specs[name] ?: Spec(listOf(400, 700), false, SANS)
         if (!online) return deviceFamily(spec.fallback)
         return cache.getOrPut(name) {

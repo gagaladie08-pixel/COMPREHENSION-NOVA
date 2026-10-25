@@ -27,7 +27,13 @@ import androidx.compose.ui.unit.dp
  * pointu, nuage, soleil, métal, pride, bonbon, polaroid, géométrique, dual).
  */
 @Composable
-fun ThemedTabIcon(icon: ImageVector, contentDescription: String, selected: Boolean, modifier: Modifier = Modifier) {
+fun ThemedTabIcon(
+    icon: ImageVector,
+    contentDescription: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    glyph: SurvivorGlyph? = null
+) {
     val theme = Nova.theme
     val tint by animateColorAsState(if (selected) theme.primary else theme.textSecondary, NovaMotion.spec(theme), label = "tint")
     val emphasis by animateFloatAsState(if (selected) 1f else 0f, NovaMotion.spec(theme), label = "emph")
@@ -113,27 +119,41 @@ fun ThemedTabIcon(icon: ImageVector, contentDescription: String, selected: Boole
                     listOf(Offset(-1f, -1f), Offset(1f, -1f), Offset(1f, 1f), Offset(-1f, 1f)).forEach { d -> drawCircle(theme.glowSecondary.copy(alpha = 0.5f + 0.5f * e), 1.5.dp.toPx(), Offset(c.x + d.x * (r - 3.dp.toPx()), c.y + d.y * (r - 3.dp.toPx()))) }
                 }
                 IconStyle.PRIDE -> {
-                    // Bandeau de trois mini-drapeaux sous l'icône : arc-en-ciel | trans | bi
-                    val h = 3.5f.dp.toPx(); val top = c.y + r - h
-                    val flags = listOf(NovaColors.Rainbow, NovaColors.Trans, NovaColors.Bi)
-                    val segW = r * 2 / flags.size
-                    flags.forEachIndexed { fi, f ->
-                        val x0 = c.x - r + fi * segW; val w = segW / f.size
-                        f.forEachIndexed { ci, col -> drawRect(col, Offset(x0 + ci * w, top), Size(w + 0.5f, h), alpha = 0.55f + 0.45f * e) }
+                    // Insigne prismatique : halo sobre au repos, anneau arc-en-ciel lumineux à la sélection.
+                    val ring = NovaColors.PrideCycle + NovaColors.PrideCycle.first()
+                    drawCircle(
+                        Brush.radialGradient(
+                            listOf(theme.primary.copy(alpha = 0.24f + 0.18f * e), theme.surface.copy(alpha = 0.92f), Color.Transparent),
+                            c,
+                            r * 1.12f
+                        ),
+                        r * 1.12f,
+                        c
+                    )
+                    drawCircle(theme.surface.copy(alpha = 0.82f), r * 0.82f, c)
+                    drawCircle(
+                        Brush.sweepGradient(ring, c),
+                        r * 0.94f,
+                        c,
+                        alpha = 0.42f + 0.58f * e,
+                        style = Stroke((1f + 1.25f * e).dp.toPx())
+                    )
+                    // Chevron Progress discret intégré à l'insigne, plutôt que des fanions minuscules sous le glyphe.
+                    val chevron = Path().apply {
+                        moveTo(c.x - r * 0.86f, c.y - r * 0.44f)
+                        lineTo(c.x - r * 0.52f, c.y)
+                        lineTo(c.x - r * 0.86f, c.y + r * 0.44f)
+                        lineTo(c.x - r * 0.98f, c.y + r * 0.44f)
+                        lineTo(c.x - r * 0.64f, c.y)
+                        lineTo(c.x - r * 0.98f, c.y - r * 0.44f)
+                        close()
                     }
-                    // Chevron Progress sur le flanc gauche (blanc, rose, bleu, marron, noir)
-                    val cw = r * 0.22f
-                    NovaColors.Progress.forEachIndexed { i, col ->
-                        val x = c.x - r - 1.dp.toPx() + i * cw * 0.55f
-                        val chev = Path().apply { moveTo(x, c.y - r * 0.55f); lineTo(x + cw, c.y); lineTo(x, c.y + r * 0.55f); lineTo(x + cw * 0.5f, c.y + r * 0.55f); lineTo(x + cw * 1.5f, c.y); lineTo(x + cw * 0.5f, c.y - r * 0.55f); close() }
-                        drawPath(chev, col, alpha = 0.35f + 0.65f * e)
-                    }
-                    // Sélection : anneau en dégradé conique arc-en-ciel → trans → bi → gay
-                    if (e > 0f) {
-                        val ring = NovaColors.PrideCycle + NovaColors.PrideCycle.first()
-                        drawCircle(Brush.sweepGradient(ring, c), r, c, alpha = 0.22f * e)
-                        drawCircle(Brush.sweepGradient(ring, c), r - 1.dp.toPx(), c, alpha = 0.9f * e, style = Stroke(1.5.dp.toPx()))
-                    }
+                    drawPath(
+                        chevron,
+                        Brush.horizontalGradient(NovaColors.Progress, startX = c.x - r, endX = c.x),
+                        alpha = 0.72f + 0.28f * e
+                    )
+                    drawPath(chevron, Color.White.copy(alpha = 0.9f * e), style = Stroke(0.8.dp.toPx()))
                 }
                 IconStyle.CANDY -> {
                     drawCircle(Brush.linearGradient(listOf(theme.primary, theme.glowSecondary, theme.secondary), Offset(c.x - r, c.y - r), Offset(c.x + r, c.y + r)), r, c, alpha = 0.25f + 0.6f * e)
@@ -166,6 +186,10 @@ fun ThemedTabIcon(icon: ImageVector, contentDescription: String, selected: Boole
         },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
+        if (theme.id == "survivor" && glyph != null) {
+            SurvivorNavGlyph(glyph, description = contentDescription, selected = selected, modifier = Modifier.size(24.dp))
+        } else {
+            Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
+        }
     }
 }

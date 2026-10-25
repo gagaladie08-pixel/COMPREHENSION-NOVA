@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -63,22 +65,30 @@ import com.novastats.app.ui.screens.PantheonScreen
 import com.novastats.app.ui.screens.SettingsScreen
 import com.novastats.app.ui.screens.StatsScreen
 import com.novastats.app.ui.theme.Nova
+import com.novastats.app.ui.theme.NovaColors
 import com.novastats.app.ui.theme.NovaMotion
+import com.novastats.app.ui.theme.SurvivorGlyph
 import com.novastats.app.ui.theme.ThemeEvents
 import com.novastats.app.ui.theme.ThemeFxHost
 import com.novastats.app.ui.theme.ThemedTabIcon
 
 /** Les onglets de la barre de navigation supérieure (ordre du cahier des charges). */
-enum class NovaTab(val route: String, val label: String, val emoji: String, val icon: ImageVector) {
-    HOME("home", "Accueil", "🏠", Icons.Filled.Home),
-    STATS("stats", "Stats", "📊", Icons.Filled.BarChart),
-    BILLBOARD("billboard", "Billboard", "🏆", Icons.Filled.EmojiEvents),
-    RECORDS("records", "Records", "🏅", Icons.Filled.MilitaryTech),
-    CERTIFICATIONS("certifications", "Certifs", "💎", Icons.Filled.Diamond),
-    HALL_OF_FAME("hall_of_fame", "Hall of Fame", "🏛️", Icons.Filled.AccountBalance),
-    PANTHEON("pantheon", "Panthéon", "👑", Icons.Filled.Star),
-    AWARDS("awards", "Awards", "🏆", Icons.Filled.WorkspacePremium),
-    SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings);
+enum class NovaTab(
+    val route: String,
+    val label: String,
+    val emoji: String,
+    val icon: ImageVector,
+    val survivorGlyph: SurvivorGlyph
+) {
+    HOME("home", "Accueil", "🏠", Icons.Filled.Home, SurvivorGlyph.HOME),
+    STATS("stats", "Stats", "📊", Icons.Filled.BarChart, SurvivorGlyph.STATS),
+    BILLBOARD("billboard", "Billboard", "🏆", Icons.Filled.EmojiEvents, SurvivorGlyph.BILLBOARD),
+    RECORDS("records", "Records", "🏅", Icons.Filled.MilitaryTech, SurvivorGlyph.RECORDS),
+    CERTIFICATIONS("certifications", "Certifs", "💎", Icons.Filled.Diamond, SurvivorGlyph.CERTIFICATIONS),
+    HALL_OF_FAME("hall_of_fame", "Hall of Fame", "🏛️", Icons.Filled.AccountBalance, SurvivorGlyph.HALL_OF_FAME),
+    PANTHEON("pantheon", "Panthéon", "👑", Icons.Filled.Star, SurvivorGlyph.PANTHEON),
+    AWARDS("awards", "Awards", "🏆", Icons.Filled.WorkspacePremium, SurvivorGlyph.AWARDS),
+    SETTINGS("settings", "Réglages", "⚙️", Icons.Filled.Settings, SurvivorGlyph.SETTINGS);
 }
 
 /** Tous les onglets du cahier des charges — la barre, placée en haut de l'écran, défile horizontalement. */
@@ -90,6 +100,12 @@ fun NovaApp() {
     val backStack by navController.currentBackStackEntryAsState()
     val currentDestination = backStack?.destination
     val theme = Nova.theme
+    var observedRoute by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentDestination?.route) {
+        val route = currentDestination?.route ?: return@LaunchedEffect
+        if (observedRoute != null && observedRoute != route) ThemeEvents.tabChanged()
+        observedRoute = route
+    }
     // Navigation différée : 🟡 À vérifier ouvre l'Éditeur ; récompenses, Awards et charts ouvrent leur onglet.
     val pending by PendingNav.target.collectAsStateWithLifecycle()
     LaunchedEffect(pending) {
@@ -153,7 +169,6 @@ fun NovaApp() {
                         modifier = Modifier.width(76.dp).clip(Nova.chipShape)
                             .background(if (selected) theme.primary.copy(alpha = 0.15f) else Color.Transparent)
                             .clickable {
-                                if (!selected) ThemeEvents.tabChanged()
                                 navController.navigate(tab.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
@@ -162,8 +177,20 @@ fun NovaApp() {
                             }
                             .padding(vertical = 6.dp)
                     ) {
-                        ThemedTabIcon(tab.icon, contentDescription = tab.label, selected = selected)
+                        ThemedTabIcon(
+                            tab.icon,
+                            contentDescription = tab.label,
+                            selected = selected,
+                            glyph = tab.survivorGlyph
+                        )
                         Text(tab.label, maxLines = 1, style = MaterialTheme.typography.labelSmall, color = if (selected) theme.primary else theme.textSecondary)
+                        if (selected && theme.id == "survivor") {
+                            Spacer(
+                                Modifier.padding(top = 2.dp).width(42.dp).height(2.dp)
+                                    .clip(RoundedCornerShape(50.dp))
+                                    .background(Brush.horizontalGradient(NovaColors.PrideCycle))
+                            )
+                        }
                     }
                 }
             }

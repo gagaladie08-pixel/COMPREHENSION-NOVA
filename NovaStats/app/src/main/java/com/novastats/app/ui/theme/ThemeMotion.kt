@@ -19,7 +19,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -66,24 +68,41 @@ object NovaMotion {
         if (theme.easing == MotionEasing.CUT) snap() else tween(duration(theme), easing = easing(theme))
 
     /** Transition d'entrée d'un onglet. */
-    fun enter(theme: NovaTheme): EnterTransition = when (theme.signature) {
-        Signature.JUMP_CUT -> EnterTransition.None
-        Signature.CLOUD_FADE -> fadeIn(tween(theme.transitionMs, easing = LinearOutSlowInEasing))
-        Signature.CURTAIN -> fadeIn(tween(theme.transitionMs / 2, delayMillis = theme.transitionMs / 3))
-        Signature.RISING_BUBBLES -> fadeIn(tween(theme.transitionMs)) + scaleIn(tween(theme.transitionMs, easing = EaseOutBounce), initialScale = 0.9f)
-        Signature.GOLD_SHIMMER -> fadeIn(tween(theme.transitionMs)) + scaleIn(tween(theme.transitionMs, easing = EaseInOutBack), initialScale = 0.96f)
-        Signature.BW_FLASH, Signature.BLUE_FLASH -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) + slideInHorizontally(tween(theme.transitionMs, easing = EaseOutExpo)) { it / 12 }
-        Signature.RANDOM_GLITCH -> fadeIn(snap(Random.nextInt(0, 120)))
-        else -> fadeIn(tween(duration(theme), easing = easing(theme))) + scaleIn(tween(duration(theme), easing = easing(theme)), initialScale = 0.97f)
+    fun enter(theme: NovaTheme): EnterTransition {
+        // Survivor : arrivée façon ballroom, la page prend la scène depuis le bas sous un ruban prismatique.
+        if (theme.id == "survivor") {
+            return fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) +
+                slideInVertically(tween(theme.transitionMs, easing = EaseOutExpo)) { it / 9 } +
+                scaleIn(tween(theme.transitionMs, easing = FastOutSlowInEasing), initialScale = 0.965f)
+        }
+
+        return when (theme.signature) {
+            Signature.JUMP_CUT -> EnterTransition.None
+            Signature.CLOUD_FADE -> fadeIn(tween(theme.transitionMs, easing = LinearOutSlowInEasing))
+            Signature.CURTAIN -> fadeIn(tween(theme.transitionMs / 2, delayMillis = theme.transitionMs / 3))
+            Signature.RISING_BUBBLES -> fadeIn(tween(theme.transitionMs)) + scaleIn(tween(theme.transitionMs, easing = EaseOutBounce), initialScale = 0.9f)
+            Signature.GOLD_SHIMMER -> fadeIn(tween(theme.transitionMs)) + scaleIn(tween(theme.transitionMs, easing = EaseInOutBack), initialScale = 0.96f)
+            Signature.BW_FLASH, Signature.BLUE_FLASH -> fadeIn(tween(theme.transitionMs, easing = EaseOutExpo)) + slideInHorizontally(tween(theme.transitionMs, easing = EaseOutExpo)) { it / 12 }
+            Signature.RANDOM_GLITCH -> fadeIn(snap(Random.nextInt(0, 120)))
+            else -> fadeIn(tween(duration(theme), easing = easing(theme))) + scaleIn(tween(duration(theme), easing = easing(theme)), initialScale = 0.97f)
+        }
     }
 
     /** Transition de sortie d'un onglet. */
-    fun exit(theme: NovaTheme): ExitTransition = when (theme.signature) {
-        Signature.JUMP_CUT, Signature.RANDOM_GLITCH -> ExitTransition.None
-        Signature.CLOUD_FADE -> fadeOut(tween(theme.transitionMs / 2))
-        Signature.BW_FLASH, Signature.BLUE_FLASH -> fadeOut(tween(theme.transitionMs / 2)) + slideOutHorizontally(tween(theme.transitionMs)) { -it / 12 }
-        Signature.CURTAIN -> fadeOut(tween(theme.transitionMs / 4))
-        else -> fadeOut(tween(duration(theme) / 2)) + scaleOut(tween(duration(theme) / 2), targetScale = 0.98f)
+    fun exit(theme: NovaTheme): ExitTransition {
+        if (theme.id == "survivor") {
+            return fadeOut(tween(theme.transitionMs / 2, easing = LinearEasing)) +
+                slideOutVertically(tween(theme.transitionMs / 2, easing = LinearOutSlowInEasing)) { it / 24 } +
+                scaleOut(tween(theme.transitionMs / 2, easing = FastOutSlowInEasing), targetScale = 0.985f)
+        }
+
+        return when (theme.signature) {
+            Signature.JUMP_CUT, Signature.RANDOM_GLITCH -> ExitTransition.None
+            Signature.CLOUD_FADE -> fadeOut(tween(theme.transitionMs / 2))
+            Signature.BW_FLASH, Signature.BLUE_FLASH -> fadeOut(tween(theme.transitionMs / 2)) + slideOutHorizontally(tween(theme.transitionMs)) { -it / 12 }
+            Signature.CURTAIN -> fadeOut(tween(theme.transitionMs / 4))
+            else -> fadeOut(tween(duration(theme) / 2)) + scaleOut(tween(duration(theme) / 2), targetScale = 0.98f)
+        }
     }
 }
 

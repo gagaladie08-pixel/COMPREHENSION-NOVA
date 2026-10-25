@@ -291,8 +291,46 @@ fun ThemeSignatureOverlay(theme: NovaTheme, modifier: Modifier = Modifier) {
             LaunchedEffect(unlock) { if (unlock > 0) startAt = clock }
             val pieces = remember(unlock) { List(90) { floatArrayOf(Random.nextFloat(), -Random.nextFloat() * 0.3f, 0.25f + Random.nextFloat() * 0.35f, Random.nextFloat() * 360f, (Random.nextFloat() - 0.5f) * 0.1f, Random.nextInt(NovaColors.PrideConfetti.size).toFloat()) } }
             val t = clock - startAt
-            if (t in 0f..2.2f) Canvas(modifier) {
-                pieces.forEach { c ->
+            val unlockBurst = t in 0f..2.2f
+            val prideSweep = if (theme.id == "survivor") rememberBurst(tab, 520, EaseOutExpo) else 1f
+            val tabSweep = theme.id == "survivor" && prideSweep < 1f
+            if (unlockBurst || tabSweep) Canvas(modifier) {
+                if (tabSweep) {
+                    // Un ruban des couleurs de la fierté traverse l'écran pendant l'entrée ballroom.
+                    val ribbonWidth = size.width * 0.62f
+                    val ribbonHeight = 82.dp.toPx()
+                    val x = -ribbonWidth + (size.width + ribbonWidth * 2f) * prideSweep
+                    val y = size.height * 0.42f - ribbonHeight / 2f
+                    rotate(-13f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+                        val stripeHeight = ribbonHeight / NovaColors.PrideCycle.size
+                        NovaColors.PrideCycle.forEachIndexed { index, color ->
+                            drawRect(
+                                color.copy(alpha = 0.19f),
+                                Offset(x, y + index * stripeHeight),
+                                Size(ribbonWidth, stripeHeight + 0.5f)
+                            )
+                        }
+                        drawRect(
+                            Brush.horizontalGradient(
+                                listOf(Color.Transparent, Color.White.copy(alpha = 0.20f), Color.Transparent),
+                                startX = x - ribbonWidth * 0.2f,
+                                endX = x + ribbonWidth * 1.2f
+                            ),
+                            Offset(x, y),
+                            Size(ribbonWidth, ribbonHeight)
+                        )
+                        drawRect(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, theme.glowSecondary.copy(alpha = 0.18f), Color.Transparent),
+                                startY = y - 18.dp.toPx(),
+                                endY = y + ribbonHeight + 18.dp.toPx()
+                            ),
+                            Offset(x, y - 18.dp.toPx()),
+                            Size(ribbonWidth, ribbonHeight + 36.dp.toPx())
+                        )
+                    }
+                }
+                if (unlockBurst) pieces.forEach { c ->
                     val x = (c[0] + sin(t * 3f + c[3]) * 0.02f + c[4] * t) * size.width
                     val y = (c[1] + c[2] * t * (1f + t * 0.4f)) * size.height
                     val col = NovaColors.PrideConfetti[c[5].toInt()].copy(alpha = (1f - (t / 2.2f)).coerceIn(0f, 1f))

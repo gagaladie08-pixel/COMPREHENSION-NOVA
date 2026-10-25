@@ -6,7 +6,7 @@ import androidx.compose.ui.graphics.Color
  * Système de thèmes NovaStats — THEMES.md (statut VALIDÉ ✅)
  *
  * 15 thèmes, chacun transforme entièrement l'app : couleurs (8 rôles fixes), polices
- * (titre + corps, Google Fonts), icônes, animations (durée + easing), graphiques (style de
+ * (titre + corps, Google Fonts et familles locales sélectionnées), icônes, animations (durée + easing), graphiques (style de
  * courbe) et composants UI (formes). Aucun toggle clair/sombre : chaque thème garde son mode.
  * Ce fichier est du Kotlin pur (pas d'API Android) pour rester utilisable dans les tests JVM.
  * ===================================================================================== */
@@ -259,10 +259,10 @@ object NovaThemes {
         "survivor", "🏳️‍🌈", "Survivor",
         // Rose trans en primaire, bleu trans en secondaire, lavande bi en glow, menthe du drapeau gay en accent
         hex("#F77FB4"), hex("#5BCEFA"), hex("#9B4F96"), hex("#080808"), hex("#121018"), hex("#FFFFFF"), hex("#FFB7D5"), hex("#26CEAA"),
-        effects = "Confettis aux couleurs de tous les drapeaux au déblocage d'un palier, bandeau de drapeaux (arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire)",
+        effects = "Balayage prismatique façon entrée ballroom, aurore douce et confettis aux couleurs des drapeaux lors d'un déblocage",
         inspiration = "Communauté LGBTQ+ / Ballroom — fierté, drapeaux arc-en-ciel, trans, bi, gay, lesbien, pan, non-binaire, Progress",
-        titleFont = "Righteous", bodyFont = "Nunito", iconsDescription = "Icônes cerclées des drapeaux (arc-en-ciel, trans, bi, gay…) avec chevron Progress", icons = IconStyle.PRIDE,
-        transitionMs = 300, easing = MotionEasing.EASE_OUT, signature = Signature.CONFETTI, cornerDp = 16,
+        titleFont = "Righteous", bodyFont = "Nunito", iconsDescription = "Neuf glyphes vectoriels propres aux onglets, halo arc-en-ciel et chevron Progress", icons = IconStyle.PRIDE,
+        transitionMs = 420, easing = MotionEasing.EASE_OUT_EXPO, signature = Signature.CONFETTI, cornerDp = 16,
         chart = ChartStyle(stroke = null, glowDp = 6f, fillTop = ColorKey.PRIMARY, fillBottom = ColorKey.SECONDARY, rainbow = true),
         rainbowTextSecondary = true
     )
