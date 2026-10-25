@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novastats.app.domain.BillboardDates
+import com.novastats.app.domain.Period
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.NovaColors
 import java.time.format.DateTimeFormatter
@@ -47,10 +48,23 @@ private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy
 /** Libellé court pour l'axe X de la courbe (« 3 oct. ») — la forme longue débordait du graphique. */
 private val axisFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
 
+/** Les snapshots Global sont hebdomadaires même si le chart affiche un cumul all-time. */
+private fun chartPeriodUnit(period: Period, count: Int): String =
+    if (period == Period.GLOBAL) {
+        if (count == 1) "semaine" else "semaines"
+    } else BillboardDates.unitLabel(period, count)
+
+private fun previousPositionLabel(period: Period): String = when (period) {
+    Period.DAILY -> "Position la veille"
+    Period.WEEKLY, Period.GLOBAL -> "Position de la semaine précédente"
+    Period.MONTHLY -> "Position du mois précédent"
+    Period.YEARLY -> "Position de l'année précédente"
+}
+
 /** Une seule phrase qui raconte tout le parcours — l'âme de la fiche. */
 fun storySentence(h: EntityHistory): String {
     val s = h.stats
-    val unit = { n: Int -> BillboardDates.unitLabel(h.period, n) }
+    val unit = { n: Int -> chartPeriodUnit(h.period, n) }
     val first = s.firstEntry ?: return "Pas encore de parcours dans ce classement."
     val sb = StringBuilder("Entré #${first.position} le ${first.date.format(dateFmt)}")
     if (first.position == 1) sb.append(" — entrée directe")
@@ -93,7 +107,7 @@ fun ChartHistoryDialog(
 ) {
     val theme = Nova.theme
     val s = h.stats
-    val unit = { n: Int -> BillboardDates.unitLabel(h.period, n) }
+    val unit = { n: Int -> chartPeriodUnit(h.period, n) }
     var playsMode by remember { mutableStateOf(false) }
     var windowed by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
@@ -206,7 +220,12 @@ fun ChartHistoryDialog(
         PopupSection("📋 Détails", Gold)
         PopupInfoRow("Première entrée", s.firstEntry?.let { "#${it.position} · ${it.date.format(dateFmt)}" } ?: "—")
         PopupInfoRow("Peak", s.peak?.let { "#${it.position} · ${it.date.format(dateFmt)}" } ?: "—", valueColor = Gold)
-        PopupInfoRow("Total de périodes dans le chart", "${s.periodsInChart} ${unit(s.periodsInChart)}")
+        PopupInfoRow(previousPositionLabel(h.period), h.item.previousPosition?.let { "#$it" } ?: "—")
+        PopupInfoRow("Total sur le chart", "${s.periodsInChart} ${unit(s.periodsInChart)}")
+        PopupInfoRow(
+            "Streak actuelle sur le chart",
+            s.currentRunInChart.takeIf { it > 0 }?.let { "$it ${unit(it)}" } ?: "—"
+        )
         PopupInfoRow("Plus longue série #1", "${s.longestRunAt1} ${unit(s.longestRunAt1)}")
         PopupInfoRow("Plus longue série Top 10", "${s.longestRunTop10} ${unit(s.longestRunTop10)}")
         PopupInfoRow("Record d'écoutes sur une période", "${formatCount(s.maxPlays)} ▶")

@@ -92,6 +92,26 @@ class BillboardTest {
     }
 
     @Test
+    fun `streak au chart compte les periodes consecutives tous rangs confondus`() {
+        val anchors = BillboardDates.allAnchors(Period.WEEKLY, d("2026-08-03"), d("2026-09-30"))
+        val last = anchors.lastIndex
+        val uninterrupted = (last - 3..last).mapIndexed { index, anchorIndex ->
+            ChartAppearance(anchors[anchorIndex], position = 20 - index * 4, playCount = 10 + index)
+        }
+        val fullRun = ChartHistory.stats(uninterrupted, anchors)
+        assertEquals(4, fullRun.periodsInChart)
+        assertEquals(4, fullRun.currentRunInChart)
+
+        val withAReentry = listOf(last - 3, last - 1, last).mapIndexed { index, anchorIndex ->
+            ChartAppearance(anchors[anchorIndex], position = 35 - index * 7, playCount = 20 + index)
+        }
+        val resumed = ChartHistory.stats(withAReentry, anchors)
+        assertEquals(3, resumed.periodsInChart) // le total inclut les apparitions séparées par une absence
+        assertEquals(2, resumed.currentRunInChart)
+        assertEquals(0, ChartHistory.stats(uninterrupted.dropLast(1), anchors).currentRunInChart)
+    }
+
+    @Test
     fun `description Global enumere les trois distinctions`() {
         val description = RecordCatalog.byId("MOST_GLOBAL")!!.description
         assertTrue(description.contains("Triple Debut"))

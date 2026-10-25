@@ -47,7 +47,9 @@ data class ChartItem(
     val periodsInChart: Int,
     val peakPosition: Int,
     val timesAtPeak: Int,
-    val isPlaysPeak: Boolean
+    val isPlaysPeak: Boolean,
+    /** Rang de l'entité dans le snapshot immédiatement précédent (jour/semaine/mois, selon le chart). */
+    val previousPosition: Int? = null
 )
 
 /** Bandeau résumé de la période. */
@@ -309,7 +311,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                             r.row.trackId, r.row.position, r.title, r.artistName, r.coverUrl, false,
                             r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
-                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
+                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak, r.row.previousPosition
                         )
                     }
                 }
@@ -320,7 +322,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                             r.row.artistId, r.row.position, r.name, status, r.photoUrl, true,
                             r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
-                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
+                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak, r.row.previousPosition
                         )
                     }
                 }
@@ -330,7 +332,7 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                             r.row.albumId, r.row.position, r.title, r.artistName, r.coverUrl, false,
                             r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
-                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
+                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak, r.row.previousPosition
                         )
                     }
                 }

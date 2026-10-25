@@ -134,7 +134,9 @@ data class ChartHistoryStats(
     val longestRunAt1: Int,
     val longestRunTop10: Int,
     val currentRunAt1: Int,
-    val maxPlays: Int
+    val maxPlays: Int,
+    /** Nombre de périodes consécutives dans le chart, tous rangs confondus; zéro si absent du dernier snapshot. */
+    val currentRunInChart: Int = 0
 ) {
     companion object {
         val EMPTY = ChartHistoryStats(0, null, null, 0, 0, 0, 0, 0)
@@ -178,6 +180,22 @@ object ChartHistory {
             currentRun++
         }
 
+        // Série actuelle dans le chart, tous rangs confondus. Une absence pendant la dernière période la remet à zéro.
+        val latestAnchor = allAnchors?.lastOrNull()
+        val isInLatestChartPeriod = when {
+            allAnchors == null -> true
+            latestAnchor == null -> false
+            else -> sorted.last().date == latestAnchor
+        }
+        var currentRunInChart = 0
+        if (isInLatestChartPeriod) {
+            currentRunInChart = 1
+            for (i in sorted.lastIndex downTo 1) {
+                if (!consecutive(sorted[i - 1], sorted[i])) break
+                currentRunInChart++
+            }
+        }
+
         return ChartHistoryStats(
             periodsInChart = sorted.size,
             firstEntry = sorted.first(),
@@ -186,7 +204,8 @@ object ChartHistory {
             longestRunAt1 = longestRun { it.position == 1 },
             longestRunTop10 = longestRun { it.position <= 10 },
             currentRunAt1 = currentRun,
-            maxPlays = sorted.maxOf { it.playCount }
+            maxPlays = sorted.maxOf { it.playCount },
+            currentRunInChart = currentRunInChart
         )
     }
 }
