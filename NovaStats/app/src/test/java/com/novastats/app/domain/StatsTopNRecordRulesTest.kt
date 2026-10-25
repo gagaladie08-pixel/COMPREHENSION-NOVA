@@ -82,7 +82,7 @@ class StatsTopNRecordRulesTest {
             StatsTopNRecordRules.albumTrackCounts(rankedTracks, 3, eligibleAlbumIds = setOf(10L, 20L))
         )
         assertEquals(
-            mapOf(10L to 2),
+            mapOf(10L to 3),
             StatsTopNRecordRules.albumTrackCounts(rankedTracks, 4, eligibleAlbumIds = setOf(10))
         )
     }
