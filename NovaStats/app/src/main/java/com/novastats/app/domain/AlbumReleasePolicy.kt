@@ -50,7 +50,8 @@ object AlbumReleasePolicy {
     private val versionDashSuffix = Regex("""\s+[-–—]\s+(.+)$""")
     private val interfaceMarkers = listOf("official music video", "official video", "official audio", "lyric video", "lyrics", "visualizer", "video", "audio", "hd", "4k", "mv")
 
-    private fun audioVersionTags(raw: String): Set<String> {
+    /** Marqueurs audio explicites présents dans un titre, sans confondre les suffixes vidéo/lyrics. */
+    fun audioVersionTags(raw: String): Set<String> {
         if (!TitleNormalizer.normalizeTitle(raw).isVersion) return emptySet()
         val segments = buildList {
             versionBrackets.findAll(raw).forEach { match ->

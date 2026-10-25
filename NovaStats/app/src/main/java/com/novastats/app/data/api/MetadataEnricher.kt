@@ -334,7 +334,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     private suspend fun discoverAlbumCandidates(track: TrackEntity, artistName: String): List<AlbumMatchSuggestion> {
         val enabled = albumMatchSources.filter { hasKey(it) && apis.containsKey(it) }
         val rawTrackTitle = track.titleRaw.takeIf { it.isNotBlank() } ?: track.title
-        val versionTags = audibleVersionTags(rawTrackTitle)
+        val versionTags = AlbumReleasePolicy.audioVersionTags(rawTrackTitle)
         val searchTitle = if (versionTags.isNotEmpty()) rawTrackTitle else track.title
         val comparableTitle = TitleNormalizer.normalizeTitle(rawTrackTitle).title
         val directResults = mutableListOf<Pair<ApiSource, MetaCandidate>>()
