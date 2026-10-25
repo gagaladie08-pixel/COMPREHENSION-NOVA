@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -110,22 +112,22 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
     DetailPopupHost(detail) { detail = null }
 
-    // 🎨 Fond et accroche : artiste en tête sur les 7 derniers jours, ou pochette du titre #1 de la semaine.
+    // 🎨 Fond artistique + portrait séparé : la bannière peut être recadrée, mais le visage reste cadré en rond.
     val week = remember { Dates.statsRangeFor(Period.WEEKLY) }
-    val weekHero by produceState<Pair<String?, String?>>(initialValue = null to null) {
+    val weekHero by produceState<HomeWeekHero?>(null, week.fromIso, week.toIso) {
         value = runCatching {
-            val a = db.artistDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()
-            if (a != null) {
-                val url = a.artist.photoUrl
-                    ?: db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()?.track?.coverUrl
-                url to a.artist.name
-            } else {
-                db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()?.track?.coverUrl to null
-            }
-        }.getOrDefault(null to null)
+            val artist = db.artistDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()
+            val track = db.trackDao().topForPeriod(week.fromIso, week.toIso, 1).first().firstOrNull()
+            HomeWeekHero(
+                artworkUrl = artist?.artist?.photoUrl ?: track?.track?.coverUrl,
+                artistName = artist?.artist?.name,
+                artistPhotoUrl = artist?.artist?.photoUrl
+            )
+        }.getOrNull()
     }
-    val artUrl = weekHero.first
-    val weekArtistName = weekHero.second
+    val artUrl = weekHero?.artworkUrl
+    val weekArtistName = weekHero?.artistName
+    val weekArtistPhotoUrl = weekHero?.artistPhotoUrl
 
     // 📈 Sparkline 7 jours + insight vs hier
     val weekStats by db.dailyStatsDao().since(today.minusDays(6).format(Dates.ISO)).collectAsStateWithLifecycle(initialValue = emptyList())
@@ -155,7 +157,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
                 Text("$greet ✨", style = MaterialTheme.typography.headlineMedium, color = theme.text, fontWeight = FontWeight.Black)
                 Text(dateLabel.replaceFirstChar { it.uppercase() }, color = theme.textSecondary, style = MaterialTheme.typography.bodyMedium)
             }
-            HomeSpotlightCard(artUrl, weekArtistName) { onOpenTab(NovaTab.BILLBOARD) }
+            HomeSpotlightCard(artUrl, weekArtistName, weekArtistPhotoUrl) { onOpenTab(NovaTab.BILLBOARD) }
             Spacer(Modifier.height(4.dp))
             HomeQuickActions(onOpenTab)
         }
@@ -521,7 +523,7 @@ fun HomeScreen(onOpenTab: (NovaTab) -> Unit) {
 }
 
 @Composable
-private fun HomeSpotlightCard(artUrl: String?, artistName: String?, onOpenCharts: () -> Unit) {
+private fun HomeSpotlightCard(artUrl: String?, artistName: String?, artistPhotoUrl: String?, onOpenCharts: () -> Unit) {
     val theme = Nova.theme
     val shape = Nova.cardShape
     Box(
@@ -549,10 +551,30 @@ private fun HomeSpotlightCard(artUrl: String?, artistName: String?, onOpenCharts
             )
         )
         Box(
-            Modifier.align(Alignment.TopEnd).padding(14.dp).clip(RoundedCornerShape(50))
+            Modifier.align(Alignment.TopStart).padding(14.dp).clip(RoundedCornerShape(50))
                 .background(theme.surface.copy(alpha = 0.86f)).padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
             Text("7 JOURS", color = theme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        }
+        if (!artistPhotoUrl.isNullOrBlank() && artistName != null) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(12.dp).size(82.dp).clip(CircleShape)
+                    .background(theme.surface).border(2.dp, theme.primary.copy(alpha = 0.9f), CircleShape)
+            ) {
+                AsyncImage(
+                    model = artistPhotoUrl,
+                    contentDescription = "Portrait de $artistName",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().padding(3.dp).clip(CircleShape)
+                )
+            }
+        } else if (artistName != null) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(14.dp).clip(RoundedCornerShape(50))
+                    .background(theme.surface.copy(alpha = 0.90f)).padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Text("Photo à enrichir", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
         }
         Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(
@@ -609,6 +631,8 @@ private fun HomeQuickActions(onOpenTab: (NovaTab) -> Unit) {
 }
 
 /* ---------- Modèles d'affichage ---------- */
+
+private data class HomeWeekHero(val artworkUrl: String?, val artistName: String?, val artistPhotoUrl: String?)
 
 private data class NewsItem(
     val at: Long,
