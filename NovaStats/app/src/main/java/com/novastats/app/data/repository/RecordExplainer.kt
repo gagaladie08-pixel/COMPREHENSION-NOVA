@@ -1658,12 +1658,13 @@ class RecordExplainer(private val db: NovaDatabase) {
             java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).format(dateTimeFmt)
         } ?: "indisponible"
         val elapsedLabel = RecordCatalog.formatFastDuration(elapsed)
+        val thresholdOrdinal = if (threshold == 1) "1re" else "${threshold}e"
         val countingRule = when (cat) {
             RecordCategory.TRACK -> "Les versions reliées à ce titre sont regroupées sous le titre source."
             RecordCategory.ARTIST -> "Chaque écoute compte pour chaque artiste crédité sur le titre; l'artiste principal sert de repli si aucun crédit détaillé n'existe."
             RecordCategory.ALBUM -> "Seules les écoutes rattachées à cet album alimentent son compteur."
         }
-        val narrative = "$name atteint le palier $threshold en $elapsedLabel. Le chronomètre démarre à l'horodatage de sa 1re écoute confirmée et s'arrête à celui de sa $thresholdᵉ écoute confirmée : durée = heure d'arrivée − heure de départ. Le palier $threshold inclut donc bien la première écoute; pour 25 écoutes, on mesure du play n°1 au play n°25. La précision de l'horodatage est conservée jusqu'aux secondes et millisecondes."
+        val narrative = "$name atteint le palier $threshold en $elapsedLabel. Le chronomètre démarre à l'horodatage de sa 1re écoute confirmée et s'arrête à celui de sa $thresholdOrdinal écoute confirmée : durée = heure d'arrivée − heure de départ. Le palier $threshold inclut donc bien la première écoute; pour 25 écoutes, on mesure du play n°1 au play n°25. La précision de l'horodatage est conservée jusqu'aux secondes et millisecondes."
         return Story(
             headline = "⏱ $threshold écoutes en $elapsedLabel",
             narrative = narrative,
