@@ -44,7 +44,7 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
         private val rebuildMutex = Mutex()
     }
 
-    /** Réparation ciblée de Fastest Panthéon et des deux caches Fastest, sans reconstruire les autres records. */
+    /** Réparation ciblée des records de vitesse (certifications, Panthéon et paliers d'écoute), sans recalculer les autres familles. */
     suspend fun rebuildFastestRecordsOnly() = rebuildMutex.withLock {
         rebuildPantheonSpeedHistory()
         RecordsEngine(db).rebuildSpeedRecords()

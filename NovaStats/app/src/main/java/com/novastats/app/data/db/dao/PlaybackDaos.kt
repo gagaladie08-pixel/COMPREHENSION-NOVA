@@ -35,6 +35,15 @@ data class RelinkRow(
     @androidx.room.ColumnInfo(name = "raw_album") val rawAlbum: String?
 )
 
+data class ListeningMilestoneScrobble(
+    @androidx.room.ColumnInfo(name = "scrobble_id") val scrobbleId: Long,
+    @androidx.room.ColumnInfo(name = "source_track_id") val sourceTrackId: Long,
+    @androidx.room.ColumnInfo(name = "track_id") val trackId: Long,
+    @androidx.room.ColumnInfo(name = "artist_id") val artistId: Long,
+    @androidx.room.ColumnInfo(name = "album_id") val albumId: Long?,
+    @androidx.room.ColumnInfo(name = "started_at") val startedAt: Long
+)
+
 data class DayCount(val date: String, @androidx.room.ColumnInfo(name = "play_count") val playCount: Int)
 data class DailyEntityRow(@androidx.room.ColumnInfo(name = "track_id") val trackId: Long, @androidx.room.ColumnInfo(name = "artist_id") val artistId: Long, @androidx.room.ColumnInfo(name = "album_id") val albumId: Long?, val date: String)
 data class IdCount(val id: Long, val plays: Int, @androidx.room.ColumnInfo(name = "duration_ms") val durationMs: Long)
@@ -301,6 +310,31 @@ interface ScrobbleDao {
         """
     )
     fun summary(fromMs: Long, toMs: Long): Flow<PeriodSummary>
+
+    /** Page chronologique confirmée, avec les versions d'un titre rabattues sur leur titre racine. */
+    @Query(
+        """
+        WITH RECURSIVE roots(track_id, root_id) AS (
+            SELECT track_id, track_id FROM tracks WHERE original_track_id IS NULL
+            UNION ALL
+            SELECT child.track_id, roots.root_id
+            FROM tracks child JOIN roots ON child.original_track_id = roots.track_id
+        )
+        SELECT s.scrobble_id AS scrobble_id,
+               s.track_id AS source_track_id,
+               COALESCE(roots.root_id, s.track_id) AS track_id,
+               s.artist_id AS artist_id,
+               s.album_id AS album_id,
+               s.started_at AS started_at
+        FROM scrobbles s
+        LEFT JOIN roots ON roots.track_id = s.track_id
+        WHERE s.status = 'CONFIRMED'
+          AND (s.started_at > :afterAt OR (s.started_at = :afterAt AND s.scrobble_id > :afterId))
+        ORDER BY s.started_at, s.scrobble_id
+        LIMIT :limit
+        """
+    )
+    suspend fun listeningMilestonePage(afterAt: Long, afterId: Long, limit: Int): List<ListeningMilestoneScrobble>
 
     /** Date (epoch ms) de la N-ième écoute confirmée d'un titre — dates rétroactives des certifications. */
     @Query(

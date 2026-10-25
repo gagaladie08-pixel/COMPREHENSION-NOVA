@@ -67,6 +67,7 @@ import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
 import com.novastats.app.domain.RecordDef
 import com.novastats.app.domain.RecordGroup
+import com.novastats.app.domain.RecordSub
 import com.novastats.app.domain.RecordUnit
 import com.novastats.app.ui.theme.Nova
 import com.novastats.app.ui.theme.prideOnFlag
@@ -404,7 +405,7 @@ private fun RecordCard(def: RecordDef, color: Color, onClick: () -> Unit) {
             Row(Modifier.padding(top = 4.dp)) {
                 if (def.periods.isNotEmpty()) Tag("📅 " + def.periods.joinToString("·") { it.label.take(1) })
                 Tag(def.categories.joinToString(" ") { it.emoji })
-                if (def.subs.isNotEmpty()) Tag("🧩 sous-sections")
+                if (def.subs.isNotEmpty() || def.id == "FASTEST_LISTEN_MILESTONE") Tag("🧩 sous-sections")
             }
         }
         Text("›", color = color, fontSize = 26.sp)
@@ -446,7 +447,7 @@ private fun RecordSearchResults(query: String, onOpen: (RecordEntryRef) -> Unit)
                     val def = RecordCatalog.byId(row.r.recordType) ?: return@forEach
                     val period = Period.entries.firstOrNull { it.dbName == row.r.periodType }
                     val cat = RecordCategory.entries.firstOrNull { it.dbName == row.r.category } ?: RecordCategory.TRACK
-                    val subLabel = def.subs[cat]?.firstOrNull { it.dbName == row.r.subcategory }?.label
+                    val subLabel = RecordCatalog.subLabel(def, cat, row.r.subcategory)
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp)).background(theme.surface)
                             .clickable { onOpen(RecordEntryRef(def, period, cat, row.r.subcategory, row, rank = null)) }.padding(8.dp),
@@ -508,7 +509,30 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
     var period by st::period
     var category by st::category
     var sub by st::sub
-    fun selectCategory(c: RecordCategory) { category = c; sub = def.subs[c]?.firstOrNull() }
+    val isDynamicMilestoneRecord = def.id == "FASTEST_LISTEN_MILESTONE"
+    var dynamicSubs by remember(def.id, category) { mutableStateOf<List<RecordSub>>(emptyList()) }
+    fun selectCategory(c: RecordCategory) {
+        if (c == category) {
+            if (isDynamicMilestoneRecord && sub == null) sub = dynamicSubs.lastOrNull()
+            return
+        }
+        category = c
+        sub = def.subs[c]?.firstOrNull()
+    }
+
+    LaunchedEffect(def.id, category) {
+        if (isDynamicMilestoneRecord) {
+            dao.subcategoriesForType(def.id, category.dbName).collect { thresholds ->
+                val selected = sub?.dbName
+                val loaded = thresholds.mapNotNull { threshold -> threshold.toIntOrNull()?.let { RecordSub(threshold, "$it écoutes") } }
+                dynamicSubs = loaded
+                if (loaded.none { it.dbName == selected }) sub = loaded.lastOrNull()
+            }
+        } else {
+            dynamicSubs = emptyList()
+        }
+    }
+    val subs = if (isDynamicMilestoneRecord) dynamicSubs else def.subs[category].orEmpty()
 
     LaunchedEffect(def, period, category, sub) {
         val limit = if (def.id == "MOST_PERFECT_ALL_KILL") 20 else 10
@@ -537,11 +561,16 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                     Spacer(Modifier.height(6.dp))
                     SegmentedRows(def.periods.map { it.label }, def.periods.indexOf(period), color) { period = def.periods[it] }
                 }
-                val subs = def.subs[category].orEmpty()
                 if (subs.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    // Sous-sections : segments pleine largeur (comme Titres / Artistes / Albums), sur plusieurs lignes si besoin
-                    SegmentedRows(subs.map { it.label }, subs.indexOf(sub), color) { sub = subs[it] }
+                    // Sous-sections fixes ou paliers d'écoute réellement atteints, sur plusieurs lignes si besoin.
+                    SegmentedRows(subs.map { it.label }, subs.indexOfFirst { it.dbName == sub?.dbName }.coerceAtLeast(0), color) { sub = subs[it] }
+                } else if (isDynamicMilestoneRecord) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Les paliers apparaîtront dès qu'un titre, artiste ou album atteint son premier seuil.",
+                        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -564,7 +593,7 @@ private fun RecordPage(def: RecordDef, st: RecordPageState, onBack: () -> Unit, 
                     def = def,
                     period = period,
                     category = category,
-                    subLabel = def.subs[category]?.firstOrNull { it.dbName == sub?.dbName }?.label,
+                    subLabel = RecordCatalog.subLabel(def, category, sub?.dbName),
                     rows = rows.take(podiumCount),
                     color = color
                 ) { row, rank -> onEntry(RecordEntryRef(def, period, category, sub?.dbName, row, rank)) }
@@ -843,7 +872,7 @@ private data class MostRecordsFamilyBundle(
 )
 
 private fun mostRecordsSubLabel(entry: RecordExplainer.Held): String? =
-    entry.def.subs[entry.category]?.firstOrNull { it.dbName == entry.sub }?.label
+    RecordCatalog.subLabel(entry.def, entry.category, entry.sub)
         ?: entry.sub?.takeIf { it.isNotBlank() && it != "ALL" }
             ?.lowercase(Locale.FRANCE)?.replace('_', ' ')
             ?.replaceFirstChar { it.uppercase() }
@@ -1588,7 +1617,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         RecordCategory.ARTIST -> DetailTarget.Artist(row.r.entityId)
         RecordCategory.ALBUM -> DetailTarget.Album(row.r.entityId)
     }
-    val subLabel = def.subs[ref.category]?.firstOrNull { it.dbName == ref.sub }?.label
+    val subLabel = RecordCatalog.subLabel(def, ref.category, ref.sub)
     val context = listOfNotNull(ref.period?.label, sectionLabel(ref.category), subLabel).joinToString(" · ")
     val movementContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
     val debutContext = listOfNotNull(ref.period?.frLabel, sectionLabel(ref.category), subLabel).joinToString(" · ")
@@ -1713,7 +1742,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
         if (!movementRecord && !debutRecord && !premiumArchiveRecord) item {
             // En-tête : pochette, nom et rang. Les records premium de vitesse, succession et présence ont leur fond dédié.
             val streakRecord = def.id == "LONGEST_LISTENING_STREAK"
-            val speedRecord = def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON"
+            val speedRecord = def.id in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "FASTEST_LISTEN_MILESTONE")
             val successiveRecord = def.id == "MOST_SUCCESSIVE_1"
             val presenceRecord = def.id in setOf("MOST_CUMULATIVE", "MOST_CUMULATIVE_TOP10", "MOST_CUMULATIVE_TOP5", "MOST_TIME_AT_1")
             val songReachRecord = def.id in setOf("MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1")
@@ -2403,7 +2432,7 @@ private fun RecordEntryPage(ref: RecordEntryRef, onBack: () -> Unit, onEntity: (
                     }
                     items(list.size) { i ->
                         val h = list[i]
-                        val subLabel = h.def.subs[h.category]?.firstOrNull { it.dbName == h.sub }?.label
+                        val subLabel = RecordCatalog.subLabel(h.def, h.category, h.sub)
                         val ctx = listOfNotNull(h.period?.frLabel, subLabel).joinToString(" · ")
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp).clip(RoundedCornerShape(12.dp)).background(theme.surface.copy(alpha = 0.6f))
@@ -4427,7 +4456,7 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
         RecordUnit.PERIODS -> "$n ${RecordCatalog.unitLabel(period, n > 1)}"
         RecordUnit.PLAYS -> "$n écoute${if (n > 1) "s" else ""}"
         RecordUnit.POSITIONS -> (if (def.id == "BIGGEST_FALL") "−" else "+") + "$n place${if (n > 1) "s" else ""}"
-        RecordUnit.DURATION_MS -> if (def.id == "FASTEST_CERT" || def.id == "FASTEST_PANTHEON") RecordCatalog.formatFastDuration(value.toLong()) else RecordCatalog.formatDurationAdaptive(value.toLong())
+        RecordUnit.DURATION_MS -> if (def.id in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "FASTEST_LISTEN_MILESTONE")) RecordCatalog.formatFastDuration(value.toLong()) else RecordCatalog.formatDurationAdaptive(value.toLong())
         RecordUnit.TIMES -> "$n fois"
         RecordUnit.DAYS -> "$n jour${if (n > 1) "s" else ""}"
         RecordUnit.COUNT -> when (def.id) {
@@ -4438,6 +4467,7 @@ fun formatRecordValue(def: RecordDef, period: Period?, value: Double): String {
             "MOST_PERFECT_ALL_KILL" -> "$n Perfect All Kill"
             "MOST_SUCCESSIVE_1" -> "$n éléments distincts au #1"
             "MOST_SIMULTANEOUS" -> "$n simultané${if (n > 1) "s" else ""}"
+            "SIMULTANEOUS_NO1_DEBUT" -> "$n période${if (n > 1) "s" else ""}"
             else -> "$n"
         }
     }
@@ -4573,7 +4603,7 @@ private fun RecordsFamilyPage(db: NovaDatabase, onBack: () -> Unit) {
                 if (gapv < 0) continue
                 val cat = RecordCategory.valueOf(rs.first().r.category)
                 val period = Period.entries.firstOrNull { it.dbName == rs.first().r.periodType }
-                val subLabel = def.subs[cat]?.firstOrNull { it.dbName == rs.first().r.subcategory }?.label
+                val subLabel = RecordCatalog.subLabel(def, cat, rs.first().r.subcategory)
                 val title = listOfNotNull(def.title, period?.label, sectionLabel(cat), subLabel).joinToString(" · ")
                 val detail = "Détenteur : « ${one.name ?: "Inconnu"} » — ${valueOf(one)}"
                 if (gapv == 0.0) {

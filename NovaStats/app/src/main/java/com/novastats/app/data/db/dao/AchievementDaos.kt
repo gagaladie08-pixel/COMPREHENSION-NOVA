@@ -229,6 +229,10 @@ interface RecordDao {
     )
     fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean, limit: Int = 10): Flow<List<RecordRow>>
 
+    /** Paliers réellement atteints pour le record de vitesse d'écoute, triés numériquement. */
+    @Query("SELECT DISTINCT subcategory FROM records_cache WHERE record_type = :type AND category = :category AND subcategory IS NOT NULL ORDER BY CAST(subcategory AS INTEGER)")
+    fun subcategoriesForType(type: String, category: String): Flow<List<String>>
+
     /** 🔍 Recherche d'un titre / artiste / album dans tous les records (nom contenant [q]). */
     @Query(
         """
@@ -258,7 +262,7 @@ interface RecordDao {
         """
         SELECT r.* FROM records_cache r
         WHERE r.category = :category AND r.entity_id = :entityId AND r.record_type != 'MOST_RECORDS'
-          AND r.value = (SELECT CASE WHEN r.record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_RISE') THEN MIN(x.value) ELSE MAX(x.value) END
+          AND r.value = (SELECT CASE WHEN r.record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_RISE', 'FASTEST_LISTEN_MILESTONE') THEN MIN(x.value) ELSE MAX(x.value) END
                          FROM records_cache x
                          WHERE x.record_type = r.record_type AND IFNULL(x.period_type, '') = IFNULL(r.period_type, '')
                            AND x.category = r.category AND IFNULL(x.subcategory, '') = IFNULL(r.subcategory, ''))
@@ -347,7 +351,7 @@ interface RecordDao {
     @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
     @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>
     @Query("DELETE FROM records_cache WHERE record_type = :type") suspend fun clearType(type: String)
-    @Query("DELETE FROM records_cache WHERE record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON')") suspend fun clearFastestRecords()
+    @Query("DELETE FROM records_cache WHERE record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_LISTEN_MILESTONE')") suspend fun clearFastestRecords()
     @Query("DELETE FROM records_cache") suspend fun clear()
 }
 

@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Règles des records 25-34 + Fastest Rise (exemples du cahier des charges). */
+/** Règles des records 25-37 + Fastest Rise et paliers d'écoutes (exemples du cahier des charges). */
 class RecordMathExtensionTest {
 
     private fun a(idx: Int, pos: Int) = RecordAppearance(idx, "d$idx", pos, 1)
@@ -65,6 +65,67 @@ class RecordMathExtensionTest {
     }
 
     @Test
+    fun `debut simultane au numero un exige titre album et meme periode`() {
+        val tracks = mapOf(
+            1L to listOf(a(1, 1), a(2, 5)),
+            2L to listOf(a(1, 1)), // même artiste et même date : ne compte pas deux fois
+            3L to listOf(a(1, 1)), // album classé #1, mais pas encore à sa première apparition
+            4L to listOf(a(1, 2))  // entrée du titre pas au #1
+        )
+        val albums = mapOf(
+            10L to listOf(RecordAppearance(1, "album-date-in-same-period", 1, 1), a(2, 4)),
+            11L to listOf(a(2, 1)),
+            12L to listOf(a(1, 1)),
+            13L to listOf(a(1, 2))
+        )
+
+        val result = RecordMath.simultaneousNo1Debuts(
+            trackSeries = tracks,
+            albumSeries = albums,
+            albumForTrack = mapOf(1L to 10L, 2L to 10L, 3L to 11L, 4L to 12L),
+            artistForAlbum = mapOf(10L to 100L, 11L to 100L, 12L to 100L, 13L to 100L),
+            artistsForTrack = mapOf(1L to setOf(100L), 2L to setOf(100L), 3L to setOf(200L), 4L to setOf(100L))
+        )
+
+        assertEquals(mapOf(1 to "d1"), result[100L])
+    }
+
+    @Test
+    fun `paliers de vitesse ne sont exposes qu'une fois atteints`() {
+        val milestones = ListeningMilestoneAccumulator(step = 25)
+        for (play in 1..60) {
+            val at = play * 1_000L
+            milestones.addPlay(entityId = 1L, atMs = at)
+            if (play <= 24) milestones.addPlay(entityId = 2L, atMs = at)
+        }
+
+        val reached = milestones.results()
+        assertEquals(setOf(25, 50), reached.keys)
+        assertEquals(1, reached.getValue(25).size)
+        assertEquals(1L, reached.getValue(25).single().entityId)
+        assertEquals(24_000L, reached.getValue(25).single().elapsedMs)
+        assertEquals(49_000L, reached.getValue(50).single().elapsedMs)
+    }
+
+    @Test
+    fun `pas des paliers et durees du record local`() {
+        assertEquals(25, RecordCatalog.fastestListenStep(RecordCategory.TRACK))
+        assertEquals(100, RecordCatalog.fastestListenStep(RecordCategory.ARTIST))
+        assertEquals(50, RecordCatalog.fastestListenStep(RecordCategory.ALBUM))
+        val record = RecordCatalog.byId("FASTEST_LISTEN_MILESTONE")!!
+        assertEquals(37, record.number)
+        assertEquals(RecordUnit.DURATION_MS, record.unit)
+        assertTrue(record.ascending)
+        assertEquals(RecordGroup.SPEED, RecordCatalog.groupOf[record.id])
+        assertEquals("100 écoutes", RecordCatalog.subLabel(record, RecordCategory.ARTIST, "100"))
+        val simultaneousDebuts = RecordCatalog.byId("SIMULTANEOUS_NO1_DEBUT")!!
+        assertEquals(36, simultaneousDebuts.number)
+        assertEquals(RecordUnit.COUNT, simultaneousDebuts.unit)
+        assertEquals(listOf(RecordCategory.ARTIST), simultaneousDebuts.categories)
+        assertEquals(RecordGroup.DEBUT, RecordCatalog.groupOf[simultaneousDebuts.id])
+    }
+
+    @Test
     fun `podium sweep standard et solo`() {
         // titres 1,2,3 : 1 = X solo, 2 = Y feat X, 3 = X solo
         val owners = mapOf(1L to setOf(10L), 2L to setOf(20L, 10L), 3L to setOf(10L))
@@ -93,8 +154,8 @@ class RecordMathExtensionTest {
     }
 
     @Test
-    fun `catalogue 35 records et groupes`() {
-        assertEquals(35, RecordCatalog.ALL.map { it.number }.distinct().size)
+    fun `catalogue 37 records et groupes`() {
+        assertEquals(37, RecordCatalog.ALL.map { it.number }.distinct().size)
         assertEquals(RecordGroup.DURATION, RecordCatalog.groupOf["MOST_CUMULATIVE_TOP5"])
         assertTrue(RecordCatalog.byId("MOST_CUMULATIVE_TOP5")!!.title.contains("Top 5"))
         val cumulativeNoOne = RecordCatalog.byId("MOST_CUMULATIVE_ARTIST_NO1")!!

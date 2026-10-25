@@ -10,6 +10,7 @@ import com.novastats.app.domain.ArtistChartNumberOnes
 import com.novastats.app.domain.RecordAppearance
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.HallOfFameRules
+import com.novastats.app.domain.ListeningMilestoneAccumulator
 import com.novastats.app.domain.Period
 import com.novastats.app.domain.RecordCatalog
 import com.novastats.app.domain.RecordCategory
@@ -18,7 +19,7 @@ import com.novastats.app.domain.RecordResult
 import java.time.LocalDate
 
 /**
- * 🏅 Moteur des 35 Records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame)
+ * 🏅 Moteur des records : lit les snapshots Billboard (+ certifications, Panthéon, Hall of Fame et écoutes NovaStats)
  * et écrit le Top 10 de chaque record (Top 20 pour Most Perfect All Kill) dans `records_cache`.
  * Tous les records se créent automatiquement (import JSON compris) — aucune saisie manuelle.
  */
@@ -38,16 +39,22 @@ class RecordsEngine(private val db: NovaDatabase) {
         fun isSolo(trackId: Long) = (trackArtists[trackId]?.size ?: 1) <= 1
     }
 
-    /** Recalcule uniquement Fastest Certification et Fastest Panthéon (réparation ciblée après migration). */
+    /** Recalcule les records de vitesse, dont les paliers mesurés sur les écoutes locales NovaStats. */
     suspend fun rebuildSpeedRecords() {
         val out = ArrayList<RecordCacheEntity>()
         val now = System.currentTimeMillis()
         val certificationHistory = db.certificationDao().allHistory()
         fastestCertificationRecords(certificationHistory, out, now)
         pantheonRecords(out, now)
+        fastestListeningMilestoneRecords(out, now)
+        val speedTypes = setOf("FASTEST_CERT", "FASTEST_PANTHEON", "FASTEST_LISTEN_MILESTONE")
+        val sourceRows = db.recordDao().rowsForMostRecords().filterNot { it.recordType in speedTypes } + out
+        val palmares = ArrayList<RecordCacheEntity>()
+        mostRecords(palmares, now, sourceRows)
         db.withTransaction {
             db.recordDao().clearFastestRecords()
-            out.chunked(500).forEach { db.recordDao().insertAll(it) }
+            db.recordDao().clearType("MOST_RECORDS")
+            (out + palmares).chunked(500).forEach { db.recordDao().insertAll(it) }
         }
     }
 
@@ -275,6 +282,8 @@ class RecordsEngine(private val db: NovaDatabase) {
         multiChart(seriesByPeriod, out, now)
         certificationRecords(links, out, now)
         pantheonRecords(out, now)
+        onProgress("Records · paliers d'écoute…")
+        fastestListeningMilestoneRecords(out, now)
         hallOfFameRecords(out, now)
         perfectAllKillRecords(out, now)
         onProgress("Records · séries d'écoute…")
@@ -384,7 +393,8 @@ class RecordsEngine(private val db: NovaDatabase) {
 
     private fun emit(out: MutableList<RecordCacheEntity>, type: String, period: Period?, cat: RecordCategory, sub: String?, results: List<RecordResult>, now: Long, asc: Boolean = false) {
         val limit = if (type == "MOST_PERFECT_ALL_KILL") 20 else 10
-        top(results.filter { it.value > 0 }, asc, limit).forEach { out += row(type, period, cat, sub, it, now) }
+        val eligible = results.filter { it.value > 0 || (type == "FASTEST_LISTEN_MILESTONE" && it.value >= 0) }
+        top(eligible, asc, limit).forEach { out += row(type, period, cat, sub, it, now) }
     }
 
     /* ---------------- Records par entité (1, 2, 3, 10, 11, 15-20, 22) ---------------- */
@@ -433,6 +443,17 @@ class RecordsEngine(private val db: NovaDatabase) {
     private fun ownerRecords(p: Period, perCat: Map<RecordCategory, Map<Long, List<RecordAppearance>>>, links: Links, out: MutableList<RecordCacheEntity>, now: Long) {
         val trackSeries = perCat.getValue(RecordCategory.TRACK)
         val albumSeries = perCat.getValue(RecordCategory.ALBUM)
+
+        val simultaneousNo1Debuts = RecordMath.simultaneousNo1Debuts(
+            trackSeries, albumSeries, links.trackAlbum, links.albumArtist, links.trackArtists
+        )
+        emit(
+            out, "SIMULTANEOUS_NO1_DEBUT", p, RecordCategory.ARTIST, null,
+            simultaneousNo1Debuts.map { (artistId, periods) ->
+                val latestDate = periods.maxByOrNull { it.key }?.value
+                RecordResult(artistId, periods.size.toDouble(), latestDate, "${periods.size} période(s) avec débuts simultanés au n°1")
+            }, now
+        )
 
         // Trois "vues" : ARTIST/SONGS (titres → artistes), ARTIST/ALBUMS (albums → artiste), ALBUM (titres → album)
         data class View(val cat: RecordCategory, val sub: String?, val series: Map<Long, List<RecordAppearance>>, val owners: (Long) -> Set<Long>)
@@ -523,6 +544,52 @@ class RecordsEngine(private val db: NovaDatabase) {
             emit(out, "PODIUM_SWEEP", p, RecordCategory.ALBUM, "${zoneKey}_STD", res(albumStd), now)
             emit(out, "PODIUM_SWEEP", p, RecordCategory.ALBUM, "${zoneKey}_SOLO", res(albumSolo), now)
         }
+    }
+
+    /* ---------------- 37. Fastest Listening Milestones (écoutes locales NovaStats) ---------------- */
+
+    private suspend fun fastestListeningMilestoneRecords(out: MutableList<RecordCacheEntity>, now: Long) {
+        val tracks = ListeningMilestoneAccumulator(RecordCatalog.fastestListenStep(RecordCategory.TRACK))
+        val artists = ListeningMilestoneAccumulator(RecordCatalog.fastestListenStep(RecordCategory.ARTIST))
+        val albums = ListeningMilestoneAccumulator(RecordCatalog.fastestListenStep(RecordCategory.ALBUM))
+        val artistsByTrack = HashMap<Long, MutableSet<Long>>()
+        db.trackLinkDao().allTrackArtists().forEach { link -> artistsByTrack.getOrPut(link.trackId) { HashSet() }.add(link.artistId) }
+        var afterAt = Long.MIN_VALUE
+        var afterId = Long.MIN_VALUE
+        val pageSize = 10_000
+
+        while (true) {
+            val page = db.scrobbleDao().listeningMilestonePage(afterAt, afterId, pageSize)
+            if (page.isEmpty()) break
+            for (play in page) {
+                tracks.addPlay(play.trackId, play.startedAt)
+                val creditedArtists = artistsByTrack[play.sourceTrackId].orEmpty()
+                if (creditedArtists.isEmpty()) artists.addPlay(play.artistId, play.startedAt)
+                else creditedArtists.forEach { artistId -> artists.addPlay(artistId, play.startedAt) }
+                play.albumId?.let { albums.addPlay(it, play.startedAt) }
+            }
+            val last = page.last()
+            afterAt = last.startedAt
+            afterId = last.scrobbleId
+        }
+
+        fun emitMilestones(category: RecordCategory, accumulator: ListeningMilestoneAccumulator) {
+            for ((threshold, milestones) in accumulator.results()) {
+                val results = milestones.map { milestone ->
+                    RecordResult(
+                        entityId = milestone.entityId,
+                        value = milestone.elapsedMs.toDouble(),
+                        date = Dates.toIso(milestone.reachedAtMs),
+                        extra = "${threshold} écoutes · première écoute le ${Dates.toIso(milestone.firstPlayedAtMs)}"
+                    )
+                }
+                emit(out, "FASTEST_LISTEN_MILESTONE", null, category, threshold.toString(), results, now, asc = true)
+            }
+        }
+
+        emitMilestones(RecordCategory.TRACK, tracks)
+        emitMilestones(RecordCategory.ARTIST, artists)
+        emitMilestones(RecordCategory.ALBUM, albums)
     }
 
     /* ---------------- 28. Longest Listening Streak (jours, hors charts) ---------------- */

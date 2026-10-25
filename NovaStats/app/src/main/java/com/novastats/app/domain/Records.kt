@@ -1,7 +1,7 @@
 package com.novastats.app.domain
 
 /*
- * 🏅 Les 35 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
+ * 🏅 Les 37 Records — catalogue (cahier des charges DEBUT, "ONGLET RECORDS").
  * Kotlin pur : définitions + moteur de calcul sur des séries de positions, testable en JVM.
  */
 
@@ -42,8 +42,8 @@ enum class RecordGroup(val emoji: String, val label: String, val description: St
     PALMARES("🏆", "Palmarès", "La synthèse : qui détient le plus de #1 dans tous les classements de records"),
     DURATION("⏳", "Durée dans le chart", "Combien de périodes dans le chart, le Top 10, le Top 5 ou au #1…"),
     MOVEMENT("📈", "Mouvements de position", "Les plus grands bonds, chutes, retours et ascensions"),
-    DEBUT("🚀", "Débuts", "Les entrées les plus fortes dans le chart"),
-    SPEED("⚡", "Vitesse", "Les certifications et statuts Panthéon atteints le plus vite"),
+    DEBUT("🚀", "Débuts", "Les entrées les plus fortes dans le chart, dont les premières simultanées au n°1"),
+    SPEED("⚡", "Vitesse", "Les écoutes, certifications et statuts Panthéon atteints le plus vite"),
     TOTALS("🧮", "Cumuls", "Les plus gros volumes : écoutes, certifications, Hall of Fame, Global, multi-charts et Perfect All Kill"),
     DOMINATION("🎼", "Domination", "Les artistes / albums qui occupent le chart avec plusieurs titres à la fois"),
     LISTENING("🎧", "Écoute", "Les séries d'écoute, indépendantes des charts : jours consécutifs avec au moins une écoute")
@@ -60,7 +60,9 @@ object RecordCatalog {
         "SLEEPER_HIT" to RecordGroup.MOVEMENT, "FASTEST_RISE" to RecordGroup.MOVEMENT, "LONGEST_ROAD" to RecordGroup.MOVEMENT,
         "MOST_DEBUT_1" to RecordGroup.DEBUT, "MOST_DEBUT_TOP5" to RecordGroup.DEBUT,
         "MOST_DEBUT_TOP10" to RecordGroup.DEBUT, "BIGGEST_DEBUT" to RecordGroup.DEBUT,
+        "SIMULTANEOUS_NO1_DEBUT" to RecordGroup.DEBUT,
         "FASTEST_CERT" to RecordGroup.SPEED, "FASTEST_PANTHEON" to RecordGroup.SPEED,
+        "FASTEST_LISTEN_MILESTONE" to RecordGroup.SPEED,
         "BIGGEST_PERIOD" to RecordGroup.TOTALS, "MOST_CERTIFICATIONS" to RecordGroup.TOTALS, "MOST_HOF" to RecordGroup.TOTALS, "MOST_GLOBAL" to RecordGroup.TOTALS, "MOST_PERFECT_ALL_KILL" to RecordGroup.TOTALS, "MULTI_CHART" to RecordGroup.TOTALS,
         "MOST_SONGS_IN_CHART" to RecordGroup.DOMINATION, "MOST_SONGS_TOP10" to RecordGroup.DOMINATION, "MOST_SONGS_TOP5" to RecordGroup.DOMINATION, "MOST_SONGS_AT_1" to RecordGroup.DOMINATION,
         "MOST_SIMULTANEOUS" to RecordGroup.DOMINATION, "MOST_SUCCESSIVE_1" to RecordGroup.DOMINATION,
@@ -219,10 +221,32 @@ object RecordCatalog {
             "Nombre de dates où le même artiste est simultanément n°1 du Hot 100, de l'Artist 50 et des Albums 75, sans mélanger les cadences.",
             listOf(Period.DAILY, Period.WEEKLY, Period.MONTHLY, Period.YEARLY), listOf(RecordCategory.ARTIST),
             unit = RecordUnit.COUNT
+        ),
+        RecordDef(
+            36, "SIMULTANEOUS_NO1_DEBUT", "🚀", "Most Simultaneous No.1 Debuts",
+            "Périodes où un nouveau titre et son album débutent tous deux au n°1 du même chart, pour un même artiste.",
+            chartPeriods, listOf(RecordCategory.ARTIST), unit = RecordUnit.COUNT
+        ),
+        RecordDef(
+            37, "FASTEST_LISTEN_MILESTONE", "⏱️", "Fastest Listening Milestones",
+            "Temps entre la première écoute NovaStats et les paliers de 25 écoutes par titre, 100 par artiste crédité et 50 par album. Un palier apparaît dès qu'au moins une entité de la section l'atteint.",
+            emptyList(), all3, unit = RecordUnit.DURATION_MS, ascending = true, screen = "FASTEST"
         )
     )
 
     fun byId(id: String): RecordDef? = ALL.firstOrNull { it.id == id }
+
+    /** Pas entre les paliers du record d'écoutes, propre à chaque catégorie. */
+    fun fastestListenStep(category: RecordCategory): Int = when (category) {
+        RecordCategory.TRACK -> 25
+        RecordCategory.ARTIST -> 100
+        RecordCategory.ALBUM -> 50
+    }
+
+    /** Sous-sections fixes et paliers d'écoute calculés dynamiquement depuis le cache. */
+    fun subLabel(def: RecordDef, category: RecordCategory, sub: String?): String? =
+        def.subs[category]?.firstOrNull { it.dbName == sub }?.label
+            ?: if (def.id == "FASTEST_LISTEN_MILESTONE") sub?.toIntOrNull()?.let { "$it écoutes" } else null
 
     /** Écrans (un écran peut regrouper plusieurs records : Fastest, HoF/Global, Jump/Fall, Climb). */
     val screens: List<List<RecordDef>> = ALL.groupBy { it.screen }.values.toList()
@@ -246,7 +270,7 @@ object RecordCatalog {
         }
     }
 
-    /** Durée exacte des deux records de vitesse : secondes et millisecondes restent visibles partout. */
+    /** Durée exacte des records de vitesse : secondes et millisecondes restent visibles partout. */
     fun formatFastDuration(ms: Long): String {
         val safe = ms.coerceAtLeast(0L)
         if (safe < 1_000L) return "$safe ms"
@@ -281,8 +305,76 @@ data class RecordAppearance(val periodIndex: Int, val date: String, val position
 /** Résultat d'un record pour une entité. */
 data class RecordResult(val entityId: Long, val value: Double, val date: String? = null, val extra: String? = null)
 
+/** Un palier d'écoutes atteint par une entité et la durée depuis sa toute première écoute. */
+data class ListeningMilestoneResult(
+    val entityId: Long,
+    val threshold: Int,
+    val firstPlayedAtMs: Long,
+    val reachedAtMs: Long,
+    val elapsedMs: Long
+)
+
+/** Accumulateur incrémental : le moteur peut parcourir les écoutes par pages sans charger tout l'historique en mémoire. */
+class ListeningMilestoneAccumulator(private val step: Int) {
+    private data class Progress(val firstAtMs: Long, var playCount: Int = 0)
+
+    private val progressByEntity = HashMap<Long, Progress>()
+    private val resultsByThreshold = HashMap<Int, MutableList<ListeningMilestoneResult>>()
+
+    init { require(step > 0) { "Le pas d'un palier doit être strictement positif." } }
+
+    /** Les événements doivent être ajoutés chronologiquement; chaque écoute confirmée compte une fois. */
+    fun addPlay(entityId: Long, atMs: Long) {
+        val progress = progressByEntity.getOrPut(entityId) { Progress(firstAtMs = atMs) }
+        progress.playCount++
+        if (progress.playCount % step != 0) return
+        val threshold = progress.playCount
+        resultsByThreshold.getOrPut(threshold) { ArrayList() } += ListeningMilestoneResult(
+            entityId = entityId,
+            threshold = threshold,
+            firstPlayedAtMs = progress.firstAtMs,
+            reachedAtMs = atMs,
+            elapsedMs = (atMs - progress.firstAtMs).coerceAtLeast(0L)
+        )
+    }
+
+    /** Seuls les paliers effectivement atteints existent dans le résultat. */
+    fun results(): Map<Int, List<ListeningMilestoneResult>> = resultsByThreshold
+        .toSortedMap()
+        .mapValues { (_, rows) -> rows.sortedWith(compareBy<ListeningMilestoneResult> { it.elapsedMs }.thenBy { it.entityId }) }
+}
+
 /** Calculs purs à partir des séries de positions d'une entité (triées par periodIndex). */
 object RecordMath {
+
+    /**
+     * Pour chaque artiste, compte les périodes où la première apparition d'un titre et de son album
+     * est simultanément au n°1 et où l'artiste est propriétaire de l'album ET crédité sur le titre.
+     * L'index de période fait foi (pas la date brute du snapshot); les doublons d'une période sont fusionnés.
+     */
+    fun simultaneousNo1Debuts(
+        trackSeries: Map<Long, List<RecordAppearance>>,
+        albumSeries: Map<Long, List<RecordAppearance>>,
+        albumForTrack: Map<Long, Long>,
+        artistForAlbum: Map<Long, Long?>,
+        artistsForTrack: Map<Long, Set<Long>>
+    ): Map<Long, Map<Int, String>> {
+        val albumDebuts = albumSeries.mapNotNull { (albumId, series) ->
+            series.firstOrNull()?.takeIf { it.position == 1 }?.let { albumId to it }
+        }.toMap()
+        val periodsByArtist = HashMap<Long, MutableMap<Int, String>>()
+        for ((trackId, appearances) in trackSeries) {
+            val trackDebut = appearances.firstOrNull()?.takeIf { it.position == 1 } ?: continue
+            val albumId = albumForTrack[trackId] ?: continue
+            val albumDebut = albumDebuts[albumId] ?: continue
+            if (trackDebut.periodIndex != albumDebut.periodIndex) continue
+            val artistId = artistForAlbum[albumId] ?: continue
+            if (artistId !in artistsForTrack[trackId].orEmpty()) continue
+            val periods = periodsByArtist.getOrPut(artistId) { HashMap() }
+            if (trackDebut.periodIndex !in periods) periods[trackDebut.periodIndex] = trackDebut.date
+        }
+        return periodsByArtist.mapValues { (_, periods) -> periods.toSortedMap() }
+    }
 
     fun cumulative(series: List<RecordAppearance>, maxPosition: Int = Int.MAX_VALUE): Int = series.count { it.position <= maxPosition }
 

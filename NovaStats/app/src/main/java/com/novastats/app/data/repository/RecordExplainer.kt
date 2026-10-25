@@ -424,6 +424,7 @@ class RecordExplainer(private val db: NovaDatabase) {
     data class Seats(val total: Int, val occupied: List<Int>)
 
     private val dayFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
+    private val dateTimeFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm:ss", Locale.FRANCE)
     private val shortFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
     private val monthFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE)
     private val monthShortFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM yy", Locale.FRANCE)
@@ -868,12 +869,14 @@ class RecordExplainer(private val db: NovaDatabase) {
             "BIGGEST_JUMP", "BIGGEST_FALL", "BIGGEST_COMEBACK", "BIGGEST_CLIMBER", "SLEEPER_HIT", "FASTEST_RISE", "LONGEST_ROAD",
             "BIGGEST_PERIOD", "BIGGEST_DEBUT", "LONGEST_LIFESPAN", "MOST_REENTRIES", "LONGEST_ABSENCE_RETURN" -> chartStory(def, period ?: Period.WEEKLY, cat, sub, id, name, value)
             "PODIUM_SWEEP" -> podiumSweep(period ?: Period.WEEKLY, cat, sub, id, name)
+            "SIMULTANEOUS_NO1_DEBUT" -> simultaneousNo1DebutStory(period ?: Period.WEEKLY, id, name, value)
             "LONGEST_LISTENING_STREAK" -> listeningStreak(cat, id, name)
             "MOST_RECORDS" -> mostRecords(cat, id, name)
             "MOST_SONGS_IN_CHART", "MOST_SONGS_TOP10", "MOST_SONGS_TOP5", "MOST_SONGS_AT_1", "MOST_DEBUT_1", "MOST_DEBUT_TOP5", "MOST_DEBUT_TOP10", "MOST_SIMULTANEOUS", "MOST_SUCCESSIVE_1" ->
                 ownerStory(def, period ?: Period.WEEKLY, cat, sub, id, name)
             "FASTEST_CERT" -> fastestCert(cat, sub, id, name)
             "FASTEST_PANTHEON" -> fastestPantheon(sub, id, name)
+            "FASTEST_LISTEN_MILESTONE" -> fastestListeningMilestone(cat, sub, id, name, value)
             "MOST_CERTIFICATIONS" -> mostCertifications(cat, sub, id, name)
             "MOST_HOF", "MOST_GLOBAL" -> hallOfFame(def, cat, sub, id, name)
             "MULTI_CHART" -> multiChart(cat, sub, id, name)
@@ -891,7 +894,8 @@ class RecordExplainer(private val db: NovaDatabase) {
             com.novastats.app.domain.RecordUnit.POSITIONS -> "$n ${plural(n, "place")}"
             com.novastats.app.domain.RecordUnit.PLAYS -> "$n ${plural(n, "écoute")}"
             com.novastats.app.domain.RecordUnit.TIMES -> "$n fois"
-            com.novastats.app.domain.RecordUnit.DURATION_MS -> RecordCatalog.formatDurationAdaptive(v.toLong())
+            com.novastats.app.domain.RecordUnit.DURATION_MS -> if (def.id in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "FASTEST_LISTEN_MILESTONE")) RecordCatalog.formatFastDuration(v.toLong()) else RecordCatalog.formatDurationAdaptive(v.toLong())
+            com.novastats.app.domain.RecordUnit.COUNT -> if (def.id == "SIMULTANEOUS_NO1_DEBUT") "$n ${plural(n, "période")}" else "$n"
             else -> "$n"
         }
     }
@@ -899,7 +903,7 @@ class RecordExplainer(private val db: NovaDatabase) {
     private fun catWord(cat: RecordCategory, n: Int = 1) = when (cat) { RecordCategory.TRACK -> plural(n, "titre"); RecordCategory.ARTIST -> plural(n, "artiste"); RecordCategory.ALBUM -> plural(n, "album") }
     private fun ordinal(n: Int) = if (n == 1) "1er" else "${n}e"
     private fun rankingLabel(def: RecordDef, period: Period?, cat: RecordCategory, sub: String?): String {
-        val subLabel = def.subs[cat]?.firstOrNull { it.dbName == sub }?.label
+        val subLabel = RecordCatalog.subLabel(def, cat, sub)
         return listOfNotNull(def.title, period?.frLabel, subLabel).joinToString(" · ")
     }
 
@@ -948,7 +952,7 @@ class RecordExplainer(private val db: NovaDatabase) {
         }
 
         // 🧬 Profil dans le chart concerné (records basés sur une trajectoire)
-        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART", "MOST_SUCCESSIVE_1", "MOST_CUMULATIVE_ARTIST_NO1", "MOST_PERFECT_ALL_KILL")
+        val chartBased = period != null && def.id !in setOf("FASTEST_CERT", "FASTEST_PANTHEON", "FASTEST_LISTEN_MILESTONE", "SIMULTANEOUS_NO1_DEBUT", "MOST_CERTIFICATIONS", "MOST_HOF", "MOST_GLOBAL", "MULTI_CHART", "MOST_SUCCESSIVE_1", "MOST_CUMULATIVE_ARTIST_NO1", "MOST_PERFECT_ALL_KILL")
         if (chartBased) {
             val p = period!!
             val s = series(cat, p, id)
@@ -1016,7 +1020,7 @@ class RecordExplainer(private val db: NovaDatabase) {
                 val parts = same.take(6).map { r ->
                     val rank = db.recordDao().betterCount(r.recordType, r.periodType, r.category, r.subcategory, r.value, asc) + 1
                     val pl = Period.entries.firstOrNull { it.dbName == r.periodType }
-                    val sl = def.subs[cat]?.firstOrNull { it.dbName == r.subcategory }?.label
+                    val sl = RecordCatalog.subLabel(def, cat, r.subcategory)
                     "#$rank en ${listOfNotNull(pl?.frLabel, sl).joinToString(" ")} (${fmtValue(def, pl, r.value)})"
                 }
                 sb.append("Sur ce même record, il est aussi " + parts.joinToString(", ") + (if (same.size > 6) " et ${same.size - 6} autres" else "") + ". ")
@@ -1533,7 +1537,7 @@ class RecordExplainer(private val db: NovaDatabase) {
                 numberOnePeriods = appearances.count { it.position == 1 }
             )
         }
-        val subLabel = def.subs[cat]?.firstOrNull { it.dbName == sub }?.label
+        val subLabel = RecordCatalog.subLabel(def, cat, sub)
         val itemLabel = if (itemCat == RecordCategory.ALBUM) "album" else "titre"
         return SongReachVisual(
             contextLabel = listOfNotNull(p.frLabel, cat.label, subLabel).joinToString(" · "),
@@ -1551,6 +1555,78 @@ class RecordExplainer(private val db: NovaDatabase) {
             tiedAtTop = tiedAtTop,
             rival = rival,
             featuredTracks = featured
+        )
+    }
+
+    private suspend fun simultaneousNo1DebutStory(period: Period, artistId: Long, name: String, value: Double): Story {
+        val tracks = allSeries(RecordCategory.TRACK, period)
+        val albums = allSeries(RecordCategory.ALBUM, period)
+        val playedTracks = db.trackDao().allPlayed()
+        val trackAlbums = playedTracks.mapNotNull { track -> track.albumId?.let { track.trackId to it } }.toMap()
+        val trackArtists = HashMap<Long, MutableSet<Long>>()
+        db.trackLinkDao().allTrackArtists().forEach { trackArtists.getOrPut(it.trackId) { linkedSetOf() }.add(it.artistId) }
+        playedTracks.forEach { trackArtists.getOrPut(it.trackId) { linkedSetOf() }.add(it.artistId) }
+        val albumArtists = db.albumDao().all().associate { it.albumId to it.artistId }
+        val periodDates = RecordMath.simultaneousNo1Debuts(tracks, albums, trackAlbums, albumArtists, trackArtists)[artistId].orEmpty()
+        val dates = periodDates.toSortedMap().values.toList()
+        val count = value.toInt()
+        val latest = dates.lastOrNull()
+        val cadence = period.frLabel.lowercase(Locale.FRANCE)
+        val facts = buildList {
+            add("Cadence du chart" to period.frLabel)
+            add("Périodes distinctes" to count.toString())
+            latest?.let { add("Dernier double début au n°1" to on(period, it)) }
+        }
+        val examples = dates.takeLast(60).map { date -> Point(date, short(period, date), 1, null, date == latest) }
+        return Story(
+            headline = "🚀 $count ${plural(count, "double début", "doubles débuts")} au n°1",
+            narrative = if (dates.isEmpty()) {
+                "$name détient ce record sur le $cadence : un nouveau titre et l'album auquel il appartient font tous deux leur première apparition au n°1 pendant la même période de chart."
+            } else {
+                "$name compte $count ${plural(count, "période", "périodes")} de $cadence où un nouveau titre et son album ont tous deux fait leur première apparition au n°1 du même chart. " +
+                    "Chaque période ne compte qu'une fois, même si plusieurs titres de l'album débutent simultanément au sommet."
+            },
+            facts = facts,
+            timelineTitle = "Les périodes avec un double début au n°1",
+            timeline = examples
+        )
+    }
+
+    private suspend fun fastestListeningMilestone(cat: RecordCategory, sub: String?, id: Long, name: String, cachedValue: Double): Story {
+        val threshold = sub?.toIntOrNull() ?: RecordCatalog.fastestListenStep(cat)
+        val dao = db.scrobbleDao()
+        val firstAt: Long?
+        val reachedAt: Long?
+        when (cat) {
+            RecordCategory.TRACK -> {
+                firstAt = dao.nthPlayOfTrack(id, 1)
+                reachedAt = dao.nthPlayOfTrack(id, threshold)
+            }
+            RecordCategory.ARTIST -> {
+                firstAt = dao.nthPlayOfArtist(id, 1)
+                reachedAt = dao.nthPlayOfArtist(id, threshold)
+            }
+            RecordCategory.ALBUM -> {
+                firstAt = dao.nthPlayOfAlbum(id, 1)
+                reachedAt = dao.nthPlayOfAlbum(id, threshold)
+            }
+        }
+        val elapsed = if (firstAt != null && reachedAt != null) (reachedAt - firstAt).coerceAtLeast(0L) else cachedValue.toLong().coerceAtLeast(0L)
+        fun stamp(at: Long?): String = at?.let {
+            java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).format(dateTimeFmt)
+        } ?: "indisponible"
+        val elapsedLabel = RecordCatalog.formatFastDuration(elapsed)
+        return Story(
+            headline = "⏱ $threshold écoutes en $elapsedLabel",
+            narrative = "$name a atteint $threshold écoutes locales NovaStats en $elapsedLabel. Le chrono part de sa première écoute confirmée (${stamp(firstAt)}) et s'arrête à l'écoute qui franchit ce palier (${stamp(reachedAt)}); le temps est conservé jusqu'aux secondes et millisecondes disponibles.",
+            facts = listOf(
+                "Section" to cat.label,
+                "Palier atteint" to "$threshold écoutes",
+                "Première écoute confirmée" to stamp(firstAt),
+                "Écoute du palier" to stamp(reachedAt),
+                "Temps écoulé" to elapsedLabel,
+                "Source" to "Écoutes locales NovaStats"
+            )
         )
     }
 
@@ -1891,7 +1967,7 @@ class RecordExplainer(private val db: NovaDatabase) {
         } else {
             "Série terminée après ${on(p, run.last.date)}. ${stopper?.explanation.orEmpty()}"
         }
-        val subLabel = def.subs[cat]?.firstOrNull { it.dbName == sub }?.label
+        val subLabel = RecordCatalog.subLabel(def, cat, sub)
         val contextLabel = listOfNotNull(p.label, cat.label, subLabel).joinToString(" · ")
         val duration = "${run.periodCount} ${unit(p, run.periodCount)}"
         val visual = SuccessiveVisual(
