@@ -17,7 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -78,21 +83,22 @@ fun storySentence(h: EntityHistory): String {
 
 /** Petite pilule de sélection (mode de lecture / fenêtre de la courbe). */
 @Composable
-private fun SelPill(label: String, on: Boolean, onClick: () -> Unit) {
+private fun SelPill(label: String, on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val theme = Nova.theme
     Text(
         label,
         color = if (on) theme.background else theme.textSecondary,
         style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
-        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = modifier.clip(RoundedCornerShape(8.dp))
             .background(if (on) Gold else Gold.copy(alpha = 0.12f))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
     )
 }
 
 /**
- * 4. 🏆 Popup Billboard (fiche historique, appui long sur une ligne) :
+ * 4. 🏆 Popup Billboard (fiche historique, toucher une ligne) :
  * bannière + peak en grand, courbe à deux lectures (# / ▶) avec jalons 🚀↩🔥 et fenêtre 12 dernières
  * périodes, phrase-histoire, badges, détails, palmarès (certifs / Panthéon / Hall of Fame),
  * face-à-face ⚔️ (seconde courbe argent) et carte partageable 📤.
@@ -115,16 +121,30 @@ fun ChartHistoryDialog(
     var playsMode by remember { mutableStateOf(false) }
     var windowed by remember { mutableStateOf(false) }
     var picking by remember(h) { mutableStateOf(false) }
-    var selectedPoint by remember(h, windowed, playsMode) { mutableStateOf<Int?>(null) }
+    var compareQuery by remember(h) { mutableStateOf("") }
+    var detailsExpanded by remember(h) { mutableStateOf(false) }
+    var honorsExpanded by remember(h) { mutableStateOf(false) }
+    var compareExpanded by remember(h, compare) { mutableStateOf(compare != null) }
     val currentCandidateIndex = navigationCandidates.indexOfFirst { it.entityId == h.item.entityId }
 
     val byDate = remember(h) { h.appearances.associateBy { it.date } }
+    val compareByDate = remember(compare) { compare?.appearances?.associateBy { it.date }.orEmpty() }
     val anchorsAll = remember(h) { h.anchors.filter { a -> !a.isBefore(s.firstEntry?.date ?: a) } }
     val anchors = if (windowed) anchorsAll.takeLast(12) else anchorsAll
+    var selectedPoint by remember(h, anchors, playsMode) { mutableStateOf(anchors.lastIndex.takeIf { it >= 0 }) }
     val values = remember(anchors, byDate, playsMode) {
         anchors.map { byDate[it]?.let { a -> if (playsMode) a.playCount.toFloat() else a.position.toFloat() } }
     }
-    val maxPos = remember(h) { (h.appearances.maxOfOrNull { it.position } ?: h.chart.limit(h.period)).coerceAtLeast(5).toFloat() }
+    val maxPos = remember(h, compare) {
+        maxOf(
+            h.appearances.maxOfOrNull { it.position } ?: h.chart.limit(h.period),
+            compare?.appearances?.maxOfOrNull { it.position } ?: 1
+        ).coerceAtLeast(5).toFloat()
+    }
+    val maxPlays = remember(h, compare) {
+        maxOf(h.appearances.maxOfOrNull { it.playCount } ?: 0, compare?.appearances?.maxOfOrNull { it.playCount } ?: 0)
+            .coerceAtLeast(1).toFloat()
+    }
     val peakIdx = remember(values, playsMode) {
         values.indices.filter { values[it] != null }
             .minByOrNull { if (playsMode) -values[it]!! else values[it]!! }
@@ -142,15 +162,21 @@ fun ChartHistoryDialog(
             h.appearances.maxByOrNull { it.playCount }?.takeIf { it.playCount > 1 }?.let { r -> idx[r.date]?.let { put(it, "🔥") } }
         }
     }
-    // Courbe de comparaison alignée sur les mêmes ancres (positions uniquement)
-    val overlay = remember(compare, anchors, playsMode) {
-        if (compare == null || playsMode) null else {
-            val m = compare.appearances.associateBy { it.date }
-            anchors.map { m[it]?.position?.toFloat() }
+    // Courbe de comparaison alignée sur les mêmes ancres, en position comme en écoutes.
+    val overlay = remember(compare, anchors, playsMode, compareByDate) {
+        if (compare == null) null else anchors.map { date ->
+            compareByDate[date]?.let { if (playsMode) it.playCount.toFloat() else it.position.toFloat() }
+        }
+    }
+    val visibleCandidates = remember(candidates, compareQuery, h.item.entityId) {
+        candidates.filter { it.entityId != h.item.entityId }.filter { candidate ->
+            compareQuery.isBlank() || candidate.name.contains(compareQuery, ignoreCase = true) ||
+                candidate.secondary?.contains(compareQuery, ignoreCase = true) == true
         }
     }
     val selectedDate = selectedPoint?.let { anchors.getOrNull(it) }
     val selectedAppearance = selectedDate?.let { byDate[it] }
+    val selectedCompareAppearance = selectedDate?.let { compareByDate[it] }
 
     NovaPopupCard(
         borderColor = Gold, onDismiss = onDismiss, glowDp = 18, backdropUrl = h.item.coverUrl,
@@ -198,20 +224,22 @@ fun ChartHistoryDialog(
             }
         }
 
-        // Sélecteurs : lecture (# / ▶) + fenêtre (tout / 12 dernières)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SelPill("#", !playsMode) { playsMode = false }
-            SelPill("▶ écoutes", playsMode) { playsMode = true }
-            Spacer(Modifier.width(10.dp))
-            SelPill("Tout", !windowed) { windowed = false }
-            SelPill("12 dern.", windowed) { windowed = true }
+        // Sélecteurs en deux lignes : mode de lecture puis fenêtre de l'historique.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SelPill("Position", !playsMode, { playsMode = false }, Modifier.weight(1f))
+            SelPill("Écoutes", playsMode, { playsMode = true }, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SelPill("Tout l'historique", !windowed, { windowed = false }, Modifier.weight(1f))
+            SelPill("12 dernières périodes", windowed, { windowed = true }, Modifier.weight(1f))
         }
         Spacer(Modifier.height(8.dp))
         PopupSection(if (playsMode) "▶ Écoutes par période" else "📈 Parcours dans le classement", Gold)
         if (values.all { it == null }) Text("Pas encore de parcours enregistré.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         else NovaCurveChart(
             values, Modifier.fillMaxWidth().height(170.dp), color = Gold, invertY = !playsMode,
-            minY = if (playsMode) 0f else 1f, maxY = if (playsMode) null else maxPos,
+            minY = if (playsMode) 0f else 1f, maxY = if (playsMode) maxPlays * 1.06f else maxPos,
             gridValues = if (playsMode) emptyList() else listOf(1f, ((maxPos + 1) / 2).toInt().toFloat(), maxPos),
             peakIndex = peakIdx, showPoints = true, markers = markers,
             overlay = overlay, overlayColor = NovaColors.Silver,
@@ -233,6 +261,13 @@ fun ChartHistoryDialog(
                         else "#${appearance.position} · ${formatCount(appearance.playCount)} écoutes"
                     } ?: "Hors classement sur cette période"
                     Text(pointSummary, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                    if (compare != null) {
+                        val compareSummary = selectedCompareAppearance?.let { appearance ->
+                            if (playsMode) "${formatCount(appearance.playCount)} écoutes · #${appearance.position}"
+                            else "#${appearance.position} · ${formatCount(appearance.playCount)} écoutes"
+                        } ?: "hors classement"
+                        Text("↔ ${compare.item.name} · $compareSummary", color = NovaColors.Silver, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
                 if (selectedAppearance != null) {
                     TextButton(onClick = { onViewPeriod(selectedDate) }) {
@@ -248,13 +283,13 @@ fun ChartHistoryDialog(
             )
         }
         if (compare != null && overlay != null) {
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(Gold))
                     Spacer(Modifier.width(4.dp))
                     Text(h.item.name, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(NovaColors.Silver))
                     Spacer(Modifier.width(4.dp))
                     Text(compare.item.name, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -273,51 +308,131 @@ fun ChartHistoryDialog(
             PopupBadge("👑", "${s.longestRunAt1}", "Série #1", Gold)
             PopupBadge("🔟", "${s.longestRunTop10}", "Série Top 10", Gold)
         }
-        // Détails
-        PopupSection("📋 Détails", Gold)
-        PopupInfoRow("Première entrée", s.firstEntry?.let { "#${it.position} · ${it.date.format(dateFmt)}" } ?: "—")
-        PopupInfoRow("Peak", s.peak?.let { "#${it.position} · ${it.date.format(dateFmt)}" } ?: "—", valueColor = Gold)
-        PopupInfoRow(previousPositionLabel(h.period), h.item.previousPosition?.let { "#$it" } ?: "—")
-        PopupInfoRow("Total sur le chart", "${s.periodsInChart} ${unit(s.periodsInChart)}")
-        PopupInfoRow(
-            "Streak actuelle sur le chart",
-            s.currentRunInChart.takeIf { it > 0 }?.let { "$it ${unit(it)}" } ?: "—"
-        )
-        PopupInfoRow("Plus longue série #1", "${s.longestRunAt1} ${unit(s.longestRunAt1)}")
-        PopupInfoRow("Plus longue série Top 10", "${s.longestRunTop10} ${unit(s.longestRunTop10)}")
-        PopupInfoRow("Record d'écoutes sur une période", "${formatCount(s.maxPlays)} ▶")
-        if (s.currentRunAt1 > 0) PopupInfoRow("Série #1 en cours", "${s.currentRunAt1} ${unit(s.currentRunAt1)}", valueColor = Gold)
-        // 🏅 L'autre moitié de la carte : certifications, Panthéon, Hall of Fame
+        // Le partage reste proche du récit, plutôt que caché au fond des statistiques.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onShare) { Text("📤 Partager ce parcours", color = Gold, fontWeight = FontWeight.Bold) }
+        }
+
+        PopupDisclosure("📋 Statistiques & détails", detailsExpanded, { detailsExpanded = !detailsExpanded }) {
+            PopupInfoRow("Première entrée", s.firstEntry?.let { "#${it.position} · ${it.date.format(dateFmt)}" } ?: "—")
+            PopupInfoRow("Peak", s.peak?.let { "#${it.position} · ${it.date.format(dateFmt)}" } ?: "—", valueColor = Gold)
+            PopupInfoRow(previousPositionLabel(h.period), h.item.previousPosition?.let { "#$it" } ?: "—")
+            PopupInfoRow("Total sur le chart", "${s.periodsInChart} ${unit(s.periodsInChart)}")
+            PopupInfoRow(
+                "Streak actuelle sur le chart",
+                s.currentRunInChart.takeIf { it > 0 }?.let { "$it ${unit(it)}" } ?: "—"
+            )
+            PopupInfoRow("Plus longue série #1", "${s.longestRunAt1} ${unit(s.longestRunAt1)}")
+            PopupInfoRow("Plus longue série Top 10", "${s.longestRunTop10} ${unit(s.longestRunTop10)}")
+            PopupInfoRow("Record d'écoutes sur une période", "${formatCount(s.maxPlays)} ▶")
+            if (s.currentRunAt1 > 0) PopupInfoRow("Série #1 en cours", "${s.currentRunAt1} ${unit(s.currentRunAt1)}", valueColor = Gold)
+        }
+
+        // 🏅 Certifications, Panthéon et Hall of Fame restent consultables sans allonger la vue par défaut.
         val ex = h.extras
         if (ex.certLines.isNotEmpty() || ex.pantheonLabel != null || ex.hofLines.isNotEmpty()) {
-            PopupSection("🏅 Palmarès", Gold)
-            ex.pantheonLabel?.let { PopupInfoRow("Panthéon", it, valueColor = Gold) }
-            ex.certLines.forEach { PopupInfoRow("Certification", it, valueColor = Gold) }
-            ex.hofLines.forEach { PopupInfoRow("Hall of Fame", it, valueColor = Gold) }
+            val honorsCount = ex.certLines.size + ex.hofLines.size + if (ex.pantheonLabel != null) 1 else 0
+            PopupDisclosure("🏅 Palmarès · $honorsCount", honorsExpanded, { honorsExpanded = !honorsExpanded }) {
+                ex.pantheonLabel?.let { PopupInfoRow("Panthéon", it, valueColor = Gold) }
+                ex.certLines.forEach { PopupInfoRow("Certification", it, valueColor = Gold) }
+                ex.hofLines.forEach { PopupInfoRow("Hall of Fame", it, valueColor = Gold) }
+            }
         }
-        // ⚔️ Face-à-face
-        PopupSection("⚔️ Face-à-face", Gold)
-        if (compare != null) {
-            Text("Courbe argent : « ${compare.item.name} »", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = onClearCompare) { Text("Retirer la comparaison", color = Gold, fontWeight = FontWeight.Bold) }
-        } else if (!picking) {
-            TextButton(onClick = { picking = true }) { Text("Choisir un adversaire", color = Gold, fontWeight = FontWeight.Bold) }
-        } else {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
-                items(candidates.filter { it.entityId != h.item.entityId }.take(50), key = { it.entityId }) { c ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { picking = false; onCompare(c) }.padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("#${c.position}", color = Gold, fontWeight = FontWeight.Bold, modifier = Modifier.width(44.dp))
-                        Text(c.name, color = theme.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+        // ⚔️ Comparaison : recherche complète, accès direct aux candidats et courbes alignées dans les deux modes.
+        PopupDisclosure(
+            if (compare == null) "⚔️ Comparer un parcours" else "⚔️ Face-à-face · ${compare.item.name}",
+            compareExpanded,
+            {
+                compareExpanded = !compareExpanded
+                if (!compareExpanded) picking = false
+                else if (compare == null) picking = true
+            }
+        ) {
+            if (compare != null) {
+                Text(
+                    if (playsMode) "Les courbes dorée et argentée montrent les écoutes par période."
+                    else "Courbe dorée : ${h.item.name} · courbe argentée : ${compare.item.name}",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { picking = !picking; if (!picking) compareQuery = "" }) {
+                        Text(if (picking) "Masquer la recherche" else "Changer l'adversaire", color = Gold, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { picking = false; compareQuery = ""; onClearCompare() }) {
+                        Text("Retirer", color = theme.textSecondary)
+                    }
+                }
+            } else if (!picking) {
+                Text("Choisis une entrée pour comparer son parcours au même chart.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { picking = true }) { Text("Choisir un adversaire", color = Gold, fontWeight = FontWeight.Bold) }
+            }
+
+            if (picking) {
+                OutlinedTextField(
+                    value = compareQuery, onValueChange = { compareQuery = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    placeholder = { Text("Rechercher un titre, un artiste…", color = theme.textSecondary) },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Gold) },
+                    trailingIcon = {
+                        if (compareQuery.isNotEmpty()) TextButton(onClick = { compareQuery = "" }) { Text("Effacer", color = Gold) }
+                    },
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = theme.text),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Gold, unfocusedBorderColor = theme.textSecondary.copy(alpha = 0.4f), cursorColor = Gold
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+                if (visibleCandidates.isEmpty()) {
+                    Text("Aucun candidat ne correspond à cette recherche.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+                } else {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                        items(visibleCandidates, key = { it.entityId }) { c ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                                    .clickable { picking = false; compareQuery = ""; onCompare(c) }
+                                    .padding(horizontal = 8.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(c.name, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    c.secondary?.let { Text(it, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("#${c.officialPosition}", color = Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                                    Text("${formatCount(c.plays)} ▶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        // 📤 Partager le parcours
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onShare) { Text("📤 Partager ce parcours", color = Gold, fontWeight = FontWeight.Bold) }
+    }
+}
+
+/** Section repliable : conserve les détails du popup tout en laissant le récit et la courbe respirer. */
+@Composable
+private fun PopupDisclosure(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val theme = Nova.theme
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                .background(theme.surface.copy(alpha = 0.62f))
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, color = Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(if (expanded) "−" else "+", color = Gold, fontWeight = FontWeight.Black, fontSize = 18.sp)
         }
+        if (expanded) Column(Modifier.fillMaxWidth().padding(start = 4.dp, top = 6.dp, end = 4.dp)) { content() }
     }
 }

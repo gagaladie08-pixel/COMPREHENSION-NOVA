@@ -49,7 +49,9 @@ data class ChartItem(
     val timesAtPeak: Int,
     val isPlaysPeak: Boolean,
     /** Rang de l'entité dans le snapshot immédiatement précédent (jour/semaine/mois, selon le chart). */
-    val previousPosition: Int? = null
+    val previousPosition: Int? = null,
+    /** Rang officiel du snapshot, conservé quand l'écran est réordonné par durée d'écoute. */
+    val officialPosition: Int = position
 )
 
 /** Bandeau résumé de la période. */
