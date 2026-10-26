@@ -54,11 +54,8 @@ private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy
 /** Libellé court pour l'axe X de la courbe (« 3 oct. ») — la forme longue débordait du graphique. */
 private val axisFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
 
-/** Les snapshots Global sont hebdomadaires même si le chart affiche un cumul all-time. */
-private fun chartPeriodUnit(period: Period, count: Int): String =
-    if (period == Period.GLOBAL) {
-        if (count == 1) "semaine" else "semaines"
-    } else BillboardDates.unitLabel(period, count)
+/** Le Global est un cumul all-time publié sous forme de snapshots hebdomadaires. */
+private fun chartPeriodUnit(period: Period, count: Int): String = BillboardDates.unitLabel(period, count)
 
 private fun previousPositionLabel(period: Period): String = when (period) {
     Period.DAILY -> "Position la veille"
@@ -118,6 +115,7 @@ fun ChartHistoryDialog(
     val theme = Nova.theme
     val s = h.stats
     val unit = { n: Int -> chartPeriodUnit(h.period, n) }
+    val playsLabel = if (h.period == Period.GLOBAL) "écoutes cumulées" else "écoutes"
     var playsMode by remember { mutableStateOf(false) }
     var windowed by remember { mutableStateOf(false) }
     var picking by remember(h) { mutableStateOf(false) }
@@ -235,7 +233,12 @@ fun ChartHistoryDialog(
             SelPill("12 dernières périodes", windowed, { windowed = true }, Modifier.weight(1f))
         }
         Spacer(Modifier.height(8.dp))
-        PopupSection(if (playsMode) "▶ Écoutes par période" else "📈 Parcours dans le classement", Gold)
+        PopupSection(
+            if (!playsMode) "📈 Parcours dans le classement"
+            else if (h.period == Period.GLOBAL) "▶ Écoutes cumulées · par semaine"
+            else "▶ Écoutes par période",
+            Gold
+        )
         if (values.all { it == null }) Text("Pas encore de parcours enregistré.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
         else NovaCurveChart(
             values, Modifier.fillMaxWidth().height(170.dp), color = Gold, invertY = !playsMode,
@@ -257,14 +260,14 @@ fun ChartHistoryDialog(
                 Column(Modifier.weight(1f)) {
                     Text(BillboardDates.label(h.period, selectedDate), color = Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
                     val pointSummary = selectedAppearance?.let { appearance ->
-                        if (playsMode) "${formatCount(appearance.playCount)} écoutes · #${appearance.position}"
-                        else "#${appearance.position} · ${formatCount(appearance.playCount)} écoutes"
+                        if (playsMode) "${formatCount(appearance.playCount)} $playsLabel · #${appearance.position}"
+                        else "#${appearance.position} · ${formatCount(appearance.playCount)} $playsLabel"
                     } ?: "Hors classement sur cette période"
                     Text(pointSummary, color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
                     if (compare != null) {
                         val compareSummary = selectedCompareAppearance?.let { appearance ->
-                            if (playsMode) "${formatCount(appearance.playCount)} écoutes · #${appearance.position}"
-                            else "#${appearance.position} · ${formatCount(appearance.playCount)} écoutes"
+                            if (playsMode) "${formatCount(appearance.playCount)} $playsLabel · #${appearance.position}"
+                            else "#${appearance.position} · ${formatCount(appearance.playCount)} $playsLabel"
                         } ?: "hors classement"
                         Text("↔ ${compare.item.name} · $compareSummary", color = NovaColors.Silver, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
@@ -324,7 +327,10 @@ fun ChartHistoryDialog(
             )
             PopupInfoRow("Plus longue série #1", "${s.longestRunAt1} ${unit(s.longestRunAt1)}")
             PopupInfoRow("Plus longue série Top 10", "${s.longestRunTop10} ${unit(s.longestRunTop10)}")
-            PopupInfoRow("Record d'écoutes sur une période", "${formatCount(s.maxPlays)} ▶")
+            PopupInfoRow(
+                if (h.period == Period.GLOBAL) "Record d'écoutes cumulées" else "Record d'écoutes sur une période",
+                "${formatCount(s.maxPlays)} ▶"
+            )
             if (s.currentRunAt1 > 0) PopupInfoRow("Série #1 en cours", "${s.currentRunAt1} ${unit(s.currentRunAt1)}", valueColor = Gold)
         }
 
@@ -351,7 +357,8 @@ fun ChartHistoryDialog(
         ) {
             if (compare != null) {
                 Text(
-                    if (playsMode) "Les courbes dorée et argentée montrent les écoutes par période."
+                    if (playsMode && h.period == Period.GLOBAL) "Les courbes montrent le cumul des écoutes, relevé chaque semaine."
+                    else if (playsMode) "Les courbes dorée et argentée montrent les écoutes par période."
                     else "Courbe dorée : ${h.item.name} · courbe argentée : ${compare.item.name}",
                     color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis
                 )
@@ -401,7 +408,10 @@ fun ChartHistoryDialog(
                                 Spacer(Modifier.width(8.dp))
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text("#${c.officialPosition}", color = Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
-                                    Text("${formatCount(c.plays)} ▶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                                    Text(
+                                        if (h.period == Period.GLOBAL) "${formatCount(c.plays)} cumul. ▶" else "${formatCount(c.plays)} ▶",
+                                        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                                    )
                                 }
                             }
                         }

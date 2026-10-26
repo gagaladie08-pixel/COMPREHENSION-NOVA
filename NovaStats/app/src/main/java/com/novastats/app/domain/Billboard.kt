@@ -78,14 +78,15 @@ object BillboardDates {
 
     /** Unité du compteur de périodes. */
     fun unitLabel(period: Period, n: Int): String = when (period) {
-        Period.DAILY, Period.GLOBAL -> if (n > 1) "jours" else "jour"
-        Period.WEEKLY -> if (n > 1) "semaines" else "semaine"
+        Period.DAILY -> if (n > 1) "jours" else "jour"
+        Period.WEEKLY, Period.GLOBAL -> if (n > 1) "semaines" else "semaine"
         Period.MONTHLY -> "mois"
         Period.YEARLY -> if (n > 1) "années" else "année"
     }
 
     private val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.FRANCE)
     private val shortFmt = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+    private val snapshotFmt = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
     private val monthFmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE)
 
     fun label(period: Period, anchor: LocalDate): String = when (period) {
@@ -93,7 +94,7 @@ object BillboardDates {
         Period.WEEKLY -> "Semaine ${Dates.isoWeekNumber(anchor)} · ${anchor.format(shortFmt)} – ${anchor.plusDays(6).format(shortFmt)}"
         Period.MONTHLY -> anchor.format(monthFmt).replaceFirstChar { it.uppercase() }
         Period.YEARLY -> anchor.year.toString()
-        Period.GLOBAL -> "All-time · à la semaine du ${anchor.format(shortFmt)}"
+        Period.GLOBAL -> "Cumul all-time · arrêté au ${anchor.plusDays(6).format(snapshotFmt)}"
     }
 }
 

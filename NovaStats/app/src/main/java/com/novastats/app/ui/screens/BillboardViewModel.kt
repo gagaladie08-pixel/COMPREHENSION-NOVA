@@ -42,17 +42,22 @@ data class ChartItem(
     val plays: Int,
     /** Durée totale écoutée sur la période (⏱ tri par durées). */
     val durationMs: Long = 0,
+    /** Pour Global : écoutes réellement ajoutées pendant la semaine; ailleurs : delta vs snapshot précédent. */
     val variationPlays: Int,
     val movement: Movement,
     val periodsInChart: Int,
     val peakPosition: Int,
     val timesAtPeak: Int,
     val isPlaysPeak: Boolean,
-    /** Rang de l'entité dans le snapshot immédiatement précédent (jour/semaine/mois, selon le chart). */
+    /** Rang dans le snapshot précédent (Global : snapshot hebdomadaire). */
     val previousPosition: Int? = null,
     /** Rang officiel du snapshot, conservé quand l'écran est réordonné par durée d'écoute. */
     val officialPosition: Int = position
-)
+) {
+    /** Retour au meilleur rang après l'avoir quitté; une série continue au peak n'est pas un REPEAK. */
+    val isRepeak: Boolean
+        get() = officialPosition == peakPosition && timesAtPeak > 1 && previousPosition != peakPosition
+}
 
 /** Bandeau résumé de la période. */
 data class ChartSummary(

@@ -33,6 +33,15 @@ class BillboardTest {
     }
 
     @Test
+    fun `Global reste un cumul all-time publié à la semaine`() {
+        assertEquals("semaine", BillboardDates.unitLabel(Period.GLOBAL, 1))
+        assertEquals("semaines", BillboardDates.unitLabel(Period.GLOBAL, 4))
+        val globalLabel = BillboardDates.label(Period.GLOBAL, d("2026-09-21"))
+        assertTrue(globalLabel.contains("arrêté au 27"))
+        assertTrue(globalLabel.endsWith("2026"))
+    }
+
+    @Test
     fun `dernière période publiée et close`() {
         val today = d("2026-09-30")
         // La période en cours n'est jamais publiée : la dernière est la semaine / le jour / le mois précédent

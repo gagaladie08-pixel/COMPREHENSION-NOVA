@@ -172,6 +172,7 @@ class BillboardEngine(private val db: NovaDatabase) {
     suspend fun computeSnapshot(period: Period, anchor: LocalDate, today: LocalDate = Dates.today()) {
         val iso = anchor.format(Dates.ISO)
         val range = BillboardDates.range(period, anchor, today)
+        val globalWeekRange = if (period == Period.GLOBAL) BillboardDates.range(Period.WEEKLY, anchor, today) else null
         val prevIso = BillboardDates.previous(period, anchor).format(Dates.ISO)
         val firstDate = db.dailyPlayDao().firstDate()?.let { Dates.parse(it) } ?: anchor
         // Suite complète des ancres jusqu'à celle-ci : permet de savoir si deux apparitions sont consécutives
@@ -189,20 +190,26 @@ class BillboardEngine(private val db: NovaDatabase) {
                 )
 
             // ---- Hot 100
-            val tracks = dao.rankTracks(range.fromIso, range.toIso, Chart.HOT_100.limit(period))
-            val trackRows = build(tracks, dao.priorTrackRows(period.dbName, iso), prevIso, iso, anchors)
+            val tracks = globalWeekRange?.let { week ->
+                dao.rankGlobalTracks(range.fromIso, range.toIso, week.fromIso, week.toIso, Chart.HOT_100.limit(period))
+            } ?: dao.rankTracks(range.fromIso, range.toIso, Chart.HOT_100.limit(period))
+            val trackRows = build(tracks, dao.priorTrackRows(period.dbName, iso), prevIso, iso, anchors, useWeeklyPlays = globalWeekRange != null)
             dao.clearTrackRows(snapshotId)
             db.snapshotDao().insertTracks(trackRows.map { it.toTrackEntity(snapshotId) })
 
             // ---- Artist 50
-            val artists = dao.rankArtists(range.fromIso, range.toIso, Chart.ARTIST_50.limit(period))
-            val artistRows = build(artists, dao.priorArtistRows(period.dbName, iso), prevIso, iso, anchors)
+            val artists = globalWeekRange?.let { week ->
+                dao.rankGlobalArtists(range.fromIso, range.toIso, week.fromIso, week.toIso, Chart.ARTIST_50.limit(period))
+            } ?: dao.rankArtists(range.fromIso, range.toIso, Chart.ARTIST_50.limit(period))
+            val artistRows = build(artists, dao.priorArtistRows(period.dbName, iso), prevIso, iso, anchors, useWeeklyPlays = globalWeekRange != null)
             dao.clearArtistRows(snapshotId)
             db.snapshotDao().insertArtists(artistRows.map { it.toArtistEntity(snapshotId) })
 
             // ---- 75 Albums
-            val albums = dao.rankAlbums(range.fromIso, range.toIso, Chart.ALBUMS_75.limit(period))
-            val albumRows = build(albums, dao.priorAlbumRows(period.dbName, iso), prevIso, iso, anchors)
+            val albums = globalWeekRange?.let { week ->
+                dao.rankGlobalAlbums(range.fromIso, range.toIso, week.fromIso, week.toIso, Chart.ALBUMS_75.limit(period))
+            } ?: dao.rankAlbums(range.fromIso, range.toIso, Chart.ALBUMS_75.limit(period))
+            val albumRows = build(albums, dao.priorAlbumRows(period.dbName, iso), prevIso, iso, anchors, useWeeklyPlays = globalWeekRange != null)
             dao.clearAlbumRows(snapshotId)
             db.snapshotDao().insertAlbums(albumRows.map { it.toAlbumEntity(snapshotId) })
 
@@ -237,7 +244,10 @@ class BillboardEngine(private val db: NovaDatabase) {
         val stats: ChartHistoryStats
     )
 
-    private fun build(ranked: List<RankedEntry>, prior: List<PriorRow>, prevIso: String, iso: String, anchors: List<LocalDate>): List<Computed> {
+    private fun build(
+        ranked: List<RankedEntry>, prior: List<PriorRow>, prevIso: String, iso: String,
+        anchors: List<LocalDate>, useWeeklyPlays: Boolean = false
+    ): List<Computed> {
         val byEntity = prior.groupBy { it.entityId }
         val prevRows = prior.filter { it.date == prevIso }.associateBy { it.entityId }
         return ranked.mapIndexed { i, e ->
@@ -262,7 +272,7 @@ class BillboardEngine(private val db: NovaDatabase) {
                 peakPosition = peakPos, peakDate = peakDate, timesAtPeak = times,
                 debutPosition = stats.firstEntry?.position ?: pos,
                 debutDate = stats.firstEntry?.date?.format(Dates.ISO) ?: iso,
-                variationPlays = prev?.let { e.plays - it.playCount } ?: 0,
+                variationPlays = if (useWeeklyPlays) e.weeklyPlays else prev?.let { e.plays - it.playCount } ?: 0,
                 isPlaysPeak = !isNew && e.plays > stats.maxPlays,
                 stats = stats
             )

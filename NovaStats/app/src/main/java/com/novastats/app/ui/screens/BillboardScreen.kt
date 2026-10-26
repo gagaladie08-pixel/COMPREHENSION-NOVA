@@ -208,8 +208,8 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 if (state.hasAnyData) SummaryBanner(state)
                 // 4. Carte « #1 de la période » : la pochette du #1 en fond, titre, artiste, écoutes, règne
                 state.summary.numberOne?.let { one -> if (state.items.isNotEmpty()) NumberOneCard(one, state) { vm.openHistory(one) } }
-                // 5. Carrousel « histoires » (hebdo + mensuel) : nouvelle entrée, dominance, longévité, progression
-                if (state.period == Period.WEEKLY || state.period == Period.MONTHLY) {
+                // 5. Histoires hebdo, mensuelles et bilan des changements du Global cumulatif.
+                if (state.period == Period.WEEKLY || state.period == Period.MONTHLY || state.period == Period.GLOBAL) {
                     val stories = remember(state.items, state.summary, state.chart, state.period) { buildStories(state) }
                     if (stories.isNotEmpty()) StoriesCarousel(stories, state.period)
                 }
@@ -262,7 +262,14 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                     )
                 }
                 SortToggle(state.sortDuration) { vm.toggleSort() }
-                if (state.sortDuration) {
+                if (state.period == Period.GLOBAL) {
+                    Text(
+                        if (state.sortDuration) "Global : écoutes, durée et rang cumulés · tri par durée · delta et mouvements vs semaine précédente"
+                        else "Global : écoutes, durée et rang cumulés · delta d'écoutes et mouvements vs semaine précédente",
+                        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis
+                    )
+                } else if (state.sortDuration) {
                     Text(
                         "Rang affiché = durée d'écoute · mouvements et records = classement officiel",
                         color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
@@ -450,7 +457,7 @@ private fun SummaryBanner(state: BillboardUiState) {
 private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -> Unit) {
     val theme = Nova.theme
     val kind = when (state.chart) { Chart.HOT_100 -> "🎵 #1 SONG"; Chart.ARTIST_50 -> "🎤 #1 ARTIST"; Chart.ALBUMS_75 -> "💿 #1 ALBUM" }
-    val runWord = when (state.period) { Period.DAILY -> "Day"; Period.WEEKLY -> "Week"; Period.MONTHLY -> "Month"; Period.YEARLY -> "Year"; Period.GLOBAL -> "Period" }
+    val runWord = when (state.period) { Period.DAILY -> "Day"; Period.WEEKLY -> "Week"; Period.MONTHLY -> "Month"; Period.YEARLY -> "Year"; Period.GLOBAL -> "Semaine" }
     val run = state.summary.numberOneRun.coerceAtLeast(1)
     val shape = RoundedCornerShape(18.dp)
     Box(
@@ -476,7 +483,10 @@ private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -
                 Text(one.secondary, color = Color.White, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 90.dp))
             }
             Spacer(Modifier.height(10.dp))
-            Text("${one.plays}× écoutes", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (state.period == Period.GLOBAL) "${formatCount(one.plays)} écoutes cumulées" else "${one.plays}× écoutes",
+                color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
+            )
             Spacer(Modifier.height(6.dp))
             Text("👑 $runWord $run", color = theme.accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
         }
@@ -621,19 +631,23 @@ private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = fa
         }
         Column(horizontalAlignment = Alignment.End) {
             val m = item.movement
-            // PEAK = nouveau record de POSITION (meilleure place jamais atteinte, pour la 1re fois) ; NP = nouveau record d'ÉCOUTES
-            val positionPeak = m !is Movement.New && item.officialPosition == item.peakPosition && item.timesAtPeak <= 1
+            // PEAK = première atteinte du meilleur rang ; REPEAK = retour à ce rang après l'avoir quitté.
+            val positionPeak = m !is Movement.New && item.officialPosition == item.peakPosition && item.timesAtPeak == 1
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (positionPeak) { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
+                when {
+                    item.isRepeak -> { Badge("REPEAK", NovaColors.Gold); Spacer(Modifier.width(4.dp)) }
+                    positionPeak -> { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
+                }
                 Text(if (showDuration) formatDuration(item.durationMs) else "${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
             }
-            if (item.isPlaysPeak) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-            if (m !is Movement.New && m !is Movement.Reentry) {
+            // En Global, les totaux cumulés montent mécaniquement; le delta hebdomadaire est plus informatif que NP.
+            if (item.isPlaysPeak && period != Period.GLOBAL) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            if (period == Period.GLOBAL || (m !is Movement.New && m !is Movement.Reentry)) {
                 val v = item.variationPlays
                 val (txt, col) = when {
                     v > 0 -> "+$v" to NovaColors.Up
                     v < 0 -> "$v" to NovaColors.Down
-                    else -> "=" to NovaColors.Neutral
+                    else -> (if (period == Period.GLOBAL) "0" else "=") to NovaColors.Neutral
                 }
                 Text(txt, color = col, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -650,6 +664,7 @@ private data class Story(val coverUrl: String?, val circle: Boolean, val text: S
 private fun buildStories(st: BillboardUiState): List<Story> {
     val items = st.items
     if (items.isEmpty()) return emptyList()
+    if (st.period == Period.GLOBAL) return buildGlobalStories(st)
     val chartName = st.chart.label.removePrefix("Nova ")
     val de: (ChartItem) -> String = { it.secondary?.let { a -> " de $a" } ?: "" }
     val out = mutableListOf<Story>()
@@ -711,6 +726,72 @@ private fun buildStories(st: BillboardUiState): List<Story> {
     return out
 }
 
+/** Histoires du Global : le rang et le total sont all-time, les mouvements et ajouts d'écoutes sont hebdomadaires. */
+private fun buildGlobalStories(st: BillboardUiState): List<Story> {
+    val items = st.items
+    if (items.isEmpty()) return emptyList()
+    val chartName = st.chart.label.removePrefix("Nova ")
+    val de: (ChartItem) -> String = {
+        if (st.chart == Chart.ARTIST_50) "" else it.secondary?.let { artist -> " de $artist" } ?: ""
+    }
+    val stories = mutableListOf<Story>()
+    val leader = items.first()
+    stories += Story(
+        leader.coverUrl, leader.circle,
+        "« ${leader.name} »" + de(leader) + " mène le Global $chartName avec ${formatCount(leader.plays)} écoutes cumulées."
+    )
+
+    items.getOrNull(1)?.let { runnerUp ->
+        val gap = (leader.plays - runnerUp.plays).coerceAtLeast(0)
+        stories += Story(
+            leader.coverUrl, leader.circle,
+            "Au cumul all-time, « ${leader.name} » garde ${formatCount(gap)} écoutes d'avance sur « ${runnerUp.name} »."
+        )
+    }
+
+    items.maxByOrNull { it.variationPlays }?.takeIf { it.variationPlays > 0 }?.let { weeklyLeader ->
+        stories += Story(
+            weeklyLeader.coverUrl, weeklyLeader.circle,
+            "Cette semaine, « ${weeklyLeader.name} »" + de(weeklyLeader) + " ajoute ${formatCount(weeklyLeader.variationPlays)} écoutes; son cumul atteint ${formatCount(weeklyLeader.plays)}."
+        )
+    }
+
+    st.summary.biggestClimber?.let { climber ->
+        val up = climber.movement as? Movement.Up ?: return@let
+        stories += Story(
+            climber.coverUrl, climber.circle,
+            "« ${climber.name} »" + de(climber) + " réalise la plus forte progression hebdomadaire, gagnant ${up.places} place${if (up.places > 1) "s" else ""} jusqu'au #${climber.position}."
+        )
+    }
+
+    val debutOrReturn = items.filter { it.movement is Movement.New || it.movement is Movement.Reentry }
+        .minByOrNull { it.position }
+    debutOrReturn?.let { entrant ->
+        val isReturn = entrant.movement is Movement.Reentry
+        stories += Story(
+            entrant.coverUrl, entrant.circle,
+            "« ${entrant.name} »" + de(entrant) + if (isReturn) " fait son retour dans le Top Global, à la ${entrant.position}ᵉ place."
+            else " fait sa première entrée dans le Top Global, à la ${entrant.position}ᵉ place."
+        )
+    }
+
+    st.summary.biggestFaller?.let { faller ->
+        val down = faller.movement as? Movement.Down ?: return@let
+        stories += Story(
+            faller.coverUrl, faller.circle,
+            "« ${faller.name} »" + de(faller) + " recule le plus cette semaine : ${down.places} place${if (down.places > 1) "s" else ""}, jusqu'au #${faller.position}."
+        )
+    }
+
+    st.summary.numberOneRun.takeIf { it > 1 }?.let { run ->
+        stories += Story(
+            leader.coverUrl, leader.circle,
+            "« ${leader.name} »" + de(leader) + " conserve la première place du Global depuis ${run} semaines consécutives."
+        )
+    }
+    return stories.take(6)
+}
+
 /** Carrousel compact des histoires : swipe, commandes visibles et défilement auto contrôlable. */
 @Composable
 private fun StoriesCarousel(stories: List<Story>, period: Period) {
@@ -747,9 +828,13 @@ private fun StoriesCarousel(stories: List<Story>, period: Period) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Les coulisses du chart", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                Text(if (period == Period.GLOBAL) "Les coulisses du Global" else "Les coulisses du chart", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    if (period == Period.MONTHLY) "Un fait marquant de ce mois-ci" else "Un fait marquant de cette semaine",
+                    when (period) {
+                        Period.MONTHLY -> "Un fait marquant de ce mois-ci"
+                        Period.GLOBAL -> "Cumul all-time · changements de la semaine"
+                        else -> "Un fait marquant de cette semaine"
+                    },
                     color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
                 )
             }

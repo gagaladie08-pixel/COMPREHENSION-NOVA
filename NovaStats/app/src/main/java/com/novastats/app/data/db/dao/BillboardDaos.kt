@@ -17,7 +17,9 @@ data class RankedEntry(
     @ColumnInfo(name = "plays") val plays: Int,
     @ColumnInfo(name = "duration_ms") val durationMs: Long,
     @ColumnInfo(name = "distinct_tracks") val distinctTracks: Int = 0,
-    @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0
+    @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0,
+    /** Écoutes de la semaine courante dans un snapshot Global (cumulatif), zéro pour les autres classements. */
+    @ColumnInfo(name = "weekly_plays") val weeklyPlays: Int = 0
 )
 
 /** 🏛️ Premium : dauphin (#2) d'un snapshot, pour la marge de domination du Hall of Fame. */
@@ -66,7 +68,7 @@ interface BillboardDao {
     @Query(
         """
         SELECT d.root_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
-               0 AS distinct_tracks, 0 AS distinct_albums
+               0 AS distinct_tracks, 0 AS distinct_albums, 0 AS weekly_plays
         FROM daily_plays d WHERE d.date BETWEEN :from AND :to
         GROUP BY d.root_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
         """
@@ -76,7 +78,8 @@ interface BillboardDao {
     @Query(
         """
         SELECT ta.artist_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
-               COUNT(DISTINCT d.track_id) AS distinct_tracks, COUNT(DISTINCT d.album_id) AS distinct_albums
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, COUNT(DISTINCT d.album_id) AS distinct_albums,
+               0 AS weekly_plays
         FROM daily_plays d
         JOIN track_artists ta ON ta.track_id = d.track_id
         JOIN artists a ON a.artist_id = ta.artist_id AND a.is_merged = 0
@@ -89,7 +92,7 @@ interface BillboardDao {
     @Query(
         """
         SELECT d.album_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
-               COUNT(DISTINCT d.track_id) AS distinct_tracks, 0 AS distinct_albums
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, 0 AS distinct_albums, 0 AS weekly_plays
         FROM daily_plays d
         JOIN albums al ON al.album_id = d.album_id AND al.is_compilation = 0
         WHERE d.date BETWEEN :from AND :to AND d.album_id IS NOT NULL
@@ -97,6 +100,46 @@ interface BillboardDao {
         """
     )
     suspend fun rankAlbums(from: String, to: String, limit: Int): List<RankedEntry>
+
+    /* ===== Global : cumul all-time + écoutes ajoutées durant la semaine du snapshot ===== */
+
+    @Query(
+        """
+        SELECT d.root_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+               0 AS distinct_tracks, 0 AS distinct_albums,
+               SUM(CASE WHEN d.date BETWEEN :weeklyFrom AND :weeklyTo THEN d.play_count ELSE 0 END) AS weekly_plays
+        FROM daily_plays d WHERE d.date BETWEEN :from AND :to
+        GROUP BY d.root_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun rankGlobalTracks(from: String, to: String, weeklyFrom: String, weeklyTo: String, limit: Int): List<RankedEntry>
+
+    @Query(
+        """
+        SELECT ta.artist_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, COUNT(DISTINCT d.album_id) AS distinct_albums,
+               SUM(CASE WHEN d.date BETWEEN :weeklyFrom AND :weeklyTo THEN d.play_count ELSE 0 END) AS weekly_plays
+        FROM daily_plays d
+        JOIN track_artists ta ON ta.track_id = d.track_id
+        JOIN artists a ON a.artist_id = ta.artist_id AND a.is_merged = 0
+        WHERE d.date BETWEEN :from AND :to
+        GROUP BY ta.artist_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun rankGlobalArtists(from: String, to: String, weeklyFrom: String, weeklyTo: String, limit: Int): List<RankedEntry>
+
+    @Query(
+        """
+        SELECT d.album_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, 0 AS distinct_albums,
+               SUM(CASE WHEN d.date BETWEEN :weeklyFrom AND :weeklyTo THEN d.play_count ELSE 0 END) AS weekly_plays
+        FROM daily_plays d
+        JOIN albums al ON al.album_id = d.album_id AND al.is_compilation = 0
+        WHERE d.date BETWEEN :from AND :to AND d.album_id IS NOT NULL
+        GROUP BY d.album_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun rankGlobalAlbums(from: String, to: String, weeklyFrom: String, weeklyTo: String, limit: Int): List<RankedEntry>
 
     /* ===== Apparitions passées (strictement avant une date) ===== */
 
