@@ -12,9 +12,9 @@ import androidx.compose.ui.text.googlefonts.isAvailableOnDevice
 import com.novastats.app.R
 
 /**
- * Polices des thèmes — chargées nativement via GoogleFont.Provider (Google Play Services Fonts).
- * Chaque famille enchaîne : graisses Google Fonts disponibles → police système la plus proche
- * (DeviceFontFamilyName) en secours si le téléchargement échoue ou si Play Services est absent.
+ * Les familles des 15 thèmes prédéfinis sont embarquées pour garder leur identité hors ligne.
+ * Les autres choix (thèmes personnalisés et onboarding) passent par GoogleFont.Provider, puis
+ * utilisent une police système proche si Google Play Services Fonts est absent ou le téléchargement échoue.
  */
 object NovaFonts {
     val provider = GoogleFont.Provider(
@@ -61,7 +61,9 @@ object NovaFonts {
         // Onboarding
         "Cinzel Decorative" to Spec(listOf(400, 700, 900), false, SERIF),
         "Cormorant Garamond" to Spec(listOf(300, 400, 500, 600, 700), true, SERIF),
-        "Raleway" to Spec(listOf(300, 400, 500, 600, 700, 800, 900), true, LIGHT)
+        "Raleway" to Spec(listOf(300, 400, 500, 600, 700, 800, 900), true, LIGHT),
+        "Comfortaa" to Spec(listOf(300, 400, 500, 600, 700), false, SANS),
+        "Bowlby One SC" to Spec(listOf(400), false, BLACK)
     )
 
     private val cache = HashMap<String, FontFamily>()
@@ -77,12 +79,60 @@ object NovaFonts {
         return ok
     }
 
-    /** Famille Google Fonts [name] avec repli système ; [online] = false force directement le repli. */
-    /** Polices embarquées dans l'APK (variables) : jamais de téléchargement, jamais de repli système. */
-    private val local: Map<String, Int> = mapOf("Inter" to R.font.inter, "Cinzel" to R.font.cinzel)
+    /** Faces locales des polices des 15 thèmes : mêmes dessins avec ou sans réseau/Play Services Fonts. */
+    private data class LocalFontFace(val resourceId: Int, val weight: Int, val style: FontStyle = FontStyle.Normal)
+
+    private fun variableFaces(resourceId: Int, weights: List<Int>, italicResourceId: Int? = null): List<LocalFontFace> =
+        buildList {
+            weights.forEach { add(LocalFontFace(resourceId, it)) }
+            italicResourceId?.let { italic ->
+                weights.filter { it == 400 || it == 700 }.forEach { add(LocalFontFace(italic, it, FontStyle.Italic)) }
+            }
+        }
+
+    private fun staticFace(resourceId: Int, weight: Int = 400, style: FontStyle = FontStyle.Normal) =
+        LocalFontFace(resourceId, weight, style)
+
+    private val local: Map<String, List<LocalFontFace>> = mapOf(
+        "Orbitron" to variableFaces(R.font.orbitron, listOf(400, 500, 600, 700, 800, 900)),
+        "Rajdhani" to listOf(staticFace(R.font.rajdhani_light, 300), staticFace(R.font.rajdhani, 400), staticFace(R.font.rajdhani_bold, 700)),
+        "Audiowide" to listOf(staticFace(R.font.audiowide)),
+        "Poppins" to listOf(
+            staticFace(R.font.poppins, 400), staticFace(R.font.poppins_semibold, 600), staticFace(R.font.poppins_bold, 700),
+            staticFace(R.font.poppins_italic, 400, FontStyle.Italic), staticFace(R.font.poppins_bold_italic, 700, FontStyle.Italic)
+        ),
+        "Bebas Neue" to listOf(staticFace(R.font.bebas_neue)),
+        "Playfair Display" to variableFaces(R.font.playfair_display, listOf(400, 500, 600, 700, 800, 900), R.font.playfair_display_italic),
+        "Montserrat" to variableFaces(R.font.montserrat, listOf(300, 400, 500, 600, 700, 800, 900), R.font.montserrat_italic),
+        "Baloo 2" to variableFaces(R.font.baloo_2, listOf(400, 500, 600, 700, 800)),
+        "Fredoka" to variableFaces(R.font.fredoka, listOf(300, 400, 500, 600, 700)),
+        "Abril Fatface" to listOf(staticFace(R.font.abril_fatface)),
+        "Anton" to listOf(staticFace(R.font.anton)),
+        "Quicksand" to variableFaces(R.font.quicksand, listOf(300, 400, 500, 600, 700)),
+        "DM Serif Display" to listOf(staticFace(R.font.dm_serif_display), staticFace(R.font.dm_serif_display_italic, 400, FontStyle.Italic)),
+        "Syne" to variableFaces(R.font.syne, listOf(400, 500, 600, 700, 800)),
+        "Unica One" to listOf(staticFace(R.font.unica_one)),
+        "Righteous" to listOf(staticFace(R.font.righteous)),
+        "Nunito" to variableFaces(R.font.nunito, listOf(300, 400, 500, 600, 700, 800, 900), R.font.nunito_italic),
+        "Bungee" to listOf(staticFace(R.font.bungee)),
+        "Inter" to variableFaces(R.font.inter, listOf(300, 400, 500, 600, 700, 800, 900)),
+        "Fraunces" to variableFaces(R.font.fraunces, listOf(300, 400, 500, 600, 700, 800, 900), R.font.fraunces_italic),
+        "Ubuntu" to listOf(
+            staticFace(R.font.ubuntu, 400), staticFace(R.font.ubuntu_bold, 700),
+            staticFace(R.font.ubuntu_italic, 400, FontStyle.Italic), staticFace(R.font.ubuntu_bold_italic, 700, FontStyle.Italic)
+        ),
+        "Cinzel" to variableFaces(R.font.cinzel, listOf(400, 500, 600, 700, 800, 900)),
+        "Comfortaa" to variableFaces(R.font.comfortaa, listOf(300, 400, 500, 600, 700)),
+        "Bowlby One SC" to listOf(staticFace(R.font.bowlby_one_sc)),
+        "Cormorant" to variableFaces(R.font.cormorant, listOf(300, 400, 500, 600, 700), R.font.cormorant_italic)
+    )
 
     fun family(name: String, online: Boolean = true): FontFamily {
-        local[name]?.let { res -> return cache.getOrPut(name) { FontFamily(listOf(300, 400, 500, 600, 700, 800, 900).map { w -> Font(res, FontWeight(w)) }) } }
+        local[name]?.let { faces ->
+            return cache.getOrPut(name) {
+                FontFamily(faces.map { face -> Font(face.resourceId, FontWeight(face.weight), face.style) })
+            }
+        }
         val spec = specs[name] ?: Spec(listOf(400, 700), false, SANS)
         if (!online) return deviceFamily(spec.fallback)
         return cache.getOrPut(name) {

@@ -90,7 +90,7 @@ private val PRESETS = listOf(
 
 private val TITLE_FONTS = listOf(
     "Orbitron", "Audiowide", "Bebas Neue", "Anton", "Bungee", "Cinzel", "Playfair Display",
-    "Righteous", "Abril Fatface", "DM Serif Display", "Fraunces", "Syne", "Montserrat", "Baloo 2"
+    "Righteous", "Abril Fatface", "DM Serif Display", "Fraunces", "Syne", "Montserrat", "Baloo 2", "Comfortaa", "Bowlby One SC"
 )
 
 private val BODY_FONTS = listOf(

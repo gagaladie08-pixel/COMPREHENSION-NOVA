@@ -42,7 +42,8 @@ class ITunesApi : MusicApi {
             MetaCandidate(
                 source, it.str("trackName") ?: "", it.str("artistName"), it.str("collectionName"), hd(it.str("artworkUrl100")),
                 it.long("trackTimeMillis"), it.str("primaryGenreName"), it.str("releaseDate")?.take(10),
-                externalAlbumId = it.long("collectionId")?.toString(), externalArtistId = it.long("artistId")?.toString()
+                externalAlbumId = it.long("collectionId")?.toString(), externalArtistId = it.long("artistId")?.toString(),
+                releaseType = it.str("collectionType")
             )
         }
     }
@@ -53,7 +54,8 @@ class ITunesApi : MusicApi {
             MetaCandidate(
                 source, it.str("collectionName") ?: "", it.str("artistName"), null, hd(it.str("artworkUrl100")),
                 null, it.str("primaryGenreName"), it.str("releaseDate")?.take(10),
-                externalAlbumId = it.long("collectionId")?.toString(), externalArtistId = it.long("artistId")?.toString()
+                externalAlbumId = it.long("collectionId")?.toString(), externalArtistId = it.long("artistId")?.toString(),
+                releaseType = it.str("collectionType")
             )
         }
     }
@@ -197,6 +199,30 @@ class MusicBrainzApi : MusicApi {
         }
     }
 
+    /** Envoie toutes les sorties retournées pour chaque enregistrement, sans retenir seulement la première édition. */
+    suspend fun searchTrackAlbumCandidates(title: String, artist: String): List<MetaCandidate> {
+        val recs = limiter.run {
+            HttpJson.get("$base/recording?query=${enc("recording:${q(title)} AND artist:${q(artist)}")}&fmt=json&limit=5&inc=releases").arr("recordings").objs()
+        }
+        return recs.flatMap { rec ->
+            val credit = rec.arr("artist-credit").firstObj()
+            val releaseArtist = credit.str("name") ?: artist
+            rec.arr("releases").objs().take(8).map { release ->
+                val group = release.obj("release-group")
+                val releaseType = listOfNotNull(
+                    group.str("primary-type"),
+                    group.arr("secondary-types")?.joinToString(" ") { it.string.orEmpty() }?.takeIf { it.isNotBlank() }
+                ).joinToString(" ").takeIf { it.isNotBlank() }
+                MetaCandidate(
+                    source, rec.str("title") ?: title, releaseArtist, release.str("title"),
+                    durationMs = rec.long("length"), releaseDate = release.str("date"), mbid = rec.str("id"),
+                    externalAlbumId = release.str("id"), externalArtistId = credit.obj("artist").str("id"),
+                    releaseType = releaseType
+                )
+            }
+        }
+    }
+
     override suspend fun searchAlbum(title: String, artist: String): List<MetaCandidate> {
         val rels = limiter.run {
             HttpJson.get("$base/release?query=${enc("release:${q(title)} AND artist:${q(artist)}")}&fmt=json&limit=5").arr("releases").objs()
@@ -244,7 +270,7 @@ class TheAudioDbApi : MusicApi {
 
     override suspend fun searchAlbum(title: String, artist: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("$base/searchalbum.php?s=${enc(artist)}&a=${enc(title)}").arr("album").objs().map {
-            MetaCandidate(source, it.str("strAlbum") ?: "", it.str("strArtist"), null, it.str("strAlbumThumb"), null, it.str("strGenre"), it.str("intYearReleased"), mbid = it.str("strMusicBrainzID"))
+            MetaCandidate(source, it.str("strAlbum") ?: "", it.str("strArtist"), null, it.str("strAlbumThumb"), null, it.str("strGenre"), it.str("intYearReleased"), mbid = it.str("strMusicBrainzID"), releaseType = it.str("strReleaseFormat"))
         }
     }
 
@@ -270,14 +296,19 @@ class DeezerApi : MusicApi {
         HttpJson.get("https://api.deezer.com/search/track?q=${enc("artist:\"$artist\" track:\"$title\"")}&limit=10").arr("data").objs().map {
             MetaCandidate(
                 source, it.str("title") ?: "", it.obj("artist").str("name"), it.obj("album").str("title"), it.obj("album").str("cover_xl") ?: it.obj("album").str("cover_big"), it.long("duration")?.times(1000),
-                externalAlbumId = it.obj("album").long("id")?.toString(), externalArtistId = it.obj("artist").long("id")?.toString()
+                externalAlbumId = it.obj("album").long("id")?.toString(), externalArtistId = it.obj("artist").long("id")?.toString(),
+                releaseType = it.obj("album").str("record_type")
             )
         }
     }
 
     override suspend fun searchAlbum(title: String, artist: String): List<MetaCandidate> = limiter.run {
         HttpJson.get("https://api.deezer.com/search/album?q=${enc("artist:\"$artist\" album:\"$title\"")}&limit=10").arr("data").objs().map {
-            MetaCandidate(source, it.str("title") ?: "", it.obj("artist").str("name"), null, it.str("cover_xl") ?: it.str("cover_big"), externalAlbumId = it.long("id")?.toString(), externalArtistId = it.obj("artist").long("id")?.toString())
+            MetaCandidate(
+                source, it.str("title") ?: "", it.obj("artist").str("name"), null, it.str("cover_xl") ?: it.str("cover_big"),
+                externalAlbumId = it.long("id")?.toString(), externalArtistId = it.obj("artist").long("id")?.toString(),
+                releaseType = it.str("record_type")
+            )
         }
     }
 
@@ -313,7 +344,8 @@ class DiscogsApi : MusicApi {
             MetaCandidate(
                 source, parts.getOrElse(1) { full }.trim(), parts.getOrNull(0)?.trim()?.replace(Regex("\\s\\(\\d+\\)$"), ""), null,
                 it.str("cover_image")?.takeIf { u -> !u.contains("spacer.gif") }, null, it.arr("genre")?.firstOrNull().string, it.str("year"),
-                externalAlbumId = it.long("id")?.toString()
+                externalAlbumId = it.long("id")?.toString(),
+                releaseType = it.arr("format")?.mapNotNull { format -> format.string }?.joinToString(" ")
             )
         }
     }

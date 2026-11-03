@@ -17,7 +17,16 @@ data class RankedEntry(
     @ColumnInfo(name = "plays") val plays: Int,
     @ColumnInfo(name = "duration_ms") val durationMs: Long,
     @ColumnInfo(name = "distinct_tracks") val distinctTracks: Int = 0,
-    @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0
+    @ColumnInfo(name = "distinct_albums") val distinctAlbums: Int = 0,
+    /** Écoutes de la semaine courante dans un snapshot Global (cumulatif), zéro pour les autres classements. */
+    @ColumnInfo(name = "weekly_plays") val weeklyPlays: Int = 0
+)
+
+/** 🏛️ Premium : dauphin (#2) d'un snapshot, pour la marge de domination du Hall of Fame. */
+data class RunnerUpRow(
+    @ColumnInfo(name = "entity_id") val entityId: Long,
+    @ColumnInfo(name = "play_count") val playCount: Int,
+    @ColumnInfo(name = "name") val name: String
 )
 
 /** Apparition passée d'une entité dans un chart (pour peak, compteur, record d'écoutes, séries). */
@@ -59,7 +68,7 @@ interface BillboardDao {
     @Query(
         """
         SELECT d.root_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
-               0 AS distinct_tracks, 0 AS distinct_albums
+               0 AS distinct_tracks, 0 AS distinct_albums, 0 AS weekly_plays
         FROM daily_plays d WHERE d.date BETWEEN :from AND :to
         GROUP BY d.root_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
         """
@@ -69,7 +78,8 @@ interface BillboardDao {
     @Query(
         """
         SELECT ta.artist_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
-               COUNT(DISTINCT d.track_id) AS distinct_tracks, COUNT(DISTINCT d.album_id) AS distinct_albums
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, COUNT(DISTINCT d.album_id) AS distinct_albums,
+               0 AS weekly_plays
         FROM daily_plays d
         JOIN track_artists ta ON ta.track_id = d.track_id
         JOIN artists a ON a.artist_id = ta.artist_id AND a.is_merged = 0
@@ -82,7 +92,7 @@ interface BillboardDao {
     @Query(
         """
         SELECT d.album_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
-               COUNT(DISTINCT d.track_id) AS distinct_tracks, 0 AS distinct_albums
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, 0 AS distinct_albums, 0 AS weekly_plays
         FROM daily_plays d
         JOIN albums al ON al.album_id = d.album_id AND al.is_compilation = 0
         WHERE d.date BETWEEN :from AND :to AND d.album_id IS NOT NULL
@@ -90,6 +100,46 @@ interface BillboardDao {
         """
     )
     suspend fun rankAlbums(from: String, to: String, limit: Int): List<RankedEntry>
+
+    /* ===== Global : cumul all-time + écoutes ajoutées durant la semaine du snapshot ===== */
+
+    @Query(
+        """
+        SELECT d.root_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+               0 AS distinct_tracks, 0 AS distinct_albums,
+               SUM(CASE WHEN d.date BETWEEN :weeklyFrom AND :weeklyTo THEN d.play_count ELSE 0 END) AS weekly_plays
+        FROM daily_plays d WHERE d.date BETWEEN :from AND :to
+        GROUP BY d.root_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun rankGlobalTracks(from: String, to: String, weeklyFrom: String, weeklyTo: String, limit: Int): List<RankedEntry>
+
+    @Query(
+        """
+        SELECT ta.artist_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, COUNT(DISTINCT d.album_id) AS distinct_albums,
+               SUM(CASE WHEN d.date BETWEEN :weeklyFrom AND :weeklyTo THEN d.play_count ELSE 0 END) AS weekly_plays
+        FROM daily_plays d
+        JOIN track_artists ta ON ta.track_id = d.track_id
+        JOIN artists a ON a.artist_id = ta.artist_id AND a.is_merged = 0
+        WHERE d.date BETWEEN :from AND :to
+        GROUP BY ta.artist_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun rankGlobalArtists(from: String, to: String, weeklyFrom: String, weeklyTo: String, limit: Int): List<RankedEntry>
+
+    @Query(
+        """
+        SELECT d.album_id AS entity_id, SUM(d.play_count) AS plays, SUM(d.total_duration_ms) AS duration_ms,
+               COUNT(DISTINCT d.track_id) AS distinct_tracks, 0 AS distinct_albums,
+               SUM(CASE WHEN d.date BETWEEN :weeklyFrom AND :weeklyTo THEN d.play_count ELSE 0 END) AS weekly_plays
+        FROM daily_plays d
+        JOIN albums al ON al.album_id = d.album_id AND al.is_compilation = 0
+        WHERE d.date BETWEEN :from AND :to AND d.album_id IS NOT NULL
+        GROUP BY d.album_id ORDER BY plays DESC, duration_ms DESC LIMIT :limit
+        """
+    )
+    suspend fun rankGlobalAlbums(from: String, to: String, weeklyFrom: String, weeklyTo: String, limit: Int): List<RankedEntry>
 
     /* ===== Apparitions passées (strictement avant une date) ===== */
 
@@ -249,4 +299,40 @@ interface BillboardDao {
         """
     )
     suspend fun numberOneAlbum(type: String, date: String): Long?
+
+    /** Données de tête et écoutes pour comparer le #1 au dauphin de chaque pilier PAK. */
+    @Query("SELECT st.track_id AS entity_id, st.play_count AS play_count, t.title AS name FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id JOIN tracks t ON t.track_id = st.track_id WHERE s.type = :type AND s.date = :date AND st.position = 1 LIMIT 1")
+    suspend fun numberOneTrackDetails(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.artist_id AS entity_id, sa.play_count AS play_count, a.name AS name FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN artists a ON a.artist_id = sa.artist_id WHERE s.type = :type AND s.date = :date AND sa.position = 1 LIMIT 1")
+    suspend fun numberOneArtistDetails(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.album_id AS entity_id, sa.play_count AS play_count, al.title AS name FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN albums al ON al.album_id = sa.album_id WHERE s.type = :type AND s.date = :date AND sa.position = 1 LIMIT 1")
+    suspend fun numberOneAlbumDetails(type: String, date: String): RunnerUpRow?
+
+    /* ===== 🏛️ Premium : dauphin (#2) d'un snapshot + résolution de noms (Antichambre / domination) ===== */
+
+    @Query("SELECT st.track_id AS entity_id, st.play_count AS play_count, t.title AS name FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id JOIN tracks t ON t.track_id = st.track_id WHERE s.type = :type AND s.date = :date AND st.position = 2 LIMIT 1")
+    suspend fun runnerUpTrack(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.artist_id AS entity_id, sa.play_count AS play_count, a.name AS name FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN artists a ON a.artist_id = sa.artist_id WHERE s.type = :type AND s.date = :date AND sa.position = 2 LIMIT 1")
+    suspend fun runnerUpArtist(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT sa.album_id AS entity_id, sa.play_count AS play_count, al.title AS name FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id JOIN albums al ON al.album_id = sa.album_id WHERE s.type = :type AND s.date = :date AND sa.position = 2 LIMIT 1")
+    suspend fun runnerUpAlbum(type: String, date: String): RunnerUpRow?
+
+    @Query("SELECT title FROM tracks WHERE track_id = :id") suspend fun nameOfTrack(id: Long): String?
+    @Query("SELECT name FROM artists WHERE artist_id = :id") suspend fun nameOfArtist(id: Long): String?
+    @Query("SELECT title FROM albums WHERE album_id = :id") suspend fun nameOfAlbum(id: Long): String?
+
+    /* ===== 🌍 Vrai Triple Debut : première apparition dans chaque chart ===== */
+
+    @Query("SELECT COUNT(*) FROM snapshot_tracks st JOIN snapshots s ON s.snapshot_id = st.snapshot_id WHERE s.type = :type AND s.date < :before AND st.track_id = :id")
+    suspend fun appearedBeforeTrack(type: String, before: String, id: Long): Int
+
+    @Query("SELECT COUNT(*) FROM snapshot_artists sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id WHERE s.type = :type AND s.date < :before AND sa.artist_id = :id")
+    suspend fun appearedBeforeArtist(type: String, before: String, id: Long): Int
+
+    @Query("SELECT COUNT(*) FROM snapshot_albums sa JOIN snapshots s ON s.snapshot_id = sa.snapshot_id WHERE s.type = :type AND s.date < :before AND sa.album_id = :id")
+    suspend fun appearedBeforeAlbum(type: String, before: String, id: Long): Int
 }

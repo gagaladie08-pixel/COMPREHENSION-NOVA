@@ -492,11 +492,13 @@ fun MedalBadge(level: com.novastats.app.domain.CertLevel?, multiplier: Int = 1, 
  * [artUrl] : pochette ou photo mise en avant ; null = simple dégradé du thème.
  */
 @Composable
-fun ScreenBackdrop(artUrl: String?, content: @Composable BoxScope.() -> Unit) {
+fun ScreenBackdrop(artUrl: String?, parallaxY: Float = 0f, content: @Composable BoxScope.() -> Unit) {
     val theme = Nova.theme
     Box(Modifier.fillMaxSize()) {
-        RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.98f, scrim = 0.76f)
-        RewindParticles(theme, Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize().graphicsLayer { translationY = parallaxY }) {
+            RewindBackdrop(artUrl, theme, Modifier.fillMaxSize(), artAlpha = 0.98f, scrim = 0.76f)
+            RewindParticles(theme, Modifier.fillMaxSize())
+        }
         content()
     }
 }

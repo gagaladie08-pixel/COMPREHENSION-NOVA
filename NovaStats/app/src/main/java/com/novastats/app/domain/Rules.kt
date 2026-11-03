@@ -14,18 +14,18 @@ enum class CertLevel(val emoji: String, val label: String, val dbName: String) {
     DIAMOND("💎", "Diamant", "DIAMOND")
 }
 
-/** Une certification = niveau + multiplicateur (le multiplicateur ne concerne que Diamant). */
+/** Une certification = niveau + multiplicateur (Platine jusqu'à 3x, puis Diamant à l'infini). */
 data class Certification(val level: CertLevel, val multiplier: Int = 1) : Comparable<Certification> {
     val rank: Int get() = level.ordinal * 1000 + multiplier
     override fun compareTo(other: Certification) = rank.compareTo(other.rank)
-    fun label(): String = if (level == CertLevel.DIAMOND && multiplier > 1) "${multiplier}x ${level.emoji} ${level.label}" else "${level.emoji} ${level.label}"
+    fun label(): String = if (multiplier > 1) "${multiplier}x ${level.emoji} ${level.label}" else "${level.emoji} ${level.label}"
 }
 
 object CertificationRules {
-    /** Seuils Chansons : Argent 25 / Or 50 / Platine 100 / Diamant 350 (+350 par multiplicateur) */
+    /** Seuils Chansons : Argent 25 / Or 50 / Platine 100 (2x à 200, 3x à 300) / Diamant 350 (+350 par multiplicateur) */
     val TRACK = Thresholds(silver = 25, gold = 50, platinum = 100, diamond = 350)
 
-    /** Seuils Albums : Argent 50 / Or 100 / Platine 200 / Diamant 700 (+700 par multiplicateur) */
+    /** Seuils Albums : Argent 50 / Or 100 / Platine 200 (2x à 400, 3x à 600) / Diamant 700 (+700 par multiplicateur) */
     val ALBUM = Thresholds(silver = 50, gold = 100, platinum = 200, diamond = 700)
 
     data class Thresholds(val silver: Int, val gold: Int, val platinum: Int, val diamond: Int) {
@@ -34,14 +34,14 @@ object CertificationRules {
         fun required(cert: Certification): Int = when (cert.level) {
             CertLevel.SILVER -> silver
             CertLevel.GOLD -> gold
-            CertLevel.PLATINUM -> platinum
+            CertLevel.PLATINUM -> platinum * cert.multiplier
             CertLevel.DIAMOND -> diamond * cert.multiplier
         }
 
         /** Certification actuelle pour un nombre d'écoutes, ou null si en dessous d'Argent. */
         fun current(playCount: Int): Certification? = when {
             playCount >= diamond -> Certification(CertLevel.DIAMOND, playCount / diamond)
-            playCount >= platinum -> Certification(CertLevel.PLATINUM)
+            playCount >= platinum -> Certification(CertLevel.PLATINUM, minOf(playCount / platinum, 3))
             playCount >= gold -> Certification(CertLevel.GOLD)
             playCount >= silver -> Certification(CertLevel.SILVER)
             else -> null
@@ -53,7 +53,7 @@ object CertificationRules {
             else -> when (c.level) {
                 CertLevel.SILVER -> Certification(CertLevel.GOLD)
                 CertLevel.GOLD -> Certification(CertLevel.PLATINUM)
-                CertLevel.PLATINUM -> Certification(CertLevel.DIAMOND)
+                CertLevel.PLATINUM -> if (c.multiplier < 3) Certification(CertLevel.PLATINUM, c.multiplier + 1) else Certification(CertLevel.DIAMOND)
                 CertLevel.DIAMOND -> Certification(CertLevel.DIAMOND, c.multiplier + 1)
             }
         }
@@ -65,7 +65,8 @@ object CertificationRules {
             val out = mutableListOf<Certification>()
             if (playCount >= silver) out += Certification(CertLevel.SILVER)
             if (playCount >= gold) out += Certification(CertLevel.GOLD)
-            if (playCount >= platinum) out += Certification(CertLevel.PLATINUM)
+            var mp = 1
+            while (mp <= 3 && playCount >= platinum * mp) { out += Certification(CertLevel.PLATINUM, mp); mp++ }
             var m = 1
             while (playCount >= diamond * m) { out += Certification(CertLevel.DIAMOND, m); m++ }
             return out
@@ -144,6 +145,92 @@ object PantheonRules {
     }
 }
 
+/** Voie réellement la plus rapide pour chaque étape du Panthéon — utilisée exclusivement par Fastest Panthéon. */
+enum class PantheonRoute(val dbName: String, val label: String) {
+    PLAYS("PLAYS", "Écoutes"),
+    CERTIFICATIONS("CERTIFICATIONS", "Certifications"),
+    BOTH("BOTH", "Écoutes + certifications"),
+    LEGACY_ESTIMATE("LEGACY_ESTIMATE", "Estimation historique");
+
+    companion object {
+        fun fromDb(value: String?): PantheonRoute = entries.firstOrNull { it.dbName == value } ?: LEGACY_ESTIMATE
+    }
+}
+
+/** Une certification historique attribuée à un artiste (titres crédités ou albums propriétaires). */
+data class PantheonCertificationEvent(
+    val entityType: String,
+    val entityId: Long,
+    val certification: Certification,
+    val reachedAt: Long
+)
+
+data class PantheonPathDate(val dateReached: Long, val route: PantheonRoute)
+
+/**
+ * Reconstitue la première date où le portefeuille de certifications a réellement débloqué chaque statut.
+ * Les événements au même instant sont appliqués ensemble : un lot importé ne crée pas de faux ordre interne.
+ */
+object PantheonProgression {
+    fun certificationDates(events: Iterable<PantheonCertificationEvent>): Map<PantheonStatus, Long> {
+        val ordered = events.asSequence()
+            .filter { it.entityType == "TRACK" || it.entityType == "ALBUM" }
+            .filter { it.reachedAt > 0L }
+            .sortedWith(compareBy<PantheonCertificationEvent> { it.reachedAt }
+                .thenBy { it.entityType }
+                .thenBy { it.entityId }
+                .thenBy { it.certification.rank })
+            .toList()
+        if (ordered.isEmpty()) return emptyMap()
+
+        val current = HashMap<Pair<String, Long>, Certification>()
+        val trackCounts = IntArray(CertLevel.entries.size)
+        val albumCounts = IntArray(CertLevel.entries.size)
+        val reached = LinkedHashMap<PantheonStatus, Long>()
+        var i = 0
+        while (i < ordered.size) {
+            val instant = ordered[i].reachedAt
+            while (i < ordered.size && ordered[i].reachedAt == instant) {
+                val event = ordered[i++]
+                val key = event.entityType to event.entityId
+                val previous = current[key]
+                if (previous == null || event.certification > previous) {
+                    val counts = if (event.entityType == "TRACK") trackCounts else albumCounts
+                    previous?.let { counts[it.level.ordinal]-- }
+                    current[key] = event.certification
+                    counts[event.certification.level.ordinal]++
+                }
+            }
+            val status = highestCertificationStatus(trackCounts, albumCounts) ?: continue
+            PantheonStatus.entries.take(status.ordinal + 1).forEach { reached.putIfAbsent(it, instant) }
+        }
+        return reached
+    }
+
+    /** Compare les dates d'obtention des deux voies; en cas d'égalité, les deux ont débloqué le statut ensemble. */
+    fun earliest(playsAt: Long?, certificationsAt: Long?): PantheonPathDate? = when {
+        playsAt == null && certificationsAt == null -> null
+        playsAt != null && certificationsAt != null && playsAt == certificationsAt -> PantheonPathDate(playsAt, PantheonRoute.BOTH)
+        certificationsAt == null || (playsAt != null && playsAt < certificationsAt) -> PantheonPathDate(playsAt!!, PantheonRoute.PLAYS)
+        else -> PantheonPathDate(certificationsAt!!, PantheonRoute.CERTIFICATIONS)
+    }
+
+    private fun highestCertificationStatus(tracks: IntArray, albums: IntArray): PantheonStatus? {
+        fun atLeast(counts: IntArray, level: CertLevel): Int =
+            (level.ordinal until counts.size).sumOf { counts[it] }
+        val legend = atLeast(tracks, CertLevel.DIAMOND) >= 5 && atLeast(albums, CertLevel.DIAMOND) >= 2
+        val mythique = legend && CertLevel.entries.all { tracks[it.ordinal] >= 2 && albums[it.ordinal] >= 2 }
+        return when {
+            mythique -> PantheonStatus.MYTHIQUE
+            legend -> PantheonStatus.LEGENDE
+            atLeast(tracks, CertLevel.PLATINUM) >= 5 && atLeast(albums, CertLevel.PLATINUM) >= 2 -> PantheonStatus.MEGASTAR
+            atLeast(tracks, CertLevel.GOLD) >= 5 && atLeast(albums, CertLevel.GOLD) >= 2 -> PantheonStatus.SUPERSTAR
+            atLeast(tracks, CertLevel.SILVER) >= 5 && atLeast(albums, CertLevel.SILVER) >= 2 -> PantheonStatus.STAR
+            else -> null
+        }
+    }
+}
+
 /* =========================== DÉTECTION — Normalisation =========================== */
 
 object TitleNormalizer {
@@ -156,6 +243,44 @@ object TitleNormalizer {
         "official video", "official audio", "official music video", "lyrics", "lyric video", "visualizer",
         "audio", "video", "mv", "m/v", "hd", "4k"
     )
+
+    /**
+     * 🧹 Suffixes d'interface des lecteurs collés au nom d'artiste (« Burna Boy • Recommandé Pour Vous »).
+     * Liste blanche : on ne coupe qu'après un « • » suivi d'un motif connu — jamais un vrai nom.
+     */
+    val UI_ARTIST_SUFFIXES = listOf(
+        "recommandé pour vous", "recommandes pour vous", "suggestions", "à suivre", "a suivre",
+        "vos titres les plus écoutés", "vos titres les plus ecoutes", "en vogue", "tendances",
+        "recommended for you", "mixed for you", "your top songs", "related artists"
+    )
+
+    /** Retire un suffixe d'interface du nom d'artiste (« Burna Boy • Recommandé Pour Vous » → « Burna Boy »). */
+    fun cleanArtistName(raw: String): String {
+        val name = raw.trim()
+        val idx = name.lastIndexOf('•')
+        if (idx <= 0) return name
+        val suffix = name.substring(idx + 1).trim().lowercase()
+        return if (UI_ARTIST_SUFFIXES.any { suffix == it || suffix.startsWith(it) }) name.substring(0, idx).trim().ifBlank { name } else name
+    }
+
+    private val episodeRegex = Regex("\\bs\\d{1,2}\\s?e\\d{1,2}\\b")
+    private val fileExtRegex = Regex("\\.(mp3|m4a|flac|ogg|webm|mkv)\\b")
+
+    /**
+     * 🗂️ Empreinte d'un nom de fichier/émission brut (vidéo Mnet, épisode S01 E01, .mp3…) — pas un vrai titre.
+     * Score conservateur : il faut au moins deux indices (ou un indice fort) pour envoyer en quarantaine.
+     */
+    fun isFileDump(title: String): Boolean {
+        val t = title.lowercase()
+        var score = 0
+        if ("♬" in title || "mnet" in t || episodeRegex.containsMatchIn(t)) score += 2
+        if (t.count { it == '_' } >= 2) score++
+        if ("@" in t) score++
+        if (fileExtRegex.containsMatchIn(t)) score += 2
+        if ("http" in t || "www." in t) score += 2
+        if ("회_" in title || "방송" in title) score++
+        return score >= 2
+    }
 
     /** Éditions d'album fusionnées avec l'album principal (Deluxe, Expanded, Japan/UK Edition, Platinum, International…). */
     val ALBUM_EDITION_KEYWORDS = listOf(
@@ -288,6 +413,33 @@ object TitleNormalizer {
         return NormalizedTitle(title = title.ifBlank { raw.trim() }, featuredArtists = featured.distinctBy { normalizeKey(it) }, isVersion = isVersion)
     }
 
+    /**
+     * 🧬 Titre nu d'une variante « méta » : « Song (From F1 The Movie) » / « Song (Taylor's Version) » /
+     * « Song (Album Version) » / « Song (Kiss Me) » → « Song ». Les parenthèses contenant « cover » ne sont
+     * jamais retirées (une cover est une œuvre à part). Les tags tronqués (parenthèse ouverte non fermée,
+     * « Song (Extended ») sont traités pareil si le début du groupe porte un mot de version ou feat/with.
+     * Retourne null si rien à retirer.
+     */
+    fun metaBareTitle(title: String): String? {
+        var stripped = false
+        val closed = bracketRegex.replace(title) { m ->
+            if (m.groupValues[1].lowercase().contains("cover")) m.value else { stripped = true; "" }
+        }
+        // 🩹 Tag tronqué : parenthèse ouverte jamais fermée (« Video Phone (Extended ») → traitée comme un
+        // groupe de version si elle commence par un mot de version (« extended », « remix »…) ou feat/with.
+        val open = closed.lastIndexOf('(')
+        val out = if (open >= 0 && ')' !in closed.substring(open)) {
+            val inner = closed.substring(open + 1).lowercase().trim()
+            val isFeat = inner.startsWith("feat") || inner.startsWith("ft ") || inner.startsWith("with ")
+            if (!inner.contains("cover") && (isFeat || VERSION_KEYWORDS.any { inner.contains(it) })) {
+                stripped = true
+                closed.substring(0, open)
+            } else closed
+        } else closed
+        val clean = spaceRegex.replace(out, " ").trim()
+        return if (stripped && clean.isNotBlank() && clean != title) clean else null
+    }
+
     /** Sépare "A, B & C feat. D" en liste d'artistes. */
     /** Compilations ("Various Artists", "NOW That's What I Call Music"…) : jamais de crédit album. */
     private val compilationRegex = Regex("""(?i)(now that'?s what i call|nrj music awards|nrj hits|hits? 20\d\d|top hits|compilation|\bvol(ume)?\.? \d+\b.*(hits|party|dance))""")
@@ -354,6 +506,8 @@ object TitleNormalizer {
             .map { it.trim().trim('(', ')', '[', ']') }
             .filter { it.isNotBlank() }
             .map { part -> Regex("\u0001(\\d+)\u0001").replace(part) { m -> tokens[m.groupValues[1].toInt()] }.trim() }
+            .filter { it.isNotBlank() }
+            .map { cleanArtistName(it) }
             .filter { it.isNotBlank() }
             .distinctBy { normalizeKey(it) }
     }

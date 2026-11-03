@@ -39,12 +39,23 @@ class SettingsRepository(private val context: Context) {
         val AUTO_BACKUP = booleanPreferencesKey("auto_backup")
         val LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
         val HAPTICS = booleanPreferencesKey("haptics")
+        val ONBOARDING_REDUCED_MOTION = booleanPreferencesKey("onboarding_reduced_motion")
+        val ONBOARDING_SOUNDS = booleanPreferencesKey("onboarding_sound_effects")
         val FONT_SCALE = intPreferencesKey("font_scale_pct")
         val DYNAMIC_ICON = booleanPreferencesKey("dynamic_icon")
         val COMPACT_ROWS = booleanPreferencesKey("compact_rows")
         val AWARDS_REVEALED = stringSetPreferencesKey("awards_revealed_years")
+        val STREAK_TIERS_ANNOUNCED = stringSetPreferencesKey("streak_tiers_announced")
+        val SIMULTANEOUS_ANNOUNCED = stringSetPreferencesKey("simultaneous_records_announced")
+        val SWEEP_ANNOUNCED = stringSetPreferencesKey("podium_sweep_announced")
+        val MULTI_CHART_ANNOUNCED = stringSetPreferencesKey("multi_chart_milestones_announced")
+        val MULTI_CHART_BOOTSTRAP_DATE = stringPreferencesKey("multi_chart_bootstrap_date")
         val AWARDS_UNLOCK_NOTIFIED = booleanPreferencesKey("awards_unlock_notified")
         val FIRST_SCROBBLE_NOTIFIED = booleanPreferencesKey("first_scrobble_notified")
+        val AGENT_SYNC = booleanPreferencesKey("agent_sync")
+        val AGENT_TOKEN = stringPreferencesKey("agent_token")
+        val AGENT_GIST_ID = stringPreferencesKey("agent_gist_id")
+        val AGENT_LAST_SYNC = longPreferencesKey("agent_last_sync")
     }
 
     /** Clés des notifications réelles de l'app (toutes actives par défaut, chacune désactivable séparément). */
@@ -105,6 +116,10 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.THRESHOLD] = sec }
     }
     suspend fun setWhitelist(apps: Set<String>) = context.dataStore.edit { it[Keys.WHITELIST] = apps }
+    suspend fun setWhitelistApp(packageName: String, allowed: Boolean) = context.dataStore.edit { prefs ->
+        val current = prefs[Keys.WHITELIST] ?: emptySet()
+        prefs[Keys.WHITELIST] = if (allowed) current + packageName else current - packageName
+    }
     suspend fun setBlacklistArtists(v: Set<String>) = context.dataStore.edit { it[Keys.BLACKLIST_ARTISTS] = v }
     suspend fun setBlacklistKeywords(v: Set<String>) = context.dataStore.edit { it[Keys.BLACKLIST_KEYWORDS] = v }
     suspend fun setFilterLongTracks(v: Boolean) = context.dataStore.edit { it[Keys.FILTER_LONG_TRACKS] = v }
@@ -118,6 +133,20 @@ class SettingsRepository(private val context: Context) {
     /** Années dont la cérémonie de révélation (cartes une par une) a déjà été jouée. */
     val awardsRevealedYears: Flow<Set<String>> = context.dataStore.data.map { it[Keys.AWARDS_REVEALED] ?: emptySet() }
     suspend fun markAwardsRevealed(year: Int) = context.dataStore.edit { it[Keys.AWARDS_REVEALED] = (it[Keys.AWARDS_REVEALED] ?: emptySet()) + year.toString() }
+    /** 🔥 Paliers de séries d'écoute déjà annoncés (clé « CAT:id:palier ») — chaque palier ne se célèbre qu'une fois. */
+    val streakTiersAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.STREAK_TIERS_ANNOUNCED] ?: emptySet() }
+    suspend fun markStreakTierAnnounced(key: String) = context.dataStore.edit { it[Keys.STREAK_TIERS_ANNOUNCED] = (it[Keys.STREAK_TIERS_ANNOUNCED] ?: emptySet()) + key }
+    /** 🎯 Records de simultanéité déjà annoncés (cérémonie « le chart est à moi ») — chaque #1 ne se célèbre qu'une fois. */
+    val simultaneousAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.SIMULTANEOUS_ANNOUNCED] ?: emptySet() }
+    suspend fun markSimultaneousAnnounced(keys: Set<String>) = context.dataStore.edit { it[Keys.SIMULTANEOUS_ANNOUNCED] = (it[Keys.SIMULTANEOUS_ANNOUNCED] ?: emptySet()) + keys }
+    /** 🧹 Records de balayage déjà annoncés (cérémonie « Balayage ! ») — chaque #1 ne se célèbre qu'une fois. */
+    val sweepAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.SWEEP_ANNOUNCED] ?: emptySet() }
+    suspend fun markSweepAnnounced(keys: Set<String>) = context.dataStore.edit { it[Keys.SWEEP_ANNOUNCED] = (it[Keys.SWEEP_ANNOUNCED] ?: emptySet()) + keys }
+    /** 🌐 Paliers Multi-Chart déjà célébrés — amorçage silencieux pour éviter les annonces rétroactives. */
+    val multiChartAnnounced: Flow<Set<String>> = context.dataStore.data.map { it[Keys.MULTI_CHART_ANNOUNCED] ?: emptySet() }
+    suspend fun markMultiChartAnnounced(keys: Set<String>) = context.dataStore.edit { it[Keys.MULTI_CHART_ANNOUNCED] = (it[Keys.MULTI_CHART_ANNOUNCED] ?: emptySet()) + keys }
+    val multiChartBootstrapDate: Flow<String?> = context.dataStore.data.map { it[Keys.MULTI_CHART_BOOTSTRAP_DATE] }
+    suspend fun setMultiChartBootstrapDate(iso: String) = context.dataStore.edit { it[Keys.MULTI_CHART_BOOTSTRAP_DATE] = iso }
     val awardsUnlockNotified: Flow<Boolean> = context.dataStore.data.map { it[Keys.AWARDS_UNLOCK_NOTIFIED] ?: false }
     suspend fun markAwardsUnlockNotified() = context.dataStore.edit { it[Keys.AWARDS_UNLOCK_NOTIFIED] = true }
 
@@ -167,12 +196,26 @@ class SettingsRepository(private val context: Context) {
     val autoBackup: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_BACKUP] ?: false }
     val lastBackupAt: Flow<Long?> = context.dataStore.data.map { it[Keys.LAST_BACKUP_AT] }
     val haptics: Flow<Boolean> = context.dataStore.data.map { it[Keys.HAPTICS] ?: true }
+    val onboardingReducedMotion: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_REDUCED_MOTION] ?: false }
+    val onboardingSoundEffects: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_SOUNDS] ?: true }
     /** 🔠 Taille du texte en % (80…140, pas de 10) — appliquée à toute l'app via LocalDensity.fontScale. */
     val fontScalePct: Flow<Int> = context.dataStore.data.map { it[Keys.FONT_SCALE] ?: 100 }
     suspend fun setFontScalePct(pct: Int) = context.dataStore.edit { it[Keys.FONT_SCALE] = pct.coerceIn(FONT_MIN, FONT_MAX) }
     suspend fun setAutoBackup(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_BACKUP] = v }
+
+    /* ---- 🤖 Synchro agent (temporaire — sera retirée) ---- */
+    val agentSync: Flow<Boolean> = context.dataStore.data.map { it[Keys.AGENT_SYNC] ?: false }
+    val agentToken: Flow<String?> = context.dataStore.data.map { it[Keys.AGENT_TOKEN] }
+    val agentGistId: Flow<String?> = context.dataStore.data.map { it[Keys.AGENT_GIST_ID] }
+    val agentLastSync: Flow<Long?> = context.dataStore.data.map { it[Keys.AGENT_LAST_SYNC] }
+    suspend fun setAgentSync(v: Boolean) = context.dataStore.edit { it[Keys.AGENT_SYNC] = v }
+    suspend fun setAgentToken(v: String) = context.dataStore.edit { it[Keys.AGENT_TOKEN] = v }
+    suspend fun setAgentGistId(v: String) = context.dataStore.edit { it[Keys.AGENT_GIST_ID] = v }
+    suspend fun setAgentLastSync(v: Long) = context.dataStore.edit { it[Keys.AGENT_LAST_SYNC] = v }
     suspend fun setLastBackupAt(v: Long) = context.dataStore.edit { it[Keys.LAST_BACKUP_AT] = v }
     suspend fun setHaptics(v: Boolean) = context.dataStore.edit { it[Keys.HAPTICS] = v }
+    suspend fun setOnboardingReducedMotion(v: Boolean) = context.dataStore.edit { it[Keys.ONBOARDING_REDUCED_MOTION] = v }
+    suspend fun setOnboardingSoundEffects(v: Boolean) = context.dataStore.edit { it[Keys.ONBOARDING_SOUNDS] = v }
     /** Icône du launcher qui suit le thème (bascule d'activity-alias, appliquée quand l'app passe en arrière-plan). */
     val dynamicIcon: Flow<Boolean> = context.dataStore.data.map { it[Keys.DYNAMIC_ICON] ?: true }
     suspend fun setDynamicIcon(v: Boolean) = context.dataStore.edit { it[Keys.DYNAMIC_ICON] = v }

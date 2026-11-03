@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.novastats.app.ui.navigation.BillboardFocus
 import com.novastats.app.domain.BillboardDates
 import com.novastats.app.domain.Chart
 import com.novastats.app.domain.Dates
@@ -82,6 +83,11 @@ import com.novastats.app.ui.theme.prideWash
 import com.novastats.app.ui.theme.NovaColors
 import java.time.Instant
 import androidx.compose.runtime.produceState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import java.time.ZoneOffset
 
@@ -89,7 +95,7 @@ private val Bronze = Color(0xFFCD7F32)
 
 /**
  * 🏆 Billboard — Nova Hot 100 · Nova Artist 50 · Nova 75 Albums.
- * Classements figés par période (snapshots), navigation dans l'historique, fiche détaillée par appui long.
+ * Classements figés par période (snapshots), navigation dans l'historique et fiche détaillée accessible au toucher.
  * Périodes + bandeau défilent avec la liste ; la rangée des charts reste collée en haut. Top 25 + « Voir plus » (+20).
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -98,10 +104,13 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     val theme = Nova.theme
     val state by vm.state.collectAsStateWithLifecycle()
     val history by vm.history.collectAsStateWithLifecycle()
+    val compare by vm.compare.collectAsStateWithLifecycle()
+    val focus by BillboardFocus.state.collectAsStateWithLifecycle()
+    var pendingFocus by remember { mutableStateOf<BillboardFocus.Focus?>(null) }
+    var highlightId by remember { mutableStateOf<Long?>(null) }
     var showPicker by remember { mutableStateOf(false) }
 
     var searching by remember { mutableStateOf(false) }
-    var yearEnd by remember { mutableStateOf(false) }
 
     val rows = state.filtered
     val limit = state.limit
@@ -109,20 +118,49 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
     // Lignes à afficher : uniquement le classement réel (plus de places vides « — »)
     val totalRows = rows.size
     // Top 25 → « Voir plus » (+20) ; remis à 25 à chaque changement de chart / période / date / recherche
-    var visible by remember(state.chart, state.period, state.anchor, state.query) { mutableIntStateOf(TOP_INITIAL) }
+    var visible by remember(state.chart, state.period, state.anchor, state.query, state.sortDuration) { mutableIntStateOf(TOP_INITIAL) }
     val shown = minOf(visible, totalRows)
     val listState = rememberLazyListState()
+    val screenScope = rememberCoroutineScope()
     LaunchedEffect(state.period, state.anchor) { listState.scrollToItem(0) }
+    // 🚪 Téléporteur Stats → Billboard : applique chart/période, attend les lignes, surligne la cible
+    LaunchedEffect(focus) {
+        val f = focus ?: return@LaunchedEffect
+        vm.search("")
+        state.movementFilter?.let { vm.toggleMovementFilter(it) }
+        vm.selectChart(f.chart)
+        vm.selectPeriod(f.period)
+        f.anchor?.let(vm::goToDate)
+        pendingFocus = f
+        BillboardFocus.consume()
+    }
+    LaunchedEffect(pendingFocus, state.items, state.anchor, state.chart, state.period, state.query, state.movementFilter, state.sortDuration) {
+        val f = pendingFocus ?: return@LaunchedEffect
+        if (state.chart != f.chart || state.period != f.period) return@LaunchedEffect
+        if (f.anchor != null && state.anchor != BillboardDates.anchor(f.period, f.anchor)) return@LaunchedEffect
+        if (state.query.isNotBlank() || state.movementFilter != null) return@LaunchedEffect
+        if (state.items.isEmpty()) return@LaunchedEffect
+        val snapshotItem = state.items.firstOrNull { it.entityId == f.entityId }
+        if (f.expectedPosition != null && snapshotItem?.position != f.expectedPosition) return@LaunchedEffect
+        if (f.expectedPlays != null && snapshotItem?.plays != f.expectedPlays) return@LaunchedEffect
+        val idx = state.filtered.indexOfFirst { it.entityId == f.entityId }
+        if (idx < 0) {
+            if (f.expectedPosition == null) pendingFocus = null
+            return@LaunchedEffect
+        }
+        if (visible < idx + 1) visible = idx + 1
+        highlightId = f.entityId
+        kotlinx.coroutines.delay(80)
+        val dividersBefore = if (state.query.isBlank()) state.filtered.take(idx).count { it.position == 10 } else 0
+        listState.scrollToItem(2 + idx + dividersBefore)
+        pendingFocus = null
+    }
+    LaunchedEffect(highlightId) {
+        if (highlightId != null) { kotlinx.coroutines.delay(2600); highlightId = null }
+    }
 
     // 🎨 Pochette du n°1 du chart affiché, en fond d'écran
     val artUrl = state.items.firstOrNull()?.coverUrl
-
-    // 🏆 Year-End Charts (écran plein, retour = Billboard)
-    if (yearEnd) {
-        BackHandler { yearEnd = false }
-        YearEndScreen { yearEnd = false }
-        return
-    }
 
     ScreenBackdrop(artUrl) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
@@ -132,40 +170,32 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 // 1. Périodes
                 PeriodSegment(state.period) { vm.selectPeriod(it) }
 
-                // 🏆 Bilan de l'année civile
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
-                        .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.30f), theme.secondary.copy(alpha = 0.22f), Color.Transparent)))
-                        .clickable { yearEnd = true }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🏆", fontSize = 20.sp)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Year-End Charts", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text("Le bilan complet de chaque année civile", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text("›", color = theme.primary, fontSize = 22.sp)
-                }
-
-                // 2. Navigation dans l'historique (appui long sur la date → calendrier)
+                // 2. Navigation dans l'historique : la date et le calendrier sont directement découvrables.
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = vm::previousPeriod) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Période précédente", tint = theme.text) }
-                    Row(
+                    Column(
                         Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
-                            .combinedClickable(onClick = {}, onLongClick = { showPicker = true })
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+                            .combinedClickable(onClick = { showPicker = true }, onLongClick = { showPicker = true })
+                            .padding(horizontal = 4.dp, vertical = 3.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            BillboardDates.label(state.period, state.anchor), color = theme.text, fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis
-                        )
-                        if (state.isCurrent) {
-                            Spacer(Modifier.width(8.dp))
-                            Badge("LIVE", NovaColors.Down)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                BillboardDates.label(state.period, state.anchor), color = theme.text, fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                            )
+                            Icon(Icons.Filled.DateRange, "Ouvrir le calendrier", tint = theme.primary, modifier = Modifier.size(18.dp))
+                            if (state.isCurrent) {
+                                Spacer(Modifier.width(6.dp))
+                                Badge("LIVE", NovaColors.Down)
+                            }
                         }
+                        Text(
+                            if (state.isCurrent) "Dernière période publiée" else "Période archivée · toucher pour choisir une date",
+                            color = if (state.isCurrent) NovaColors.Down else theme.textSecondary,
+                            style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
                     }
                     IconButton(onClick = vm::nextPeriod, enabled = !state.isCurrent) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Période suivante", tint = if (state.isCurrent) theme.textSecondary.copy(alpha = 0.3f) else theme.text)
@@ -178,6 +208,15 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                 if (state.hasAnyData) SummaryBanner(state)
                 // 4. Carte « #1 de la période » : la pochette du #1 en fond, titre, artiste, écoutes, règne
                 state.summary.numberOne?.let { one -> if (state.items.isNotEmpty()) NumberOneCard(one, state) { vm.openHistory(one) } }
+                // 5. Histoires hebdo, mensuelles et bilan des changements du Global cumulatif.
+                if (state.period == Period.WEEKLY || state.period == Period.MONTHLY || state.period == Period.GLOBAL) {
+                    val stories = remember(state.items, state.summary, state.chart, state.period) { buildStories(state) }
+                    if (stories.isNotEmpty()) StoriesCarousel(stories, state.period)
+                }
+                TextButton(
+                    onClick = { screenScope.launch { listState.animateScrollToItem(1) } },
+                    modifier = Modifier.align(Alignment.End).padding(horizontal = 12.dp)
+                ) { Text("↓ Voir le classement", color = theme.primary, fontWeight = FontWeight.Bold) }
             }
         }
 
@@ -222,6 +261,21 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
                         shape = RoundedCornerShape(12.dp)
                     )
                 }
+                SortToggle(state.sortDuration) { vm.toggleSort() }
+                if (state.period == Period.GLOBAL) {
+                    Text(
+                        if (state.sortDuration) "Global : écoutes, durée et rang cumulés · tri par durée · delta et mouvements vs semaine précédente"
+                        else "Global : écoutes, durée et rang cumulés · delta d'écoutes et mouvements vs semaine précédente",
+                        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp), maxLines = 2, overflow = TextOverflow.Ellipsis
+                    )
+                } else if (state.sortDuration) {
+                    Text(
+                        "Rang affiché = durée d'écoute · mouvements et records = classement officiel",
+                        color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -255,7 +309,10 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 
             val realShown = minOf(shown, rows.size)
             items(rows.take(realShown), key = { it.entityId }) { item ->
-                ChartRow(item, state.period, onLongPress = { vm.openHistory(item) })
+                ChartRow(
+                    item, state.period, showDuration = state.sortDuration, highlighted = item.entityId == highlightId,
+                    onOpenHistory = { vm.openHistory(if (state.sortDuration) item.copy(position = item.officialPosition) else item) }
+                )
                 if (item.position == 10 && state.query.isBlank()) Top10Divider()
             }
 
@@ -295,7 +352,29 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
         ) { DatePicker(state = pickerState, showModeToggle = false) }
     }
 
-    history?.let { ChartHistoryDialog(it, onDismiss = vm::closeHistory) }
+    history?.let { h ->
+        ChartHistoryDialog(
+            h, onDismiss = { vm.clearCompare(); vm.closeHistory() },
+            compare = compare, candidates = state.items, navigationCandidates = rows.take(shown),
+            onCompare = vm::compareWith, onClearCompare = vm::clearCompare, onShare = { vm.shareHistory(theme) },
+            onNavigate = { item ->
+                vm.clearCompare()
+                vm.openHistory(if (state.sortDuration) item.copy(position = item.officialPosition) else item)
+            },
+            onViewPeriod = { date ->
+                h.appearances.firstOrNull { it.date == date }?.let { appearance ->
+                    vm.clearCompare()
+                    vm.closeHistory()
+                    BillboardFocus.request(
+                        BillboardFocus.Focus(
+                            chart = h.chart, period = h.period, entityId = h.item.entityId,
+                            anchor = date, expectedPosition = appearance.position, expectedPlays = appearance.playCount
+                        )
+                    )
+                }
+            }
+        )
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -304,39 +383,65 @@ fun BillboardScreen(vm: BillboardViewModel = viewModel()) {
 private fun SummaryBanner(state: BillboardUiState) {
     val theme = Nova.theme
     val s = state.summary
+    var detailsExpanded by remember(state.chart, state.period, state.anchor) { mutableStateOf(false) }
     val cells = listOf(
         StripCell("${state.items.size}", "Classés"),
         StripCell("${s.newEntries}", "Nouveautés", NovaColors.DirectDebut),
         StripCell("${s.exits}", "Sorties", NovaColors.Down),
         StripCell("${s.reentries}", "Retours", theme.secondary)
     )
-    val hasDetails = state.items.isNotEmpty() && (s.numberOne != null || s.biggestClimber != null || s.totalPlays > 0)
+    val hasDetails = state.items.isNotEmpty() && (s.numberOne != null || s.biggestClimber != null || s.totalPlays > 0 || s.totalDurationMs > 0)
     val details: (@Composable () -> Unit)? = if (!hasDetails) null else {
         {
-            // ⏱️ Temps d'écoute et ▶ écoutes de la période, variation vs période précédente (maquette utilisateur)
-            if (s.totalPlays > 0 || s.prevPlays > 0) {
-                TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
-                TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
-                Spacer(Modifier.height(4.dp))
-            }
-            s.numberOne?.let { one ->
-                val since = if (s.numberOneRun > 1) " · depuis ${s.numberOneRun} ${BillboardDates.unitLabel(state.period, s.numberOneRun)}" else " · nouveau #1"
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { detailsExpanded = !detailsExpanded }
+                    .padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    buildString { append("👑 #1 : "); append(one.name); one.secondary?.let { if (state.chart == Chart.HOT_100 || state.chart == Chart.ALBUMS_75) append(" — $it") }; append(since) },
-                    color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis
+                    if (detailsExpanded) "Masquer les détails" else "Voir le détail de la période",
+                    color = theme.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium
                 )
+                Spacer(Modifier.weight(1f))
+                Text(if (detailsExpanded) "−" else "+", color = theme.primary, fontWeight = FontWeight.Bold)
             }
-            s.biggestClimber?.let { c ->
-                Text(
-                    "🚀 Plus forte montée : ${c.name} (${c.movement.label()} → #${c.position})",
-                    color = NovaColors.Up, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-            }
-            s.biggestFaller?.let { c ->
-                Text(
-                    "📉 Plus forte régression : ${c.name} (${c.movement.label()} → #${c.position})",
-                    color = NovaColors.Down, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
+            if (detailsExpanded) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // ⏱️ Temps d'écoute et ▶ écoutes de la période, variation vs période précédente.
+                    if (s.totalPlays > 0 || s.prevPlays > 0) {
+                        if (state.period == Period.GLOBAL) {
+                            // Le cumul all-time se lit en delta absolu, pas en pourcentage.
+                            val dDur = s.totalDurationMs - s.prevDurationMs
+                            val dPlays = s.totalPlays - s.prevPlays
+                            TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs),
+                                deltaText = "${if (dDur >= 0) "+" else "-"}${formatDuration(kotlin.math.abs(dDur))} cette semaine", prevPrefix = "cumul à la semaine précédente")
+                            TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes",
+                                deltaText = "${if (dPlays >= 0) "+" else "-"}${formatCount(kotlin.math.abs(dPlays))} écoutes cette semaine", prevPrefix = "cumul à la semaine précédente")
+                        } else {
+                            TrendLine("⏱️", formatDuration(s.totalDurationMs), s.totalDurationMs.toDouble(), s.prevDurationMs.toDouble(), formatDuration(s.prevDurationMs))
+                            TrendLine("▶", "${formatCount(s.totalPlays)} écoutes", s.totalPlays.toDouble(), s.prevPlays.toDouble(), "${formatCount(s.prevPlays)} écoutes")
+                        }
+                    }
+                    s.numberOne?.let { one ->
+                        val since = if (s.numberOneRun > 1) " · depuis ${s.numberOneRun} ${BillboardDates.unitLabel(state.period, s.numberOneRun)}" else " · nouveau #1"
+                        Text(
+                            buildString { append("👑 #1 : "); append(one.name); one.secondary?.let { if (state.chart == Chart.HOT_100 || state.chart == Chart.ALBUMS_75) append(" — $it") }; append(since) },
+                            color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    s.biggestClimber?.let { c ->
+                        Text(
+                            "🚀 Plus forte montée : ${c.name} (${c.movement.label()} → #${c.position})",
+                            color = NovaColors.Up, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    s.biggestFaller?.let { c ->
+                        Text(
+                            "📉 Plus forte régression : ${c.name} (${c.movement.label()} → #${c.position})",
+                            color = NovaColors.Down, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }
@@ -352,7 +457,7 @@ private fun SummaryBanner(state: BillboardUiState) {
 private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -> Unit) {
     val theme = Nova.theme
     val kind = when (state.chart) { Chart.HOT_100 -> "🎵 #1 SONG"; Chart.ARTIST_50 -> "🎤 #1 ARTIST"; Chart.ALBUMS_75 -> "💿 #1 ALBUM" }
-    val runWord = when (state.period) { Period.DAILY -> "Day"; Period.WEEKLY -> "Week"; Period.MONTHLY -> "Month"; Period.YEARLY -> "Year"; Period.GLOBAL -> "Period" }
+    val runWord = when (state.period) { Period.DAILY -> "Day"; Period.WEEKLY -> "Week"; Period.MONTHLY -> "Month"; Period.YEARLY -> "Year"; Period.GLOBAL -> "Semaine" }
     val run = state.summary.numberOneRun.coerceAtLeast(1)
     val shape = RoundedCornerShape(18.dp)
     Box(
@@ -378,7 +483,10 @@ private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -
                 Text(one.secondary, color = Color.White, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 90.dp))
             }
             Spacer(Modifier.height(10.dp))
-            Text("${one.plays}× écoutes", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (state.period == Period.GLOBAL) "${formatCount(one.plays)} écoutes cumulées" else "${one.plays}× écoutes",
+                color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium
+            )
             Spacer(Modifier.height(6.dp))
             Text("👑 $runWord $run", color = theme.accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
         }
@@ -387,20 +495,27 @@ private fun NumberOneCard(one: ChartItem, state: BillboardUiState, onClick: () -
 
 /** « ⏱️ 17h 38min ↑ +13 % » + « vs période précédente : 15h 29min ». */
 @Composable
-private fun TrendLine(emoji: String, value: String, cur: Double, prev: Double, prevLabel: String) {
+private fun TrendLine(
+    emoji: String, value: String, cur: Double, prev: Double, prevLabel: String,
+    /** Global : au lieu du % (croissance du cumul), on affiche le delta absolu de la semaine (« +87 écoutes cette semaine »). */
+    deltaText: String? = null, prevPrefix: String = "vs période précédente"
+) {
     val theme = Nova.theme
     val pct = if (prev <= 0.0) null else ((cur - prev) / prev * 100).toInt()
-    val up = pct == null || pct >= 0
+    val up = cur >= prev
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("$emoji ", style = MaterialTheme.typography.titleMedium)
         Text(value, color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.width(8.dp))
         Text(
-            when { pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %" },
+            when {
+                deltaText != null -> deltaText
+                pct == null -> if (cur > 0) "nouveau" else ""; pct >= 0 -> "↑ +$pct %"; else -> "↓ $pct %"
+            },
             color = if (up) NovaColors.Up else NovaColors.Down, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium
         )
     }
-    Text("vs période précédente : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+    Text("$prevPrefix : $prevLabel", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -459,7 +574,7 @@ fun movementColor(m: Movement): Color = when (m) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
+private fun ChartRow(item: ChartItem, period: Period, showDuration: Boolean = false, highlighted: Boolean = false, onOpenHistory: () -> Unit) {
     val theme = Nova.theme
     val isOne = item.position == 1
     val bg = when (item.position) {
@@ -485,7 +600,8 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
                 }
             )
             .then(if (pride) Modifier.prideWash(flag, alpha = if (item.position <= 3) 0.14f else 0.07f).prideStripe(flag) else Modifier.background(bg))
-            .combinedClickable(onClick = {}, onLongClick = onLongPress)
+            .then(if (highlighted) Modifier.border(2.dp, NovaColors.Gold, RoundedCornerShape(14.dp)) else Modifier)
+            .combinedClickable(onClick = onOpenHistory, onLongClick = onOpenHistory)
             .padding(horizontal = 12.dp, vertical = if (isOne) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -498,6 +614,7 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
                 Movement.Reentry -> Badge("↩ RE", theme.secondary)
                 else -> Text(m.label(), color = mColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
+            if (showDuration) Text("off. #${item.officialPosition}", color = theme.textSecondary, fontSize = 9.sp, maxLines = 1)
         }
         CoverArt(item.coverUrl, item.name, size = coverSize, circle = item.circle)
         Spacer(Modifier.width(12.dp))
@@ -514,23 +631,251 @@ private fun ChartRow(item: ChartItem, period: Period, onLongPress: () -> Unit) {
         }
         Column(horizontalAlignment = Alignment.End) {
             val m = item.movement
-            // PEAK = nouveau record de POSITION (meilleure place jamais atteinte, pour la 1re fois) ; NP = nouveau record d'ÉCOUTES
-            val positionPeak = m !is Movement.New && item.position == item.peakPosition && item.timesAtPeak <= 1
+            // PEAK = première atteinte du meilleur rang ; REPEAK = retour à ce rang après l'avoir quitté.
+            val positionPeak = m !is Movement.New && item.officialPosition == item.peakPosition && item.timesAtPeak == 1
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (positionPeak) { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
-                Text("${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
+                when {
+                    item.isRepeak -> { Badge("REPEAK", NovaColors.Gold); Spacer(Modifier.width(4.dp)) }
+                    positionPeak -> { Badge("PEAK", NovaColors.Up); Spacer(Modifier.width(4.dp)) }
+                }
+                Text(if (showDuration) formatDuration(item.durationMs) else "${formatCount(item.plays)} ▶", color = if (isOne) NovaColors.Gold else theme.primary, fontWeight = FontWeight.Bold, fontSize = if (isOne) 17.sp else 15.sp)
             }
-            if (item.isPlaysPeak) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-            if (m !is Movement.New && m !is Movement.Reentry) {
+            // En Global, les totaux cumulés montent mécaniquement; le delta hebdomadaire est plus informatif que NP.
+            if (item.isPlaysPeak && period != Period.GLOBAL) Text("NP", color = NovaColors.Up, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            if (period == Period.GLOBAL || (m !is Movement.New && m !is Movement.Reentry)) {
                 val v = item.variationPlays
                 val (txt, col) = when {
                     v > 0 -> "+$v" to NovaColors.Up
                     v < 0 -> "$v" to NovaColors.Down
-                    else -> "=" to NovaColors.Neutral
+                    else -> (if (period == Period.GLOBAL) "0" else "=") to NovaColors.Neutral
                 }
                 Text(txt, color = col, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Ouvrir la fiche historique de ${item.name}", tint = theme.textSecondary, modifier = Modifier.size(18.dp))
     }
 }
 
+
+/** Carte du carrousel « histoires » — un fait, une pochette. */
+private data class Story(val coverUrl: String?, val circle: Boolean, val text: String)
+
+/** Dix faits possibles calculés sur le snapshot affiché ; chaque carte absente = fait manquant. */
+private fun buildStories(st: BillboardUiState): List<Story> {
+    val items = st.items
+    if (items.isEmpty()) return emptyList()
+    if (st.period == Period.GLOBAL) return buildGlobalStories(st)
+    val chartName = st.chart.label.removePrefix("Nova ")
+    val de: (ChartItem) -> String = { it.secondary?.let { a -> " de $a" } ?: "" }
+    val out = mutableListOf<Story>()
+    // 1. Entrée directe (New n°1) sinon meilleure nouvelle entrée
+    val newBest = items.filter { it.movement is Movement.New }.minByOrNull { it.position }
+    if (newBest != null && newBest.position == 1) {
+        out += Story(newBest.coverUrl, newBest.circle, "« ${newBest.name} »" + de(newBest) + " est entré directement n°1 du classement $chartName. Une entrée directe.")
+    } else if (newBest != null) {
+        out += Story(newBest.coverUrl, newBest.circle, "« ${newBest.name} »" + de(newBest) + " est la meilleure nouvelle entrée du classement $chartName, directement à la ${newBest.position}ᵉ place.")
+    }
+    // 2. Dominance : l'artiste qui occupe le plus de places
+    if (st.chart != Chart.ARTIST_50) {
+        items.groupBy { it.secondary.orEmpty() }.filter { it.key.isNotBlank() && it.value.size >= 2 }
+            .maxByOrNull { it.value.size }?.let { (artist, rows) ->
+                val one = items.first()
+                out += if (one.secondary == artist)
+                    Story(one.coverUrl, one.circle, "$artist occupe le plus grand nombre de places dans le classement $chartName (${rows.size}). Son titre « ${one.name} » est numéro 1.")
+                else {
+                    val best = rows.minByOrNull { it.position }!!
+                    Story(best.coverUrl, best.circle, "$artist occupe le plus grand nombre de places dans le classement $chartName (${rows.size}), avec « ${best.name} » en meilleure position (#${best.position}).")
+                }
+            }
+    }
+    // 3. Duel au sommet : l'écart #1 / #2
+    val one = items.first()
+    val two = items.getOrNull(1)
+    if (two != null) {
+        val gap = one.plays - two.plays
+        out += if (gap <= 10)
+            Story(one.coverUrl, one.circle, "« ${one.name} » et « ${two.name} » ne sont séparés que de $gap écoute${if (gap > 1) "s" else ""} en tête du classement $chartName.")
+        else Story(one.coverUrl, one.circle, "« ${one.name} » mène le classement $chartName avec $gap écoutes d'avance sur « ${two.name} ».")
+    }
+    // 4. Longévité : le plus grand nombre de périodes consécutives dans le chart
+    items.maxByOrNull { it.periodsInChart }?.takeIf { it.periodsInChart > 1 }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " détient le record de longévité du classement $chartName, avec ${r.periodsInChart} ${BillboardDates.unitLabel(st.period, r.periodsInChart)} d'affilée.")
+    }
+    // 5. Plus forte progression de la période
+    st.summary.biggestClimber?.let { c ->
+        val up = c.movement as? Movement.Up ?: return@let
+        out += Story(c.coverUrl, c.circle, "« ${c.name} »" + de(c) + " signe la plus forte progression du classement $chartName, gagnant ${up.places} place${if (up.places > 1) "s" else ""} pour atteindre la ${c.position}ᵉ position.")
+    }
+    // 6. Plus forte chute de la période
+    st.summary.biggestFaller?.let { f ->
+        val down = f.movement as? Movement.Down ?: return@let
+        out += Story(f.coverUrl, f.circle, "« ${f.name} »" + de(f) + " signe la plus forte chute de la période, perdant ${down.places} place${if (down.places > 1) "s" else ""} — maintenant #${f.position}.")
+    }
+    // 7. Le retour : meilleure réentrée
+    items.filter { it.movement is Movement.Reentry }.minByOrNull { it.position }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " fait son retour dans le classement $chartName, directement à la ${r.position}ᵉ place.")
+    }
+    // 8. Dynastie : le n°1 actuel déjà couronné plusieurs fois
+    st.summary.numberOne?.takeIf { it.timesAtPeak > 1 }?.let { n ->
+        out += Story(n.coverUrl, n.circle, "« ${n.name} »" + de(n) + " a maintenant été n°1 à ${n.timesAtPeak} reprises dans ce classement.")
+    }
+    // 9. Record personnel : meilleure période historique d'une ligne du chart
+    items.filter { it.isPlaysPeak }.minByOrNull { it.position }?.let { r ->
+        out += Story(r.coverUrl, r.circle, "« ${r.name} »" + de(r) + " vient de vivre sa meilleure période historique : ${r.plays} écoutes, un record personnel.")
+    }
+    return out
+}
+
+/** Histoires du Global : le rang et le total sont all-time, les mouvements et ajouts d'écoutes sont hebdomadaires. */
+private fun buildGlobalStories(st: BillboardUiState): List<Story> {
+    val items = st.items
+    if (items.isEmpty()) return emptyList()
+    val chartName = st.chart.label.removePrefix("Nova ")
+    val de: (ChartItem) -> String = {
+        if (st.chart == Chart.ARTIST_50) "" else it.secondary?.let { artist -> " de $artist" } ?: ""
+    }
+    val stories = mutableListOf<Story>()
+    val leader = items.first()
+    stories += Story(
+        leader.coverUrl, leader.circle,
+        "« ${leader.name} »" + de(leader) + " mène le Global $chartName avec ${formatCount(leader.plays)} écoutes cumulées."
+    )
+
+    items.getOrNull(1)?.let { runnerUp ->
+        val gap = (leader.plays - runnerUp.plays).coerceAtLeast(0)
+        stories += Story(
+            leader.coverUrl, leader.circle,
+            "Au cumul all-time, « ${leader.name} » garde ${formatCount(gap)} écoutes d'avance sur « ${runnerUp.name} »."
+        )
+    }
+
+    items.maxByOrNull { it.variationPlays }?.takeIf { it.variationPlays > 0 }?.let { weeklyLeader ->
+        stories += Story(
+            weeklyLeader.coverUrl, weeklyLeader.circle,
+            "Cette semaine, « ${weeklyLeader.name} »" + de(weeklyLeader) + " ajoute ${formatCount(weeklyLeader.variationPlays)} écoutes; son cumul atteint ${formatCount(weeklyLeader.plays)}."
+        )
+    }
+
+    st.summary.biggestClimber?.let { climber ->
+        val up = climber.movement as? Movement.Up ?: return@let
+        stories += Story(
+            climber.coverUrl, climber.circle,
+            "« ${climber.name} »" + de(climber) + " réalise la plus forte progression hebdomadaire, gagnant ${up.places} place${if (up.places > 1) "s" else ""} jusqu'au #${climber.position}."
+        )
+    }
+
+    val debutOrReturn = items.filter { it.movement is Movement.New || it.movement is Movement.Reentry }
+        .minByOrNull { it.position }
+    debutOrReturn?.let { entrant ->
+        val isReturn = entrant.movement is Movement.Reentry
+        stories += Story(
+            entrant.coverUrl, entrant.circle,
+            "« ${entrant.name} »" + de(entrant) + if (isReturn) " fait son retour dans le Top Global, à la ${entrant.position}ᵉ place."
+            else " fait sa première entrée dans le Top Global, à la ${entrant.position}ᵉ place."
+        )
+    }
+
+    st.summary.biggestFaller?.let { faller ->
+        val down = faller.movement as? Movement.Down ?: return@let
+        stories += Story(
+            faller.coverUrl, faller.circle,
+            "« ${faller.name} »" + de(faller) + " recule le plus cette semaine : ${down.places} place${if (down.places > 1) "s" else ""}, jusqu'au #${faller.position}."
+        )
+    }
+
+    st.summary.numberOneRun.takeIf { it > 1 }?.let { run ->
+        stories += Story(
+            leader.coverUrl, leader.circle,
+            "« ${leader.name} »" + de(leader) + " conserve la première place du Global depuis ${run} semaines consécutives."
+        )
+    }
+    return stories.take(6)
+}
+
+/** Carrousel compact des histoires : swipe, commandes visibles et défilement auto contrôlable. */
+@Composable
+private fun StoriesCarousel(stories: List<Story>, period: Period) {
+    val theme = Nova.theme
+    val pagerState = rememberPagerState(pageCount = { stories.size })
+    val scope = rememberCoroutineScope()
+    var autoAdvancePaused by remember(stories.size) { mutableStateOf(false) }
+    var autoAdvanceTarget by remember(pagerState) { mutableIntStateOf(-1) }
+    var lastObservedPage by remember(pagerState) { mutableIntStateOf(pagerState.currentPage) }
+
+    // Un geste manuel met en pause le défilement ; le bouton « Auto » permet de le reprendre.
+    LaunchedEffect(pagerState.currentPage) {
+        val page = pagerState.currentPage
+        if (page != lastObservedPage) {
+            if (page != autoAdvanceTarget) autoAdvancePaused = true
+            autoAdvanceTarget = -1
+            lastObservedPage = page
+        }
+    }
+    LaunchedEffect(pagerState.currentPage, stories.size, autoAdvancePaused) {
+        if (stories.size > 1 && !autoAdvancePaused) {
+            delay(45_000)
+            val nextPage = (pagerState.currentPage + 1) % stories.size
+            autoAdvanceTarget = nextPage
+            scope.launch { pagerState.animateScrollToPage(nextPage) }
+        }
+    }
+    fun navigateTo(page: Int) {
+        autoAdvancePaused = true
+        autoAdvanceTarget = -1
+        scope.launch { pagerState.animateScrollToPage(page.coerceIn(0, stories.lastIndex)) }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(if (period == Period.GLOBAL) "Les coulisses du Global" else "Les coulisses du chart", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    when (period) {
+                        Period.MONTHLY -> "Un fait marquant de ce mois-ci"
+                        Period.GLOBAL -> "Cumul all-time · changements de la semaine"
+                        else -> "Un fait marquant de cette semaine"
+                    },
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
+            }
+            TextButton(onClick = { autoAdvancePaused = !autoAdvancePaused }, enabled = stories.size > 1) {
+                Text(if (autoAdvancePaused) "▶ Auto" else "⏸ Auto", color = theme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+        }
+        HorizontalPager(state = pagerState, pageSpacing = 8.dp) { page ->
+            val story = stories[page]
+            Row(
+                Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(16.dp))
+                    .background(Brush.horizontalGradient(listOf(theme.primary.copy(alpha = 0.18f), NovaColors.Gold.copy(alpha = 0.10f), theme.surface.copy(alpha = 0.9f))))
+                    .border(1.dp, NovaColors.Gold.copy(alpha = 0.28f), RoundedCornerShape(16.dp)).padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CoverArt(story.coverUrl, story.text, circle = story.circle, size = 84)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("FAIT MARQUANT · ${page + 1}/${stories.size}", color = NovaColors.Gold, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(3.dp))
+                    Text(story.text, color = theme.text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val cur = pagerState.currentPage
+            stories.forEachIndexed { index, _ ->
+                Box(Modifier.size(22.dp).clickable { navigateTo(index) }, contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(if (index == cur) 9.dp else 7.dp).clip(RoundedCornerShape(50))
+                            .background(if (index == cur) theme.primary else theme.textSecondary.copy(alpha = 0.5f))
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { navigateTo((cur - 1 + stories.size) % stories.size) }, enabled = stories.size > 1) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Histoire précédente", tint = theme.text)
+            }
+            IconButton(onClick = { navigateTo((cur + 1) % stories.size) }, enabled = stories.size > 1) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Histoire suivante", tint = theme.text)
+            }
+        }
+    }
+}

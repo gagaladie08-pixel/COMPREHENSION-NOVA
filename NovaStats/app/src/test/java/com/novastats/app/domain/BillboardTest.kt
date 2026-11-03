@@ -33,6 +33,15 @@ class BillboardTest {
     }
 
     @Test
+    fun `Global reste un cumul all-time publié à la semaine`() {
+        assertEquals("semaine", BillboardDates.unitLabel(Period.GLOBAL, 1))
+        assertEquals("semaines", BillboardDates.unitLabel(Period.GLOBAL, 4))
+        val globalLabel = BillboardDates.label(Period.GLOBAL, d("2026-09-21"))
+        assertTrue(globalLabel.contains("arrêté au 27"))
+        assertTrue(globalLabel.endsWith("2026"))
+    }
+
+    @Test
     fun `dernière période publiée et close`() {
         val today = d("2026-09-30")
         // La période en cours n'est jamais publiée : la dernière est la semaine / le jour / le mois précédent
@@ -89,6 +98,34 @@ class BillboardTest {
 
         val onlyOnes = ChartHistory.stats(app.take(3), anchors)
         assertEquals(2, onlyOnes.currentRunAt1)
+    }
+
+    @Test
+    fun `streak au chart compte les periodes consecutives tous rangs confondus`() {
+        val anchors = BillboardDates.allAnchors(Period.WEEKLY, d("2026-08-03"), d("2026-09-30"))
+        val last = anchors.lastIndex
+        val uninterrupted = (last - 3..last).mapIndexed { index, anchorIndex ->
+            ChartAppearance(anchors[anchorIndex], position = 20 - index * 4, playCount = 10 + index)
+        }
+        val fullRun = ChartHistory.stats(uninterrupted, anchors)
+        assertEquals(4, fullRun.periodsInChart)
+        assertEquals(4, fullRun.currentRunInChart)
+
+        val withAReentry = listOf(last - 3, last - 1, last).mapIndexed { index, anchorIndex ->
+            ChartAppearance(anchors[anchorIndex], position = 35 - index * 7, playCount = 20 + index)
+        }
+        val resumed = ChartHistory.stats(withAReentry, anchors)
+        assertEquals(3, resumed.periodsInChart) // le total inclut les apparitions séparées par une absence
+        assertEquals(2, resumed.currentRunInChart)
+        assertEquals(0, ChartHistory.stats(uninterrupted.dropLast(1), anchors).currentRunInChart)
+    }
+
+    @Test
+    fun `description Global enumere les trois distinctions`() {
+        val description = RecordCatalog.byId("MOST_GLOBAL")!!.description
+        assertTrue(description.contains("Triple Debut"))
+        assertTrue(description.contains("All Kill"))
+        assertTrue(description.contains("Legendary Run"))
     }
 
     @Test

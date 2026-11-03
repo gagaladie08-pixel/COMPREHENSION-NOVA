@@ -275,7 +275,7 @@ private fun ReviewPopup(
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         if (item.kind == ReviewKind.YELLOW) DropdownMenuItem(text = { Text("✅ C'est correct") }, onClick = { menu = false; exec { editor.confirmReview(item.trackId) }; onDismiss() })
                         DropdownMenuItem(text = { Text("🚫 Ignorer (garder tel quel)") }, onClick = { menu = false; exec { editor.ignoreReview(item.trackId, item.rawTitle ?: item.title, item.rawArtist ?: item.artist) }; onDismiss() })
-                        DropdownMenuItem(text = { Text("🗑️ Supprimer les écoutes cochées", color = ReviewRed) }, onClick = { menu = false; confirmDelete = true })
+                        DropdownMenuItem(text = { Text("🗑️ Mettre les écoutes cochées à la corbeille", color = ReviewRed) }, onClick = { menu = false; confirmDelete = true })
                     }
                 }
             }
@@ -298,6 +298,13 @@ private fun ReviewPopup(
                     InfoLine("Valeur brute (lecteur)", listOfNotNull(item.rawArtist, item.rawTitle).joinToString(" — ").ifBlank { "—" } + (item.rawAlbum?.let { " · $it" } ?: ""))
                     InfoLine("Écoutes concernées", "${plays.size}${plays.firstOrNull()?.let { " · dernière le ${dateFmt.format(it.startedAt)}" } ?: ""}")
                 }
+
+                // Aperçu des effets avant l'application de la correction
+                SectionLabel("👀 Aperçu avant / après", color)
+                val beforePreview = listOfNotNull(item.title, item.artist, item.album).joinToString(" · ").ifBlank { "—" }
+                val afterPreview = listOfNotNull(title.ifBlank { "(titre inchangé / vide)" }, artistText.ifBlank { "(artiste à préciser)" }, albumText.ifBlank { "(sans album)" }).joinToString(" · ")
+                InfoLine("Avant", beforePreview)
+                InfoLine("Après", afterPreview)
 
                 // 2. Champs modifiables
                 SectionLabel("✏️ Champs modifiables", color)
@@ -420,11 +427,11 @@ private fun ReviewPopup(
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             containerColor = theme.surface, titleContentColor = theme.text, textContentColor = theme.textSecondary,
-            title = { Text("🗑️ Supprimer ${checked.size} écoute${if (checked.size > 1) "s" else ""} ?") },
-            text = { Text("Les écoutes cochées seront définitivement supprimées et toutes les statistiques recalculées. Cette action est irréversible.") },
+            title = { Text("🗑️ Mettre ${checked.size} écoute${if (checked.size > 1) "s" else ""} à la corbeille ?") },
+            text = { Text("Les écoutes cochées seront exclues des statistiques et déplacées vers la corbeille. Tu pourras les restaurer depuis l'onglet 🗑️ Corbeille ; les statistiques seront recalculées.") },
             confirmButton = {
                 TextButton(enabled = checked.isNotEmpty(), onClick = { confirmDelete = false; exec { editor.deleteScrobbles(checked.toList()) }; onDismiss() }) {
-                    Text("Supprimer", color = ReviewRed, fontWeight = FontWeight.Bold)
+                    Text("Mettre à la corbeille", color = ReviewRed, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annuler") } }

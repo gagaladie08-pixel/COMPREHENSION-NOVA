@@ -14,10 +14,10 @@ class PeriodsTest {
     }
 
     @Test
-    fun `stats weekly = 7 derniers jours glissants, billboard weekly = semaine ISO`() {
+    fun `stats weekly = semaine calendaire en cours (lundi vers ancre), billboard weekly = semaine ISO`() {
         val anchor = LocalDate.of(2026, 9, 30)
         val stats = Dates.statsRangeFor(Period.WEEKLY, anchor)
-        assertEquals(LocalDate.of(2026, 9, 24), stats.from)
+        assertEquals(LocalDate.of(2026, 9, 28), stats.from)
         assertEquals(anchor, stats.to)
         assertEquals(LocalDate.of(2026, 9, 28), Dates.rangeFor(Period.WEEKLY, anchor).from)
         assertEquals(anchor, Dates.statsRangeFor(Period.DAILY, anchor).from)

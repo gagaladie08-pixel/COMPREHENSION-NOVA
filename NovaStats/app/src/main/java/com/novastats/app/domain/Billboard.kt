@@ -78,14 +78,15 @@ object BillboardDates {
 
     /** Unité du compteur de périodes. */
     fun unitLabel(period: Period, n: Int): String = when (period) {
-        Period.DAILY, Period.GLOBAL -> if (n > 1) "jours" else "jour"
-        Period.WEEKLY -> if (n > 1) "semaines" else "semaine"
+        Period.DAILY -> if (n > 1) "jours" else "jour"
+        Period.WEEKLY, Period.GLOBAL -> if (n > 1) "semaines" else "semaine"
         Period.MONTHLY -> "mois"
         Period.YEARLY -> if (n > 1) "années" else "année"
     }
 
     private val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.FRANCE)
     private val shortFmt = DateTimeFormatter.ofPattern("d MMM", Locale.FRANCE)
+    private val snapshotFmt = DateTimeFormatter.ofPattern("d MMM yyyy", Locale.FRANCE)
     private val monthFmt = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRANCE)
 
     fun label(period: Period, anchor: LocalDate): String = when (period) {
@@ -93,7 +94,7 @@ object BillboardDates {
         Period.WEEKLY -> "Semaine ${Dates.isoWeekNumber(anchor)} · ${anchor.format(shortFmt)} – ${anchor.plusDays(6).format(shortFmt)}"
         Period.MONTHLY -> anchor.format(monthFmt).replaceFirstChar { it.uppercase() }
         Period.YEARLY -> anchor.year.toString()
-        Period.GLOBAL -> "All-time · semaine ${Dates.isoWeekNumber(anchor)}"
+        Period.GLOBAL -> "Cumul all-time · arrêté au ${anchor.plusDays(6).format(snapshotFmt)}"
     }
 }
 
@@ -134,7 +135,9 @@ data class ChartHistoryStats(
     val longestRunAt1: Int,
     val longestRunTop10: Int,
     val currentRunAt1: Int,
-    val maxPlays: Int
+    val maxPlays: Int,
+    /** Nombre de périodes consécutives dans le chart, tous rangs confondus; zéro si absent du dernier snapshot. */
+    val currentRunInChart: Int = 0
 ) {
     companion object {
         val EMPTY = ChartHistoryStats(0, null, null, 0, 0, 0, 0, 0)
@@ -178,6 +181,22 @@ object ChartHistory {
             currentRun++
         }
 
+        // Série actuelle dans le chart, tous rangs confondus. Une absence pendant la dernière période la remet à zéro.
+        val latestAnchor = allAnchors?.lastOrNull()
+        val isInLatestChartPeriod = when {
+            allAnchors == null -> true
+            latestAnchor == null -> false
+            else -> sorted.last().date == latestAnchor
+        }
+        var currentRunInChart = 0
+        if (isInLatestChartPeriod) {
+            currentRunInChart = 1
+            for (i in sorted.lastIndex downTo 1) {
+                if (!consecutive(sorted[i - 1], sorted[i])) break
+                currentRunInChart++
+            }
+        }
+
         return ChartHistoryStats(
             periodsInChart = sorted.size,
             firstEntry = sorted.first(),
@@ -186,7 +205,8 @@ object ChartHistory {
             longestRunAt1 = longestRun { it.position == 1 },
             longestRunTop10 = longestRun { it.position <= 10 },
             currentRunAt1 = currentRun,
-            maxPlays = sorted.maxOf { it.playCount }
+            maxPlays = sorted.maxOf { it.playCount },
+            currentRunInChart = currentRunInChart
         )
     }
 }
@@ -196,6 +216,9 @@ object HallOfFameRules {
     const val DIRECT_DEBUT = "DIRECT_DEBUT"
     const val LONG_RUN = "LONG_RUN"
     const val TRIPLE_DEBUT = "TRIPLE_DEBUT"
+    const val ALL_KILL = "ALL_KILL"
+    /** Distinction PAK distincte de l'All Kill : une même personne relie trois charts de types différents. */
+    const val PERFECT_ALL_KILL = "PERFECT_ALL_KILL"
     const val LEGENDARY_RUN = "LEGENDARY_RUN"
 
     const val LONG_RUN_WEEKS = 3

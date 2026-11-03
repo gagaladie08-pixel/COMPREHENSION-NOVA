@@ -21,6 +21,7 @@ import com.novastats.app.data.db.entity.NotificationFeedEntity
 import com.novastats.app.data.db.entity.NovaAwardEntity
 import com.novastats.app.data.db.entity.NovaAwardHistoryEntity
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
+import com.novastats.app.data.db.entity.PantheonSpeedHistoryEntity
 import com.novastats.app.data.db.entity.PantheonStatusEntity
 import com.novastats.app.data.db.entity.RecordCacheEntity
 import com.novastats.app.data.db.entity.SnapshotAlbumEntity
@@ -72,7 +73,11 @@ data class ArtistCertRow(
     @androidx.room.ColumnInfo(name = "entity_id") val entityId: Long,
     val level: String,
     val multiplier: Int,
-    val name: String?
+    val name: String?,
+    /** Date d'obtention du palier — affichée dans le pop-up Panthéon. */
+    @androidx.room.ColumnInfo(name = "certified_at") val certifiedAt: Long = 0,
+    /** Temps mis pour atteindre le palier depuis la première écoute (null si inconnu). */
+    @androidx.room.ColumnInfo(name = "time_to_certify_ms") val timeToCertifyMs: Long? = null
 )
 
 /** Ligne d'un record (Top 10) avec les infos d'affichage de l'entité. */
@@ -100,9 +105,9 @@ interface CertificationDao {
     @Query("SELECT al.album_id AS entity_id, al.title AS name, IFNULL(a.name, 'Artistes variés') AS subtitle, al.cover_url AS image_url, al.play_count AS play_count, c.level AS level, c.multiplier AS multiplier, c.certified_at AS certified_at FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id LEFT JOIN certifications c ON c.entity_id = al.album_id AND c.entity_type = 'ALBUM' WHERE al.play_count > 0 ORDER BY al.play_count DESC")
     fun albumCandidates(): Flow<List<CertCandidate>>
     @Query("SELECT level, COUNT(*) AS n FROM certifications WHERE entity_type = :type GROUP BY level") fun countsByLevel(type: String): Flow<List<LevelCount>>
-    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id IS NOT NULL")
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id IS NOT NULL")
     fun artistCertRows(): Flow<List<ArtistCertRow>>
-    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
+    @Query("SELECT t.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, t.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN tracks t ON t.track_id = c.entity_id WHERE c.entity_type = 'TRACK' AND t.artist_id = :artistId UNION ALL SELECT al.artist_id AS artist_id, c.entity_type AS entity_type, c.entity_id AS entity_id, c.level AS level, c.multiplier AS multiplier, al.title AS name, c.certified_at AS certified_at, c.time_to_certify_ms AS time_to_certify_ms FROM certifications c JOIN albums al ON al.album_id = c.entity_id WHERE c.entity_type = 'ALBUM' AND al.artist_id = :artistId")
     suspend fun certsOfArtist(artistId: Long): List<ArtistCertRow>
     @Query("SELECT * FROM certifications WHERE entity_id = :entityId AND entity_type = :type") fun observe(entityId: Long, type: String): Flow<CertificationEntity?>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM certification_history h ORDER BY h.certified_at DESC LIMIT :limit")
@@ -120,6 +125,11 @@ interface PantheonDao {
     fun all(): Flow<List<PantheonStatusEntity>>
     @Query("SELECT * FROM pantheon_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun history(artistId: Long): List<PantheonHistoryEntity>
     @Query("SELECT * FROM pantheon_history") suspend fun allHistory(): List<PantheonHistoryEntity>
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSpeedHistory(h: PantheonSpeedHistoryEntity): Long
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertSpeedHistoryAll(rows: List<PantheonSpeedHistoryEntity>)
+    @Query("SELECT * FROM pantheon_speed_history WHERE artist_id = :artistId ORDER BY date_reached") suspend fun speedHistory(artistId: Long): List<PantheonSpeedHistoryEntity>
+    @Query("SELECT * FROM pantheon_speed_history") suspend fun allSpeedHistory(): List<PantheonSpeedHistoryEntity>
+    @Query("DELETE FROM pantheon_speed_history") suspend fun clearSpeedHistory()
     @Query("SELECT * FROM pantheon_status") suspend fun allCurrent(): List<PantheonStatusEntity>
     @Query("SELECT p.*, a.name AS name, a.photo_url AS photo_url, a.play_count AS play_count FROM pantheon_status p JOIN artists a ON a.artist_id = p.artist_id ORDER BY p.status_date DESC")
     fun rows(): Flow<List<PantheonRow>>
@@ -171,9 +181,20 @@ interface HallOfFameDao {
     @Insert suspend fun insertBadge(badge: HallOfFameBadgeEntity): Long
     @Query("SELECT * FROM hall_of_fame WHERE period_type = :period AND entity_type = :entityType ORDER BY entry_date DESC") fun list(period: String, entityType: String): Flow<List<HallOfFameEntity>>
     @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType") suspend fun exists(entityId: Long, entityType: String, period: String, entryType: String): Int
+    /** Événement HoF daté : PAK peut être décroché plusieurs fois au cours d'une même cadence. */
+    @Query("SELECT COUNT(*) FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType AND period_type = :period AND entry_type = :entryType AND entry_date = :entryDate")
+    suspend fun existsOnDate(entityId: Long, entityType: String, period: String, entryType: String, entryDate: String): Int
     @Query("SELECT COUNT(*) FROM hall_of_fame") fun countFlow(): Flow<Int>
     @Query("SELECT * FROM hall_of_fame") suspend fun all(): List<HallOfFameEntity>
     @Query("SELECT * FROM hall_of_fame WHERE entity_id = :entityId AND entity_type = :entityType ORDER BY entry_date") suspend fun ofEntity(entityId: Long, entityType: String): List<HallOfFameEntity>
+    /** Nombre réel d'entités distinguées, sans extrapolation depuis le seul Top 10 en cache. */
+    @Query("""
+        SELECT COUNT(DISTINCT entity_id) FROM hall_of_fame
+        WHERE entity_type = :entityType
+          AND ((:globalOnly AND period_type = 'GLOBAL') OR (NOT :globalOnly AND period_type != 'GLOBAL'))
+          AND (:entryType IS NULL OR entry_type = :entryType)
+          AND (:periodType IS NULL OR period_type = :periodType)
+    """) suspend fun distinctEntityCount(entityType: String, globalOnly: Boolean, entryType: String?, periodType: String?): Int
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name, CASE h.entity_type WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = h.entity_id) ELSE NULL END AS subtitle, CASE h.entity_type WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = h.entity_id) ELSE (SELECT photo_url FROM artists WHERE artist_id = h.entity_id) END AS image_url FROM hall_of_fame h WHERE h.period_type = :period AND h.entity_type = :entityType ORDER BY h.entry_date DESC")
     fun rows(period: String, entityType: String): Flow<List<HallOfFameRow>>
     @Query("SELECT h.*, CASE h.entity_type WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = h.entity_id) WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = h.entity_id) ELSE (SELECT name FROM artists WHERE artist_id = h.entity_id) END AS name FROM hall_of_fame h ORDER BY h.created_at DESC LIMIT :limit")
@@ -186,14 +207,14 @@ interface HallOfFameDao {
 interface RecordDao {
     @Insert suspend fun insertAll(rows: List<RecordCacheEntity>)
 
-    /** Top 10 d'un record (avec nom / sous-titre / image de l'entité). Tri décroissant, ou croissant si [asc]. */
+    /** Top [limit] d'un record (nom / sous-titre / image inclus); 10 par défaut, 20 pour la cérémonie PAK. */
     @Query(
         """
         SELECT r.*,
                CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
-               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
                                WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
@@ -203,10 +224,14 @@ interface RecordDao {
         WHERE r.record_type = :type AND ((:period IS NULL AND r.period_type IS NULL) OR r.period_type = :period)
           AND r.category = :category AND ((:sub IS NULL AND r.subcategory IS NULL) OR r.subcategory = :sub)
         ORDER BY CASE WHEN :asc THEN r.value END ASC, CASE WHEN :asc THEN NULL ELSE r.value END DESC
-        LIMIT 10
+        LIMIT :limit
         """
     )
-    fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean): Flow<List<RecordRow>>
+    fun top10(type: String, period: String?, category: String, sub: String?, asc: Boolean, limit: Int = 10): Flow<List<RecordRow>>
+
+    /** Paliers réellement atteints pour le record de vitesse d'écoute, triés numériquement. */
+    @Query("SELECT DISTINCT subcategory FROM records_cache WHERE record_type = :type AND category = :category AND subcategory IS NOT NULL ORDER BY CAST(subcategory AS INTEGER)")
+    fun subcategoriesForType(type: String, category: String): Flow<List<String>>
 
     /** 🔍 Recherche d'un titre / artiste / album dans tous les records (nom contenant [q]). */
     @Query(
@@ -216,7 +241,7 @@ interface RecordDao {
                CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
                                WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
                                ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
-               CASE r.category WHEN 'TRACK' THEN (SELECT a.name FROM tracks t JOIN artists a ON a.artist_id = t.artist_id WHERE t.track_id = r.entity_id)
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
                                WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON a.artist_id = al.artist_id WHERE al.album_id = r.entity_id)
                                ELSE NULL END AS subtitle,
                CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
@@ -237,10 +262,11 @@ interface RecordDao {
         """
         SELECT r.* FROM records_cache r
         WHERE r.category = :category AND r.entity_id = :entityId AND r.record_type != 'MOST_RECORDS'
-          AND r.value = (SELECT CASE WHEN r.record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_RISE') THEN MIN(x.value) ELSE MAX(x.value) END
+          AND r.value = (SELECT CASE WHEN r.record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_RISE', 'FASTEST_LISTEN_MILESTONE') THEN MIN(x.value) ELSE MAX(x.value) END
                          FROM records_cache x
                          WHERE x.record_type = r.record_type AND IFNULL(x.period_type, '') = IFNULL(r.period_type, '')
                            AND x.category = r.category AND IFNULL(x.subcategory, '') = IFNULL(r.subcategory, ''))
+        GROUP BY r.record_type, IFNULL(r.period_type, ''), r.category, IFNULL(r.subcategory, '')
         ORDER BY r.record_type, r.period_type, r.subcategory
         """
     )
@@ -249,16 +275,67 @@ interface RecordDao {
     /** Nombre d'entités à égalité au #1 d'un classement. */
     @Query(
         """
-        SELECT COUNT(*) FROM records_cache x
+        SELECT COUNT(DISTINCT x.entity_id) FROM records_cache x
         WHERE x.record_type = :type AND IFNULL(x.period_type, '') = IFNULL(:period, '') AND x.category = :category AND IFNULL(x.subcategory, '') = IFNULL(:sub, '')
           AND x.value = :value
         """
     )
     suspend fun tiedAt(type: String, period: String?, category: String, sub: String?, value: Double): Int
 
+    /** 🕰️ Records établis triés par date d'établissement (fil chronologique + éphéméride + cérémonie). */
+    @Query("SELECT * FROM records_cache WHERE value_date IS NOT NULL ORDER BY value_date DESC LIMIT :limit")
+    suspend fun recentByValueDate(limit: Int): List<RecordCacheEntity>
+
+    /** 🎯 Détenteur actuel d'un record typé (bloc « en direct »). */
+    @Query("SELECT * FROM records_cache WHERE record_type = :type AND period_type = :period AND category = :category ORDER BY value DESC LIMIT 1")
+    suspend fun holder(type: String, period: String, category: String): RecordCacheEntity?
+
+    /** 🕰️ Records établis AVEC noms, triés par date d'établissement (fil cliquable + page « tombés »). */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.value_date IS NOT NULL
+        ORDER BY r.value_date DESC LIMIT :limit
+        """
+    )
+    suspend fun recentRows(limit: Int): List<RecordRow>
+
+    /** 🎯 Toutes les lignes cachées des records demandés (page « en direct » des majeurs). */
+    @Query(
+        """
+        SELECT r.*,
+               CASE r.category WHEN 'TRACK' THEN (SELECT title FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT title FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT name FROM artists WHERE artist_id = r.entity_id) END AS name,
+               CASE r.category WHEN 'TRACK' THEN (SELECT GROUP_CONCAT(n, ', ') FROM (SELECT a2.name AS n FROM track_artists ta2 JOIN artists a2 ON a2.artist_id = ta2.artist_id WHERE ta2.track_id = r.entity_id ORDER BY ta2.is_primary DESC, ta2.id))
+                               WHEN 'ALBUM' THEN (SELECT IFNULL(a.name, 'Artistes variés') FROM albums al LEFT JOIN artists a ON al.artist_id = a.artist_id WHERE al.album_id = r.entity_id)
+                               ELSE NULL END AS subtitle,
+               CASE r.category WHEN 'TRACK' THEN (SELECT cover_url FROM tracks WHERE track_id = r.entity_id)
+                               WHEN 'ALBUM' THEN (SELECT cover_url FROM albums WHERE album_id = r.entity_id)
+                               ELSE (SELECT photo_url FROM artists WHERE artist_id = r.entity_id) END AS image_url
+        FROM records_cache r
+        WHERE r.record_type IN (:types)
+        """
+    )
+    suspend fun rowsForTypes(types: List<String>): List<RecordRow>
+
     /** Toutes les lignes de cache d'une entité (tous records / périodes / sous-sections) — contexte de la fiche. */
     @Query("SELECT * FROM records_cache WHERE category = :category AND entity_id = :entityId ORDER BY record_type, period_type, subcategory")
     suspend fun rowsForEntity(category: String, entityId: Long): List<RecordCacheEntity>
+
+    /** Sources existantes pour recalculer uniquement Most Records après l'amorçage ciblé d'un nouveau record. */
+    @Query("SELECT * FROM records_cache WHERE record_type != 'MOST_RECORDS'")
+    suspend fun rowsForMostRecords(): List<RecordCacheEntity>
 
     /** Nombre d'entités strictement meilleures dans un classement (rang = n + 1). */
     @Query(
@@ -274,6 +351,7 @@ interface RecordDao {
     @Query("SELECT MAX(calculated_at) FROM records_cache") fun lastCalculated(): Flow<Long?>
     @Query("SELECT * FROM records_cache ORDER BY calculated_at DESC, id DESC LIMIT :limit") fun latest(limit: Int): Flow<List<RecordCacheEntity>>
     @Query("DELETE FROM records_cache WHERE record_type = :type") suspend fun clearType(type: String)
+    @Query("DELETE FROM records_cache WHERE record_type IN ('FASTEST_CERT', 'FASTEST_PANTHEON', 'FASTEST_LISTEN_MILESTONE')") suspend fun clearFastestRecords()
     @Query("DELETE FROM records_cache") suspend fun clear()
 }
 
@@ -330,9 +408,9 @@ interface ApiCacheDao {
 @Dao
 interface EditorDao {
     @Insert suspend fun insertEdit(row: EditHistoryEntity): Long
-    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT :limit") fun history(limit: Int = 50): Flow<List<EditHistoryEntity>>
-    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT 1") suspend fun last(): EditHistoryEntity?
-    @Query("SELECT * FROM edit_history ORDER BY created_at DESC LIMIT 50") suspend fun historyList(): List<EditHistoryEntity>
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC, id DESC LIMIT :limit") fun history(limit: Int = 50): Flow<List<EditHistoryEntity>>
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC, id DESC LIMIT 1") suspend fun last(): EditHistoryEntity?
+    @Query("SELECT * FROM edit_history ORDER BY created_at DESC, id DESC LIMIT 50") suspend fun historyList(): List<EditHistoryEntity>
     @Query("DELETE FROM edit_history WHERE id = :id") suspend fun deleteEdit(id: Long)
     @Query("DELETE FROM edit_history") suspend fun clearHistory()
     @Query("DELETE FROM edit_history WHERE id NOT IN (SELECT id FROM edit_history ORDER BY created_at DESC LIMIT 50)") suspend fun trimTo50()

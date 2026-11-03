@@ -21,7 +21,11 @@ import androidx.room.PrimaryKey
     indices = [
         Index("artist_id"), Index("album_id"),
         Index(value = ["title", "artist_id"]),
-        Index("play_count")
+        Index("play_count"),
+        // v10 : créés par MIGRATION_9_10. Ils DOIVENT être déclarés ici, sinon Room refuse le schéma
+        // à l'ouverture (« Migration didn't properly handled: tracks ») : la validation compare le
+        // schéma obtenu après migration à celui que les entités déclarent.
+        Index("original_track_id"), Index("first_played_at")
     ]
 )
 data class TrackEntity(
@@ -30,6 +34,8 @@ data class TrackEntity(
     @ColumnInfo(name = "title_raw") val titleRaw: String,
     @ColumnInfo(name = "artist_id") val artistId: Long,
     @ColumnInfo(name = "album_id") val albumId: Long? = null,
+    /** Date à partir de laquelle le lien d'album est valable; null pour les associations historiques. */
+    @ColumnInfo(name = "album_association_since") val albumAssociationSince: Long? = null,
     @ColumnInfo(name = "duration_ms") val durationMs: Long? = null,
     val genre: String? = null,
     @ColumnInfo(name = "cover_url") val coverUrl: String? = null,

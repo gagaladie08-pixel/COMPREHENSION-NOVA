@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChipDefaults
@@ -62,6 +63,8 @@ import com.novastats.app.ui.theme.Nova
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.flow.first
 import com.novastats.app.ui.theme.NovaColors
+import com.novastats.app.domain.Period
+import com.novastats.app.domain.Dates
 
 /** Couleur d'un statut (Mythique = dégradé holographique animé, on renvoie la base). */
 fun pantheonColor(s: PantheonStatus): Color = when (s) {
@@ -122,6 +125,13 @@ fun PantheonScreen() {
     val certRows by app.database.certificationDao().artistCertRows().collectAsStateWithLifecycle(initialValue = emptyList())
     val artists by app.database.artistDao().allForEditor().collectAsStateWithLifecycle(initialValue = emptyList())
     val certsByArtist = remember(certRows) { certRows.groupBy { it.artistId } }
+    val news by db.pantheonDao().latestHistory(30).collectAsStateWithLifecycle(initialValue = emptyList())
+    val recentNews = remember(news) { news.filter { System.currentTimeMillis() - it.h.dateReached <= 30L * 86_400_000L } }
+    val totalAllTime by produceState(initialValue = 0) { value = runCatching { db.scrobbleDao().countConfirmed() }.getOrDefault(0) }
+    val weekArtistPlays by produceState<Map<Long, Int>>(initialValue = emptyMap()) {
+        val r = Dates.statsRangeFor(Period.WEEKLY)
+        value = runCatching { db.artistDao().topForPeriod(r.fromIso, r.toIso, 500).first().associate { it.artist.artistId to it.periodPlays } }.getOrDefault(emptyMap())
+    }
 
     val q = query.trim().lowercase()
     val sorted = remember(rows, q, statusFilter) {
@@ -153,6 +163,10 @@ fun PantheonScreen() {
                     color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
                 )
             }
+            AscentFrieze(counts)
+            Spacer(Modifier.height(10.dp))
+            WeightCard(rows, totalAllTime)
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true, placeholder = { Text("🔍 Rechercher un artiste…") },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
@@ -177,6 +191,27 @@ fun PantheonScreen() {
             }
             Spacer(Modifier.height(6.dp))
         }
+        if (recentNews.isNotEmpty()) item(key = "intron") {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))
+                    .background(NovaColors.Gold.copy(alpha = 0.12f)).padding(12.dp)
+            ) {
+                Text("🎉 Intronsations récentes (30 derniers jours)", color = NovaColors.Gold, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+                recentNews.take(3).forEach { n ->
+                    val st = PantheonStatus.fromDb(n.h.status)
+                    Row(
+                        Modifier.fillMaxWidth().clickable { detail = DetailTarget.Pantheon(n.h.artistId) }.padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "${st?.emoji ?: "👑"} « ${n.name ?: "?"} » → ${st?.label ?: n.h.status} · ${sinceLabel(n.h.dateReached)}",
+                            color = theme.text, style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
         if (rows.isNotEmpty() && sorted.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("🕳️", fontSize = 40.sp)
@@ -198,7 +233,7 @@ fun PantheonScreen() {
         }
         if (soon.isNotEmpty()) {
             item { SectionTitle("🔜 Bientôt dans le Panthéon", Modifier.padding(top = 12.dp)) }
-            items(soon, key = { "soon" + it.first.artistId }) { (a, p) -> SoonRow(a, p) { detail = DetailTarget.Artist(a.artistId) } }
+            items(soon, key = { "soon" + it.first.artistId }) { (a, p) -> SoonRow(a, p, weekArtistPlays) { detail = DetailTarget.Artist(a.artistId) } }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
@@ -256,7 +291,7 @@ private fun PantheonCard(row: PantheonRow, status: PantheonStatus, certs: Artist
 }
 
 @Composable
-private fun SoonRow(a: ArtistEntity, p: NextStatusProgress, onOpen: () -> Unit) {
+private fun SoonRow(a: ArtistEntity, p: NextStatusProgress, weekPlays: Map<Long, Int>, onOpen: () -> Unit) {
     val theme = Nova.theme
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(12.dp)).background(theme.surface).combinedClickableCompat(onOpen).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -265,6 +300,11 @@ private fun SoonRow(a: ArtistEntity, p: NextStatusProgress, onOpen: () -> Unit) 
             Column(Modifier.weight(1f)) {
                 Text(a.name, color = theme.text, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("▶ ${formatCount(a.playCount)} · ${(p.fraction * 100).toInt()} % vers ⭐ Star", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                val remaining = p.next.playsThreshold - a.playCount
+                val daysInWeek = (java.time.temporal.ChronoUnit.DAYS.between(Dates.parse(Dates.statsRangeFor(Period.WEEKLY).fromIso), Dates.today()) + 1).coerceAtLeast(1)
+                val pace = (weekPlays[a.artistId] ?: 0).toFloat() / daysInWeek
+                val eta = if (pace > 0f) kotlin.math.ceil(remaining / pace).toInt() else null
+                if (eta != null) Text("≈ $eta j · vers le ${Dates.today().plusDays(eta.toLong()).format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))}", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
         }
         LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(4.dp).clip(RoundedCornerShape(2.dp)), color = pantheonColor(PantheonStatus.STAR), trackColor = theme.background)
@@ -274,3 +314,53 @@ private fun SoonRow(a: ArtistEntity, p: NextStatusProgress, onOpen: () -> Unit) 
 
 @OptIn(ExperimentalFoundationApi::class)
 private fun Modifier.combinedClickableCompat(onClick: () -> Unit): Modifier = this.combinedClickable(onClick = onClick, onLongClick = onClick)
+
+/** 👑 Frise de l'ascension : les 5 statuts avec seuils et compteurs. */
+@Composable
+private fun AscentFrieze(counts: Map<String, Int>) {
+    val theme = Nova.theme
+    NovaCard(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("👑 L'ascension", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically
+            ) {
+                PantheonStatus.entries.forEachIndexed { i, st ->
+                    val c = pantheonColor(st)
+                    if (i > 0) Text("→", color = theme.textSecondary)
+                    Column(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(c.copy(alpha = 0.14f))
+                            .border(1.dp, c.copy(alpha = 0.45f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(st.emoji, fontSize = 20.sp)
+                        Text(st.label, color = c, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                        Text("${formatCount(st.playsThreshold)} ▶", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
+                        Text("×${counts[st.dbName] ?: 0}", color = theme.text, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+            Text("Chaque statut s'obtient aussi par les certifications (titres + albums à chaque niveau). Un statut acquis ne se perd jamais.", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 6.dp))
+        }
+    }
+}
+
+/** 🏛️ Poids du Panthéon : part des écoutes all time portée par les artistes intronisés. */
+@Composable
+private fun WeightCard(rows: List<PantheonRow>, totalAllTime: Int) {
+    val theme = Nova.theme
+    if (totalAllTime <= 0 || rows.isEmpty()) return
+    val weight = rows.sumOf { it.playCount.toLong() }
+    val pct = ((weight * 100) / totalAllTime).toInt().coerceIn(0, 100)
+    NovaCard(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Text("🏛️ Le poids de ton Panthéon", color = theme.text, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            Text(
+                "${rows.size} artiste${if (rows.size > 1) "s" else ""} intronisé${if (rows.size > 1) "s" else ""} — ${pct} % de toutes tes écoutes all time",
+                color = theme.textSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp)
+            )
+            LinearProgressIndicator(progress = { pct / 100f }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).padding(top = 6.dp), color = NovaColors.Gold, trackColor = theme.background)
+        }
+    }
+}

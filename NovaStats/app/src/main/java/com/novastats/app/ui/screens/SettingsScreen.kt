@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.novastats.app.BuildConfig
@@ -84,6 +85,7 @@ import java.util.Locale
 /** Sous-pages de ⚙️ Paramètres. */
 enum class SettingsPage(val emoji: String, val title: String, val subtitle: String) {
     DETECTION("🎵", "Détection", "Seuil, apps sources, blacklist, filtres"),
+    SOURCE_APPS("📱", "Applications sources", "Choisir les applications suivies"),
     APPEARANCE("🎨", "Apparence", "15 thèmes néon · taille du texte · retour haptique"),
     NOTIFICATIONS("🔔", "Notifications", "Récompenses, vérifications, Awards et charts"),
     DATA("🗄️", "Données", "Export / import, liens manuels, sauvegarde auto, suppression"),
@@ -115,13 +117,20 @@ fun SettingsScreen() {
             com.novastats.app.ui.navigation.PendingNav.consume()
         }
     }
-    BackHandler(enabled = page != null) { page = null; editorReview = false; editorFocus = null }
+    BackHandler(enabled = page != null) {
+        if (page == SettingsPage.SOURCE_APPS) page = SettingsPage.DETECTION
+        else { page = null; editorReview = false; editorFocus = null }
+    }
     val current = page
     if (current == null) SettingsHome { page = it }
     else Column(Modifier.fillMaxSize()) {
-        SubPageHeader(current) { page = null }
+        SubPageHeader(current) { page = if (current == SettingsPage.SOURCE_APPS) SettingsPage.DETECTION else null }
         when (current) {
-            SettingsPage.DETECTION -> DetectionPage(onOpenReview = { editorReview = true; editorFocus = null; page = SettingsPage.EDITOR })
+            SettingsPage.DETECTION -> DetectionPage(
+                onOpenReview = { editorReview = true; editorFocus = null; page = SettingsPage.EDITOR },
+                onOpenSourceApps = { page = SettingsPage.SOURCE_APPS }
+            )
+            SettingsPage.SOURCE_APPS -> SourceAppsPage()
             SettingsPage.APPEARANCE -> AppearancePage(onOpenCustom = { page = SettingsPage.CUSTOM_THEME })
             SettingsPage.NOTIFICATIONS -> NotificationsPage()
             SettingsPage.DATA -> DataPage()
@@ -198,7 +207,7 @@ private fun SettingsHome(onOpen: (SettingsPage) -> Unit) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        SettingsPage.entries.forEach { p -> NavRow(p) { onOpen(p) } }
+        SettingsPage.entries.filterNot { it == SettingsPage.SOURCE_APPS }.forEach { p -> NavRow(p) { onOpen(p) } }
     }
 }
 
@@ -239,7 +248,7 @@ private val KNOWN_PLAYERS = linkedMapOf(
 )
 
 @Composable
-private fun DetectionPage(onOpenReview: () -> Unit = {}) {
+private fun DetectionPage(onOpenReview: () -> Unit, onOpenSourceApps: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as NovaStatsApp
     val settings = app.settings
@@ -251,8 +260,6 @@ private fun DetectionPage(onOpenReview: () -> Unit = {}) {
     val whitelist by settings.whitelist.collectAsStateWithLifecycle(initialValue = emptySet())
     val blArtists by settings.blacklistArtists.collectAsStateWithLifecycle(initialValue = emptySet())
     val blKeywords by settings.blacklistKeywords.collectAsStateWithLifecycle(initialValue = emptySet())
-    val sources by app.database.scrobbleDao().distinctSources().collectAsStateWithLifecycle(initialValue = emptyList())
-    val detection by DetectionState.state.collectAsStateWithLifecycle()
     val reviewCount by app.database.scrobbleDao().reviewCountFlow().collectAsStateWithLifecycle(initialValue = 0)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -287,24 +294,17 @@ private fun DetectionPage(onOpenReview: () -> Unit = {}) {
 
         SectionTitle("📱 Applications sources")
         NovaCard {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    if (whitelist.isEmpty()) "Toutes les applications sont écoutées. Coche des apps pour n'écouter qu'elles."
-                    else "${whitelist.size} app(s) autorisée(s) — les autres sont ignorées.",
-                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
-                )
-                Spacer(Modifier.height(6.dp))
-                val candidates = (KNOWN_PLAYERS.keys + sources + detection.activeSessions + detection.ignoredSessions + whitelist).distinct()
-                candidates.forEach { pkg ->
-                    val label = KNOWN_PLAYERS[pkg] ?: runCatching { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
-                    val seen = pkg in sources || pkg in detection.activeSessions
-                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(label, color = theme.text, style = MaterialTheme.typography.bodyMedium)
-                            Text(pkg + if (seen) " · détectée" else "", color = theme.textSecondary, style = MaterialTheme.typography.labelSmall)
-                        }
-                        Switch(checked = pkg in whitelist, onCheckedChange = { on -> scope.launch { settings.setWhitelist(if (on) whitelist + pkg else whitelist - pkg) } })
-                    }
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Applications suivies", color = theme.text, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (whitelist.isEmpty()) "Toutes les applications"
+                        else "${whitelist.size} application(s) choisie(s)",
+                        color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Button(onClick = onOpenSourceApps, colors = ButtonDefaults.buttonColors(containerColor = theme.primary)) {
+                    Text("Choisir")
                 }
             }
         }
@@ -664,7 +664,7 @@ private fun DataPage() {
         SectionTitle("📤 Export / 📥 Import JSON")
         NovaCard {
             Column(Modifier.padding(16.dp)) {
-                Text("Format NovaStats v2.3 : compatible avec l'ancien format v1 (songs + plays), avec liens de versions, horodatages de validation et données enrichies.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("Format NovaStats v2.4 : compatible avec l'ancien format v1 (songs + plays). Les écoutes de la corbeille sont conservées séparément dans les backups afin de pouvoir être restaurées sans compter dans les statistiques.", color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
@@ -675,7 +675,7 @@ private fun DataPage() {
                                     BackupExporter.build(app.database, BuildConfig.VERSION_NAME)
                                 }
                                 pendingExport = text
-                                status = "${summary.songs} titres · ${summary.plays} écoutes · ${summary.bytes / 1024} Ko"
+                                status = "${summary.songs} titres · ${summary.plays} écoutes · ${summary.trashedPlays} corbeille · ${summary.bytes / 1024} Ko"
                                 saver.launch(BackupExporter.fileName())
                             } catch (e: CancellationException) {
                                 throw e
@@ -730,6 +730,74 @@ private fun DataPage() {
                     onClick = { BackupWorker.runNow(context); status = "💾 Sauvegarde lancée en arrière-plan" },
                     enabled = scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
                 ) { Text("💾 Sauvegarder maintenant") }
+                Spacer(Modifier.height(8.dp))
+                /* Les sauvegardes vivent dans Android/data/<pkg>/files/backups : ce dossier est supprimé
+                 * à la désinstallation. Sans export, une réinstallation perd donc tout l'historique —
+                 * d'où ce bouton, seul moyen de mettre les données à l'abri hors de l'appareil. */
+                OutlinedButton(
+                    onClick = {
+                        val file = files.firstOrNull()
+                        if (file == null) {
+                            status = "⚠️ Aucune sauvegarde à partager — lance d'abord « Sauvegarder maintenant »"
+                        } else runCatching {
+                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                putExtra(Intent.EXTRA_SUBJECT, file.name)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(send, "Exporter la sauvegarde").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            status = "📤 Sauvegarde « ${file.name} » prête à envoyer"
+                        }.onFailure { status = "⚠️ Export impossible : ${it.message ?: it.javaClass.simpleName}" }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("📤 Partager la dernière sauvegarde") }
+                Text(
+                    "Le dossier des sauvegardes est effacé à la désinstallation : exporte-les pour les conserver.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+
+        SectionTitle("🤖 Synchro agent (temporaire)")
+        NovaCard {
+            Column(Modifier.padding(16.dp)) {
+                val agentOn by settings.agentSync.collectAsStateWithLifecycle(initialValue = false)
+                val agentTokenSaved by settings.agentToken.collectAsStateWithLifecycle(initialValue = null)
+                val agentGist by settings.agentGistId.collectAsStateWithLifecycle(initialValue = null)
+                val agentLast by settings.agentLastSync.collectAsStateWithLifecycle(initialValue = null)
+                var tokenInput by remember(agentTokenSaved) { mutableStateOf(agentTokenSaved.orEmpty()) }
+                ToggleRow(
+                    "Synchroniser vers un Gist privé GitHub",
+                    "Envoie l'export COMPLET (écoutes, titres, artistes, albums, certifications, Panthéon, Hall of Fame) après chaque recalcul de stats, au plus une fois toutes les 10 min. Fonction temporaire pour peaufiner l'app.",
+                    agentOn
+                ) { scope.launch { settings.setAgentSync(it) } }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tokenInput, onValueChange = { tokenInput = it }, singleLine = true,
+                    label = { Text("Token GitHub (scope : gist)") }, modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = { scope.launch { settings.setAgentToken(tokenInput.trim()); status = "🔑 Token enregistré" } },
+                    enabled = tokenInput.trim() != agentTokenSaved.orEmpty(),
+                    modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.surface, contentColor = theme.text)
+                ) { Text("💾 Enregistrer le token") }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Dernière synchro : ${agentLast?.let { formatDate(it) } ?: "jamais"}${agentGist?.let { " · Gist ${it.take(8)}…" } ?: ""}",
+                    color = theme.textSecondary, style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = { scope.launch { status = "🔄 Synchro en cours…"; status = com.novastats.app.service.AgentSync.push(app, force = true) ?: "Synchro impossible" } },
+                    enabled = scrobbles > 0, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
+                ) { Text("🔄 Synchroniser maintenant") }
+                Text(
+                    "Le token n'est envoyé qu'à api.github.com. En fin d'utilisation : désactive l'interrupteur, efface le token, puis révoque-le sur github.com → Settings → Developer settings.",
+                    color = theme.textSecondary, style = MaterialTheme.typography.labelSmall
+                )
             }
         }
 

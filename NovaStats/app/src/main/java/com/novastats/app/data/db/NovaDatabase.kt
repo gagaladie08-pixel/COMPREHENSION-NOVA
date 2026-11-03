@@ -32,7 +32,7 @@ import com.novastats.app.data.db.dao.TrackLinkDao
 import com.novastats.app.data.db.entity.*
 
 /**
- * Base de données NovaStats — 35 tables (cf. docs/DATABASE.md).
+ * Base de données NovaStats — 36 tables (cf. docs/DATABASE.md).
  */
 @Database(
     entities = [
@@ -51,7 +51,7 @@ import com.novastats.app.data.db.entity.*
         // Module 6 — Hall of Fame
         HallOfFameEntity::class, HallOfFameBadgeEntity::class,
         // Module 7 — Panthéon
-        PantheonStatusEntity::class, PantheonHistoryEntity::class,
+        PantheonStatusEntity::class, PantheonHistoryEntity::class, PantheonSpeedHistoryEntity::class,
         // Module 8 — Records
         RecordCacheEntity::class,
         // Module 9 — Nova Awards
@@ -64,7 +64,7 @@ import com.novastats.app.data.db.entity.*
         MigrationLogEntity::class,
         com.novastats.app.data.db.entity.ArtistExceptionEntity::class
     ],
-    version = 9,
+    version = 12,
     exportSchema = true
 )
 abstract class NovaDatabase : RoomDatabase() {
@@ -180,12 +180,41 @@ abstract class NovaDatabase : RoomDatabase() {
             }
         }
 
+        /** v10 : index manquants sur les titres — `original_track_id` (repli des versions, liens de versions)
+         *  et `first_played_at` (rang de découverte). Les agrégats sont désormais calculés en GROUP BY,
+         *  mais ces deux colonnes restaient parcourues par des scans complets à chaque recalcul. */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tracks_original_track_id ON tracks(original_track_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tracks_first_played_at ON tracks(first_played_at)")
+            }
+        }
+
+        /** v11 : historique exact du parcours Fastest Panthéon, isolé de l'historique public existant. */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS pantheon_speed_history (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, artist_id INTEGER NOT NULL, status TEXT NOT NULL, date_reached INTEGER NOT NULL, time_to_reach_ms INTEGER, play_count_at_status INTEGER NOT NULL, attainment_route TEXT NOT NULL DEFAULT 'LEGACY_ESTIMATE')")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_pantheon_speed_history_artist_id_status ON pantheon_speed_history(artist_id, status)")
+            }
+        }
+
+        /** v12 : borne temporelle du rattachement d'album, pour ne jamais attribuer rétroactivement les anciennes écoutes. */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN album_association_since INTEGER")
+            }
+        }
+
         @Volatile private var instance: NovaDatabase? = null
 
         fun get(context: Context): NovaDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, NovaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
-                .fallbackToDestructiveMigrationOnDowngrade()
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                // Volontairement PAS de fallbackToDestructiveMigrationOnDowngrade() : il réinitialisait
+                // la base au moindre retour de version. Installer un build plus ancien que la base
+                // effaçait donc les écoutes en silence — plusieurs milliers, irrécupérables.
+                // Les 11 migrations couvrent v1 → v12 : la montée de version est toujours possible,
+                // et un downgrade échoue désormais à l'ouverture au lieu de tout détruire.
                 .build()
                 .also { instance = it }
         }

@@ -1,6 +1,7 @@
 package com.novastats.app.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,10 +14,12 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -78,8 +81,75 @@ private data class Winner(val name: String, val subtitle: String?, val imageUrl:
  * 🏆 Nova Awards — 9 récompenses annuelles. Déblocage après 2 mois d'utilisation. Année en cours LIVE (recalculée à
  * chaque ouverture), années passées FINAL (archivées). Révélation une par une au premier accès, cérémonie le 31 décembre.
  */
+/**
+ * 🎉 Ton année — la cérémonie des Nova Awards, le Rewind et les Year-End Charts réunis.
+ *
+ * Ces trois expériences racontaient « ton année musicale » à trois endroits différents :
+ * l'onglet Awards, une carte de l'Accueil, une sous-section du Billboard. Elles vivent
+ * désormais côte à côte, en trois segments. Les autres onglets ne bougent pas ; le Rewind
+ * reste aussi accessible depuis l'Accueil, qui sert de vitrine.
+ */
 @Composable
 fun AwardsScreen() {
+    var inCeremony by rememberSaveable { mutableStateOf(false) }
+    var rewindOpen by remember { mutableStateOf(false) }
+    var yearEndOpen by remember { mutableStateOf(false) }
+
+    // Pleins écrans prioritaires : ils recouvrent tout, retour = l'onglet.
+    // RewindScreen(null) affiche lui-même le sélecteur de périodes disponibles.
+    if (rewindOpen) { RewindScreen { rewindOpen = false }; return }
+    if (yearEndOpen) { BackHandler { yearEndOpen = false }; YearEndScreen { yearEndOpen = false }; return }
+
+    if (inCeremony) {
+        BackHandler { inCeremony = false }
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                "‹ Ton année", color = Nova.theme.primary, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { inCeremony = false }.padding(horizontal = 16.dp, vertical = 10.dp)
+            )
+            Box(Modifier.weight(1f)) { AwardsCeremony() }
+        }
+        return
+    }
+
+    // Trois grandes cartes qui remplissent l'écran : l'onglet est un portail, pas une liste.
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // weight() n'existe que dans ColumnScope : il est posé ici, pas dans YearBigCard.
+        YearBigCard("🏆", "Nova Awards", "La cérémonie de tes 9 récompenses annuelles — année en cours LIVE, années passées FINAL.", Nova.theme.primary, Modifier.weight(1f)) { inCeremony = true }
+        YearBigCard("🎬", "Nova Rewind", "Tes périodes en images : écoutes, artistes, records — et une carte à partager.", Nova.theme.secondary, Modifier.weight(1f)) { rewindOpen = true }
+        YearBigCard("📊", "Year-End Charts", "Le bilan complet de chaque année civile : classements titres, artistes et albums.", Nova.theme.accent, Modifier.weight(1f)) { yearEndOpen = true }
+    }
+}
+
+/** Grande carte d'entrée d'une expérience annuelle : l'appelant pose `Modifier.weight(1f)`. */
+@Composable
+private fun YearBigCard(emoji: String, title: String, subtitle: String, tint: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val theme = Nova.theme
+    NovaCard(Modifier.fillMaxWidth().then(modifier)) {
+        Box(
+            Modifier.fillMaxSize().clickable { onClick() }
+                .background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.30f), tint.copy(alpha = 0.10f), Color.Transparent)))
+                .padding(20.dp)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Text(emoji, fontSize = 38.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(title, color = theme.text, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(4.dp))
+                Text(subtitle, color = theme.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.weight(1f))
+                Text("Ouvrir →", color = theme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+/** 🏆 Cérémonie des Nova Awards — segment « Awards » de l'onglet Ton année. */
+@Composable
+private fun AwardsCeremony() {
     val theme = Nova.theme
     val ctx = LocalContext.current
     val app = ctx.applicationContext as NovaStatsApp

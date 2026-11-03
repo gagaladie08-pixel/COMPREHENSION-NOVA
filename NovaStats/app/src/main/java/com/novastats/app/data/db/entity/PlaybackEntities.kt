@@ -51,6 +51,8 @@ object ScrobbleStatus {
     const val PENDING = "PENDING"
     const val CONFIRMED = "CONFIRMED"
     const val CANCELLED = "CANCELLED"
+    /** Retirée volontairement du calcul, mais conservée jusqu'à restauration ou purge explicite. */
+    const val TRASHED = "TRASHED"
 }
 
 /** Table 7 — sessions (session = suite d'écoutes sans gap ≥ 15 min) */

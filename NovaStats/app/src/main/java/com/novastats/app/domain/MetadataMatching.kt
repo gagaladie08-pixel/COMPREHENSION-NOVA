@@ -49,9 +49,7 @@ enum class ApiSource(
 object DataType {
     const val COVER = "COVER"
     const val PHOTO = "PHOTO"
-
-    /** Recherche d'album (api_cache) : cache négatif des titres dont l'album reste introuvable. */
-    const val ALBUM = "ALBUM"
+    const val ALBUM_MATCH = "ALBUM_MATCH"
 }
 
 /** Résultat brut renvoyé par une source, quel que soit le type d'entité. */
@@ -71,7 +69,9 @@ data class MetaCandidate(
     /** Identifiant de l'album chez la source (pour récupérer sa liste de pistes → vérification bibliothèque). */
     val externalAlbumId: String? = null,
     /** Identifiant de l'artiste chez la source (pour récupérer ses titres connus → vérification bibliothèque). */
-    val externalArtistId: String? = null
+    val externalArtistId: String? = null,
+    /** Type de sortie fourni par le catalogue (album, single, EP, compilation), quand disponible. */
+    val releaseType: String? = null
 )
 
 /** Candidat évalué. */

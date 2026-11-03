@@ -2,6 +2,30 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.apple.android.music" />
+        <package android:name="deezer.android.app" />
+        <package android:name="com.afmobi.boomplayer" />
+        <package android:name="com.aspiro.tidal" />
+        <package android:name="com.amazon.mp3" />
+        <package android:name="com.soundcloud.android" />
+        <package android:name="com.audiomack" />
+        <package android:name="com.shazam.android" />
+        <package android:name="com.maxmpz.audioplayer" />
+        <package android:name="com.samsung.android.app.music.chn" />
+        <package android:name="com.sec.android.app.music" />
+        <package android:name="com.miui.player" />
+        <package android:name="com.transsion.tpen" />
+        <package android:name="com.transsion.music" />
+        <package android:name="org.videolan.vlc" />
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

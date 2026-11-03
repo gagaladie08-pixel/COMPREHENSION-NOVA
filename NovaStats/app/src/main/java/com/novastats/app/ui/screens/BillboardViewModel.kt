@@ -13,6 +13,7 @@ import com.novastats.app.domain.ChartAppearance
 import com.novastats.app.domain.ChartHistory
 import com.novastats.app.domain.ChartHistoryStats
 import com.novastats.app.domain.Dates
+import com.novastats.app.domain.HallOfFameRules
 import com.novastats.app.domain.Movement
 import com.novastats.app.domain.Period
 import kotlinx.coroutines.Dispatchers
@@ -39,13 +40,24 @@ data class ChartItem(
     val coverUrl: String?,
     val circle: Boolean,
     val plays: Int,
+    /** Durée totale écoutée sur la période (⏱ tri par durées). */
+    val durationMs: Long = 0,
+    /** Pour Global : écoutes réellement ajoutées pendant la semaine; ailleurs : delta vs snapshot précédent. */
     val variationPlays: Int,
     val movement: Movement,
     val periodsInChart: Int,
     val peakPosition: Int,
     val timesAtPeak: Int,
-    val isPlaysPeak: Boolean
-)
+    val isPlaysPeak: Boolean,
+    /** Rang dans le snapshot précédent (Global : snapshot hebdomadaire). */
+    val previousPosition: Int? = null,
+    /** Rang officiel du snapshot, conservé quand l'écran est réordonné par durée d'écoute. */
+    val officialPosition: Int = position
+) {
+    /** Retour au meilleur rang après l'avoir quitté; une série continue au peak n'est pas un REPEAK. */
+    val isRepeak: Boolean
+        get() = officialPosition == peakPosition && timesAtPeak > 1 && previousPosition != peakPosition
+}
 
 /** Bandeau résumé de la période. */
 data class ChartSummary(
@@ -82,6 +94,8 @@ data class BillboardUiState(
     val anchor: LocalDate = BillboardDates.latest(Period.WEEKLY, Dates.today()),
     val query: String = "",
     val movementFilter: MovementFilter? = null,
+    /** ⏱ true = classement réordonné par durées écoutées (positions recalculées 1..n). */
+    val sortDuration: Boolean = false,
     val isCurrent: Boolean = true,
     val hasAnyData: Boolean = false,
     val items: List<ChartItem> = emptyList(),
@@ -89,14 +103,25 @@ data class BillboardUiState(
 ) {
     val limit: Int get() = chart.limit(period)
     val filtered: List<ChartItem>
-        get() = items.filter { item ->
-            (query.isBlank() || item.name.contains(query, ignoreCase = true) || (item.secondary?.contains(query, ignoreCase = true) == true)) &&
-                (movementFilter == null || movementFilter.matches(item.movement))
+        get() {
+            val base = items.filter { item ->
+                (query.isBlank() || item.name.contains(query, ignoreCase = true) || (item.secondary?.contains(query, ignoreCase = true) == true)) &&
+                    (movementFilter == null || movementFilter.matches(item.movement))
+            }
+            // En mode durées : ordre par minutes écoutées, positions réaffichées 1..n (le snapshot reste intact).
+            return if (sortDuration) base.sortedByDescending { it.durationMs }.mapIndexed { i, it2 -> it2.copy(position = i + 1) } else base
         }
 
     /** Compteur par type de mouvement (sur la liste complète, hors recherche). */
     fun count(filter: MovementFilter): Int = items.count { filter.matches(it.movement) }
 }
+
+/** 🏅 L'autre moitié de la carte : certifications / Panthéon / Hall of Fame (fiche historique). */
+data class EntityExtras(
+    val certLines: List<String> = emptyList(),
+    val pantheonLabel: String? = null,
+    val hofLines: List<String> = emptyList()
+)
 
 /** Fiche historique (appui long). */
 data class EntityHistory(
@@ -105,7 +130,8 @@ data class EntityHistory(
     val period: Period,
     val appearances: List<ChartAppearance>,
     val anchors: List<LocalDate>,
-    val stats: ChartHistoryStats
+    val stats: ChartHistoryStats,
+    val extras: EntityExtras = EntityExtras()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -120,7 +146,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val anchor = MutableStateFlow(BillboardDates.latest(Period.WEEKLY, Dates.today()))
     private val query = MutableStateFlow("")
     private val movementFilter = MutableStateFlow<MovementFilter?>(null)
-    private val textAndFilter = combine(query, movementFilter) { q, f -> q to f }
+    private val sortDuration = MutableStateFlow(false)
+    private val textAndFilter = combine(query, movementFilter, sortDuration) { q, f, d -> Triple(q, f, d) }
 
     private val hasAnyData: Flow<Boolean> = db.scrobbleDao().countConfirmedFlow().map { it > 0 }
 
@@ -158,9 +185,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    val state: StateFlow<BillboardUiState> = combine(selection, textAndFilter, hasAnyData, items, summary) { s, (q, f), any, list, sum ->
+    val state: StateFlow<BillboardUiState> = combine(selection, textAndFilter, hasAnyData, items, summary) { s, (q, f, d), any, list, sum ->
         BillboardUiState(
-            chart = s.chart, period = s.period, anchor = s.anchor, query = q, movementFilter = f,
+            chart = s.chart, period = s.period, anchor = s.anchor, query = q, movementFilter = f, sortDuration = d,
             isCurrent = BillboardDates.isCurrent(s.period, s.anchor),
             hasAnyData = any, items = list, summary = sum
         )
@@ -168,6 +195,8 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _history = MutableStateFlow<EntityHistory?>(null)
     val history: StateFlow<EntityHistory?> = _history
+    private var historyRequestId = 0
+    private var compareRequestId = 0
 
     init {
         // Publie les snapshots manquants (nouveau jour / nouvelle semaine) — la période en cours n'a pas de snapshot
@@ -201,21 +230,96 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun search(q: String) { query.value = q }
 
+    /** ▶ écoutes / ⏱ durées : bascule l'ordre du classement. */
+    fun toggleSort() { sortDuration.value = !sortDuration.value }
+
     /** Appui sur une case : active le filtre, ré-appui : le retire. */
     fun toggleMovementFilter(f: MovementFilter) { movementFilter.value = if (movementFilter.value == f) null else f }
 
     fun openHistory(item: ChartItem) {
+        val requestId = ++historyRequestId
+        compareRequestId++
+        _compare.value = null
         val c = chart.value; val p = period.value
         viewModelScope.launch {
-            val rows = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) }
+            val (rows, extras) = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) to loadExtras(c, item.entityId) }
+            if (requestId != historyRequestId) return@launch
             val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
             val first = appearances.minOfOrNull { it.date } ?: anchor.value
             val anchors = BillboardDates.allAnchors(p, first, Dates.today())
-            _history.value = EntityHistory(item, c, p, appearances, anchors, ChartHistory.stats(appearances, anchors))
+            _history.value = EntityHistory(item, c, p, appearances, anchors, ChartHistory.stats(appearances, anchors), extras)
         }
     }
 
-    fun closeHistory() { _history.value = null }
+    /** 🏅 Certifications, statut Panthéon, intronisations Hall of Fame de l'entité. */
+    private suspend fun loadExtras(c: Chart, id: Long): EntityExtras {
+        val type = c.entityType
+        val certFmt = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.FRANCE)
+        val certLines = if (type != "ARTIST") db.certificationDao().history(id, type).map { hst ->
+            val lvl = com.novastats.app.domain.CertLevel.entries.firstOrNull { it.dbName == hst.level }
+            "${lvl?.emoji ?: "🏅"} ${lvl?.label ?: hst.level}${if (hst.multiplier > 1) " ×${hst.multiplier}" else ""} — ${certFmt.format(java.util.Date(hst.certifiedAt))}"
+        } else emptyList()
+        val pantheonLabel = if (type == "ARTIST")
+            db.artistDao().byIds(listOf(id)).firstOrNull()?.pantheonStatus
+                ?.let { com.novastats.app.domain.PantheonStatus.fromDb(it) }?.let { "${it.emoji} ${it.label}" }
+        else null
+        val hofEntries = db.hallOfFameDao().ofEntity(id, type)
+        val hofLines = hofEntries.filterNot { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }.map { e ->
+            when (e.entryType) {
+                "DIRECT_DEBUT" -> "⚡ Entrée directe"
+                "LONG_RUN" -> "👑 Long règne (${e.weeksAt1} ${BillboardDates.unitLabel(Period.WEEKLY, e.weeksAt1)})"
+                "TRIPLE_DEBUT" -> "🌍 Triple début"
+                "ALL_KILL" -> "💥 All-kill"
+                else -> "🌟 Règne légendaire"
+            } + " — ${e.periodType}"
+        } + hofEntries.filter { it.entryType == HallOfFameRules.PERFECT_ALL_KILL }
+            .groupBy { it.periodType }
+            .toSortedMap()
+            .map { (periodType, events) ->
+                val periodLabel = Period.entries.firstOrNull { it.dbName == periodType }?.frLabel ?: periodType
+                "💠 Perfect All Kill · $periodLabel — ${events.size} événement${if (events.size == 1) "" else "s"}"
+            }
+        return EntityExtras(certLines, pantheonLabel, hofLines)
+    }
+
+    private val _compare = MutableStateFlow<EntityHistory?>(null)
+    val compare: StateFlow<EntityHistory?> = _compare
+
+    /** ⚔️ Seconde courbe : charge l'historique de l'entité choisie. */
+    fun compareWith(item: ChartItem) {
+        val requestId = ++compareRequestId
+        val c = chart.value; val p = period.value
+        viewModelScope.launch {
+            val rows = withContext(Dispatchers.IO) { historyRows(c, p, item.entityId) }
+            if (requestId != compareRequestId) return@launch
+            val appearances = rows.map { ChartAppearance(Dates.parse(it.date), it.position, it.playCount) }
+            val first = appearances.minOfOrNull { it.date } ?: anchor.value
+            val anchors = BillboardDates.allAnchors(p, first, Dates.today())
+            _compare.value = EntityHistory(item, c, p, appearances, anchors, ChartHistory.stats(appearances, anchors))
+        }
+    }
+
+    fun clearCompare() {
+        compareRequestId++
+        _compare.value = null
+    }
+
+    /** 📤 Rend la carte du parcours (+ face-à-face) et ouvre la feuille de partage. */
+    fun shareHistory(theme: com.novastats.app.ui.theme.NovaTheme) {
+        val h = _history.value ?: return
+        val cmp = _compare.value
+        viewModelScope.launch {
+            runCatching {
+                val f = withContext(Dispatchers.IO) { com.novastats.app.ui.share.ShareCards.renderChartStory(app, h, cmp, theme) }
+                com.novastats.app.ui.share.ShareCards.share(app, f)
+            }
+        }
+    }
+
+    fun closeHistory() {
+        historyRequestId++
+        _history.value = null
+    }
 
     /* ------------------------------ data ------------------------------ */
 
@@ -226,9 +330,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                     rows.map { r ->
                         ChartItem(
                             r.row.trackId, r.row.position, r.title, r.artistName, r.coverUrl, false,
-                            r.row.playCount, r.row.variationPlays,
+                            r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
-                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
+                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak, r.row.previousPosition
                         )
                     }
                 }
@@ -237,9 +341,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                         val status = r.pantheonStatus?.let { com.novastats.app.domain.PantheonStatus.fromDb(it) }?.let { "${it.emoji} ${it.label}" }
                         ChartItem(
                             r.row.artistId, r.row.position, r.name, status, r.photoUrl, true,
-                            r.row.playCount, r.row.variationPlays,
+                            r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
-                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
+                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak, r.row.previousPosition
                         )
                     }
                 }
@@ -247,9 +351,9 @@ class BillboardViewModel(application: Application) : AndroidViewModel(applicatio
                     rows.map { r ->
                         ChartItem(
                             r.row.albumId, r.row.position, r.title, r.artistName, r.coverUrl, false,
-                            r.row.playCount, r.row.variationPlays,
+                            r.row.playCount, r.row.totalDurationMs, r.row.variationPlays,
                             Movement.of(r.row.isNew, r.row.isReentry, r.row.previousPosition, r.row.position),
-                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak
+                            r.row.daysInChart, r.row.peakPosition, r.row.timesAtPeak, r.row.isPlaysPeak, r.row.previousPosition
                         )
                     }
                 }

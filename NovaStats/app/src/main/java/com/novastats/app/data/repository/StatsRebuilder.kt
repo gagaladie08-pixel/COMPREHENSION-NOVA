@@ -8,14 +8,18 @@ import com.novastats.app.data.db.entity.DailyStreakEntity
 import com.novastats.app.data.db.entity.EntityType
 import com.novastats.app.data.db.entity.PantheonHistoryEntity
 import com.novastats.app.data.db.entity.PantheonStatusEntity
+import com.novastats.app.data.db.entity.PantheonSpeedHistoryEntity
 import com.novastats.app.data.db.entity.SessionEntity
 import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.util.runCatchingCancellable
+import com.novastats.app.util.RebuildAudit
 import com.novastats.app.domain.ArtistCertSummary
 import com.novastats.app.domain.Certification
 import com.novastats.app.domain.CertificationRules
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.PantheonRules
+import com.novastats.app.domain.PantheonCertificationEvent
+import com.novastats.app.domain.PantheonProgression
 import com.novastats.app.domain.PantheonStatus
 import com.novastats.app.domain.ScrobbleRules
 import com.novastats.app.domain.StreakCalculator
@@ -38,6 +42,48 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
     companion object {
         /** Une seule reconstruction globale à la fois, même si plusieurs composants créent leur propre Rebuilder. */
         private val rebuildMutex = Mutex()
+    }
+
+    /** Réparation ciblée des records de vitesse (certifications, Panthéon et paliers d'écoute), sans recalculer les autres familles. */
+    suspend fun rebuildFastestRecordsOnly() = rebuildMutex.withLock {
+        rebuildPantheonSpeedHistory()
+        RecordsEngine(db).rebuildSpeedRecords()
+    }
+
+    /** Répare les records issus des Top N actuels de Stats et le palmarès Most Records dépendant. */
+    suspend fun rebuildStatsTopNRecordsOnly() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildStatsTopNRecordsOnly()
+    }
+
+    /** Répare seulement le cache Most Successive #1, sans toucher aux autres records ni aux données sources. */
+    suspend fun rebuildSuccessiveRecordsOnly() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildSuccessiveRecordsOnly()
+    }
+
+    /** Initialise uniquement le nouveau cache Most Cumulative in Top 5 depuis les snapshots existants. */
+    suspend fun rebuildCumulativeTop5Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildCumulativeTop5Only()
+    }
+
+    /** Amorçage ciblé de Most Songs in Top 5 et actualisation de son palmarès dépendant. */
+    suspend fun rebuildSongsTop5Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildSongsTop5Only()
+    }
+
+    /** Amorçage ciblé de Most Debut Top 5 et actualisation du seul palmarès qui en dépend. */
+    suspend fun rebuildDebutTop5Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildDebutTop5Only()
+    }
+
+    /** Reconstitue les Perfect All Kill manquants depuis les snapshots et rafraîchit uniquement les caches HoF liés. */
+    suspend fun rebuildPerfectAllKillsOnly() = rebuildMutex.withLock {
+        BillboardEngine(db).reconcilePerfectAllKillsFromSnapshots()
+        RecordsEngine(db).rebuildHallOfFameRecordsOnly()
+    }
+
+    /** Amorçage du nouveau record cumulatif #1, sans recalcul global. */
+    suspend fun rebuildArtistCumulativeNo1Only() = rebuildMutex.withLock {
+        RecordsEngine(db).rebuildArtistCumulativeNo1Only()
     }
 
     /** Recalcule les caches des racines en un seul scan groupé des scrobbles. À appeler dans une transaction. */
@@ -74,18 +120,53 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
      * @return les nouvelles certifications / statuts Panthéon / entrées Hall of Fame apparus pendant ce recalcul
      *         (vide après un import complet, pour ne pas inonder de notifications).
      */
-    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> = rebuildMutex.withLock {
+    suspend fun rebuildAll(fullBillboard: Boolean = true, onProgress: (String) -> Unit = {}): List<Achievement> {
+        val context = RebuildAudit.context ?: return rebuildAllAudited(fullBillboard, onProgress)
+        RebuildAudit.log(context, db, "🧮 Recalcul lancé (complet=$fullBillboard)")
+        return try {
+            rebuildAllAudited(fullBillboard, onProgress).also {
+                RebuildAudit.log(context, db, "✅ Recalcul terminé (complet=$fullBillboard)")
+            }
+        } catch (t: Throwable) {
+            // L'exception remonte inchangée : seule une ligne de diagnostic est ajoutée.
+            val state = runCatching { RebuildAudit.format(RebuildAudit.snapshot(db)) }
+                .getOrDefault("comptage indisponible")
+            RebuildAudit.write(context, "❌ Recalcul interrompu (${t.javaClass.simpleName}: ${t.message}) — $state")
+            throw t
+        }
+    }
+
+    /** Corps du recalcul. Le verrou est pris par [rebuildAll] — ne pas ré-entrer. */
+    private suspend fun rebuildAllAudited(fullBillboard: Boolean, onProgress: (String) -> Unit): List<Achievement> = rebuildMutex.withLock {
         val certsBefore: Map<Pair<String, Long>, Int> = if (fullBillboard) emptyMap() else db.certificationDao().allCurrent().associate { (it.entityType to it.entityId) to it.toDomain().rank }
         val pantheonBefore: Map<Long, String> = if (fullBillboard) emptyMap() else db.pantheonDao().allCurrent().associate { it.artistId to it.currentStatus }
         val hofBefore: Set<List<String>> = if (fullBillboard) emptySet() else db.hallOfFameDao().all().map { listOf(it.entityType, it.entityId.toString(), it.periodType, it.entryType) }.toSet()
 
+        // Chaque étape est journalisée AVANT d'être exécutée : si le process meurt en route,
+        // la dernière ligne du journal nomme l'étape en cours et le comptage qui la précédait.
+        val auditContext = RebuildAudit.context
+        suspend fun audit(step: String) {
+            if (auditContext != null) RebuildAudit.step(auditContext, db, "🧮 $step")
+        }
+
+        audit("1/8 Versions + agrégats + écoutes quotidiennes")
         onProgress("Versions, agrégats titres et écoutes quotidiennes…")
         // Le repli d'une version déplace les scrobbles du root et supprime parfois le dernier titre visible.
         // Publier les compteurs + daily_plays dans la même transaction évite que les listes paraissent vides.
+        val stepOneStartedAt = System.currentTimeMillis()
         db.withTransaction {
             collapseEmptyRootsInTransaction()
+            val reattached = db.scrobbleDao().reattachOrphanAlbumPlays()
+            db.trackLinkDao().clearDanglingAlbumLinks()
+            val purged = db.albumDao().deleteEmptyShells()
+            if (reattached + purged > 0 && auditContext != null)
+                RebuildAudit.write(auditContext, "🧟 Albums fantômes : $reattached écoute(s) réattribuée(s) à l'album actuel · $purged album(s) vide(s) purgé(s)")
             recomputeEntityAggregatesInTransaction()
             recomputeDailyAggregatesInTransaction()
+        }
+        if (auditContext != null) {
+            val elapsed = System.currentTimeMillis() - stepOneStartedAt
+            RebuildAudit.write(auditContext, "⏱️ Étape 1 terminée en ${elapsed} ms")
         }
         // Règle 13 : un duo arrivé avant les titres solo a créé un album homonyme chez le partenaire → fusion continue.
         // Les play_count sont déjà à jour pour choisir le bon album à conserver.
@@ -97,25 +178,32 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
             }
         }
 
+        audit("2/8 Streaks")
         onProgress("Streaks…")
         rebuildStreaks()
 
+        audit("3/8 Sessions")
         onProgress("Sessions…")
         rebuildSessions()
 
+        audit("4/8 Certifications (vide certifications puis recalcule)")
         onProgress("Certifications…")
         rebuildCertifications()
 
+        audit("5/8 Panthéon (vide pantheon_status puis recalcule)")
         onProgress("Panthéon…")
         rebuildPantheon()
 
+        audit("6/8 Billboard")
         onProgress("Billboard…")
         val billboard = BillboardEngine(db)
         if (fullBillboard) billboard.rebuildAll(onProgress) else billboard.refreshCurrent()
 
+        audit("7/8 Records (vide records_cache puis recalcule)")
         onProgress("Records…")
         RecordsEngine(db).rebuildAll(onProgress)
 
+        audit("8/8 Nova Awards")
         onProgress("Nova Awards…")
         if (fullBillboard) AwardsEngine(db).rebuildAll() else AwardsEngine(db).refreshAll()
 
@@ -167,6 +255,11 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
     /** Caller owns the Room transaction so moving scrobbles and deleting their version rows stays atomic. */
     private suspend fun collapseEmptyRootsInTransaction() {
         val roots = db.trackDao().emptyRootsWithVersions()
+        if (roots.isEmpty()) return
+        // 🔎 Diagnostic : c'est le seul endroit du recalcul qui SUPPRIME des écoutes
+        // (dropDuplicatesAgainst) et des titres (delete). On encadre chaque version.
+        val auditContext = RebuildAudit.context
+        var before: RebuildAudit.Counts? = if (auditContext != null) RebuildAudit.snapshot(db) else null
         for (root in roots) {
             val versions = db.trackDao().versionsOf(root.trackId)
             var rootAlbumId = root.albumId
@@ -182,6 +275,14 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
                 rootAlbumId?.let { db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = root.trackId, albumId = it)) }
                 db.trackDao().fillCover(root.trackId, v.coverUrl, v.coverSource)
                 db.trackDao().delete(v.trackId) // track_artists / track_albums en cascade
+                val previous = before
+                if (auditContext != null && previous != null) {
+                    val after = RebuildAudit.snapshot(db)
+                    RebuildAudit.diff(previous, after)?.let { delta ->
+                        RebuildAudit.write(auditContext, "🧬 Repli « ${v.title} » → racine #${root.trackId} : $delta")
+                    }
+                    before = after
+                }
             }
         }
     }
@@ -322,6 +423,97 @@ class StatsRebuilder(private val db: NovaDatabase, private val library: LibraryR
                 )
                 db.artistDao().setPantheonStatus(a.artistId, status.dbName, statusDate)
             }
+        }
+        // Historique distinct et précis pour Fastest Panthéon : le flux Panthéon classique reste inchangé.
+        rebuildPantheonSpeedHistory()
+    }
+
+    /**
+     * Enregistre, pour Fastest Panthéon uniquement, le premier instant où chaque statut a été obtenu :
+     * seuil d'écoutes OU portefeuille de certifications complet, en retenant le chemin le plus rapide.
+     */
+    private suspend fun rebuildPantheonSpeedHistory() {
+        val artists = db.artistDao().allByPlays().first()
+        val currentTrackCerts = db.certificationDao().byType(EntityType.TRACK).first()
+        val currentAlbumCerts = db.certificationDao().byType(EntityType.ALBUM).first()
+        val certificationHistory = db.certificationDao().allHistory()
+
+        val artistIdsByTrack = HashMap<Long, MutableSet<Long>>()
+        db.trackLinkDao().allTrackArtists().forEach { link ->
+            artistIdsByTrack.getOrPut(link.trackId) { LinkedHashSet() }.add(link.artistId)
+        }
+        // Même repli que TrackLinkDao.artistIdsForTrack : la fiche principale compte même si un ancien import n'a pas encore son lien.
+        db.trackDao().allPlayed().forEach { track ->
+            artistIdsByTrack.getOrPut(track.trackId) { LinkedHashSet() }.add(track.artistId)
+        }
+        val albumOwner = db.albumDao().all().associate { it.albumId to it.artistId }
+        val artistById = artists.associateBy { it.artistId }
+
+        val tracksByArtist = HashMap<Long, MutableList<Certification>>()
+        for (cert in currentTrackCerts) {
+            val domain = cert.toDomain()
+            artistIdsByTrack[cert.entityId].orEmpty().forEach { artistId ->
+                tracksByArtist.getOrPut(artistId) { mutableListOf() } += domain
+            }
+        }
+        val albumsByArtist = HashMap<Long, MutableList<Certification>>()
+        for (cert in currentAlbumCerts) {
+            val domain = cert.toDomain()
+            albumOwner[cert.entityId]?.let { artistId ->
+                albumsByArtist.getOrPut(artistId) { mutableListOf() } += domain
+            }
+        }
+
+        val eventsByArtist = HashMap<Long, MutableList<PantheonCertificationEvent>>()
+        for (event in certificationHistory) {
+            val level = com.novastats.app.domain.CertLevel.entries.firstOrNull { it.dbName == event.level } ?: continue
+            if (event.certifiedAt <= 0L) continue
+            val creditedArtists = when (event.entityType) {
+                EntityType.TRACK -> artistIdsByTrack[event.entityId].orEmpty()
+                EntityType.ALBUM -> albumOwner[event.entityId]?.let { listOf(it) }.orEmpty()
+                else -> emptyList()
+            }
+            for (artistId in creditedArtists) {
+                // Un timestamp de repli « maintenant » postérieur à la dernière écoute n'est pas une date d'obtention fiable.
+                val lastPlay = artistById[artistId]?.lastPlayedAt
+                if (lastPlay != null && event.certifiedAt > lastPlay) continue
+                eventsByArtist.getOrPut(artistId) { mutableListOf() } += PantheonCertificationEvent(
+                    entityType = event.entityType,
+                    entityId = event.entityId,
+                    certification = Certification(level, event.multiplier),
+                    reachedAt = event.certifiedAt
+                )
+            }
+        }
+
+        val speedHistory = ArrayList<PantheonSpeedHistoryEntity>()
+        for (artist in artists) {
+            val certs = ArtistCertSummary(
+                tracksByArtist[artist.artistId].orEmpty(),
+                albumsByArtist[artist.artistId].orEmpty()
+            )
+            val currentStatus = PantheonRules.evaluate(artist.playCount, certs).status ?: continue
+            val certificationDates = PantheonProgression.certificationDates(eventsByArtist[artist.artistId].orEmpty())
+            for (status in PantheonStatus.entries) {
+                if (status.ordinal > currentStatus.ordinal) break
+                val playsAt = db.scrobbleDao().nthPlayOfArtist(artist.artistId, status.playsThreshold)
+                val path = PantheonProgression.earliest(playsAt, certificationDates[status]) ?: continue
+                val elapsed = artist.firstPlayedAt?.let { first -> (path.dateReached - first).takeIf { it >= 0L } }
+                val playCount = db.scrobbleDao().artistPlayCountAt(artist.artistId, path.dateReached)
+                speedHistory += PantheonSpeedHistoryEntity(
+                    artistId = artist.artistId,
+                    status = status.dbName,
+                    dateReached = path.dateReached,
+                    timeToReachMs = elapsed,
+                    playCountAtStatus = playCount,
+                    attainmentRoute = path.route.dbName
+                )
+            }
+        }
+
+        db.withTransaction {
+            db.pantheonDao().clearSpeedHistory()
+            speedHistory.chunked(500).forEach { db.pantheonDao().insertSpeedHistoryAll(it) }
         }
     }
 
