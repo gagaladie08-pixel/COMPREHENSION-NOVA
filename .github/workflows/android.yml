@@ -1,4 +1,5 @@
 name: Build NovaStats APK
+# Relance 2026-11-03 : vérifier l'injection des secrets LASTFM_API_KEY / FANART_API_KEY
 
 on:
   push:
