@@ -167,8 +167,11 @@ class LibraryRepository(private val db: NovaDatabase) {
         val primaryArtistId = artistIds.first()
         val guestIds = artistIds.drop(1)
         val guestKeys = guestIds.map { "#$it" }.toSet()
-        // Album crédité uniquement s'il s'agit d'un album de l'artiste principal ; jamais pour une compilation
-        val albumId = effectiveAlbum?.takeIf { it.isNotBlank() && !TitleNormalizer.isCompilation(it, albumArtist) }
+        // Album crédité uniquement si le nom désigne un vrai album (jamais « Unknown » / « Cover » d'un lecteur
+        // sans métadonnées — sinon un faux album bloque ensuite toute recherche d'album par les APIs),
+        // s'il s'agit d'un album de l'artiste principal, et jamais pour une compilation.
+        val albumId = TitleNormalizer.realAlbumOrNull(effectiveAlbum)
+            ?.takeIf { !TitleNormalizer.isCompilation(it, albumArtist) }
             ?.let { resolveAlbumLocked(it, primaryArtistId, albumArtist, forceShared = null, artistIds = artistIds) }
 
         // ---- 1. Remix / version AVEC artiste featuring (« Song (Remix) feat. Drake ») → titre distinct « Song (feat. Drake) », lié à l'original

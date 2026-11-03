@@ -1117,7 +1117,7 @@ private fun ApisPage() {
     val missingAlbums by app.database.albumDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
     // Titres sans album (ou avec un faux album « Unknown » / « Cover ») : la passe qui les rattache est manuelle ici.
     val albumless by app.database.trackDao()
-        .missingAlbumCount(com.novastats.app.domain.TitleNormalizer.PLACEHOLDER_ALBUM_TITLES)
+        .albumlessCount(com.novastats.app.domain.TitleNormalizer.PLACEHOLDER_ALBUM_TITLES)
         .collectAsStateWithLifecycle(initialValue = 0)
     var albumFillStatus by remember { mutableStateOf<String?>(null) }
     val reliability by app.database.apiCacheDao().reliability().collectAsStateWithLifecycle(initialValue = emptyList())

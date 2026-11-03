@@ -14,6 +14,8 @@ import com.novastats.app.data.db.entity.EditHistoryEntity
 import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.data.repository.SettingsRepository
+import com.novastats.app.domain.AlbumAutoLinkPolicy
+import com.novastats.app.domain.ReviewRules
 import com.novastats.app.domain.ApiSource
 import com.novastats.app.domain.AlbumReleaseKind
 import com.novastats.app.domain.AlbumReleasePolicy
@@ -170,6 +172,12 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     /** Invalidation du cache de résolution après l'association d'un album trouvé par cascade. */
     var onAlbumLinked: (suspend (trackId: Long) -> Unit)? = null
 
+    /**
+     * Appelé à la fin de la passe « albums manquants » quand des albums ont été rattachés :
+     * les agrégats (daily_plays.album_id, albums.play_count) doivent être recalculés (branché par NovaStatsApp).
+     */
+    var onAlbumsAttached: (suspend (count: Int) -> Unit)? = null
+
     private val albumMatchJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val albumMatchSources = listOf(ApiSource.MUSICBRAINZ, ApiSource.DEEZER, ApiSource.ITUNES, ApiSource.LASTFM, ApiSource.THEAUDIODB)
     private val musicBrainz = MusicBrainzApi()
@@ -259,6 +267,10 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     /** Applique une proposition vérifiée au morceau pour les prochaines écoutes seulement. */
     suspend fun confirmTrackAlbumSuggestion(trackId: Long, suggestion: AlbumMatchSuggestion): Boolean =
         applyTrackAlbumSuggestion(trackId, suggestion, automatic = false)
+
+    /** Rattachement automatique (passe « albums manquants ») : même écriture, journalisée `API_ALBUM_MATCH`. */
+    suspend fun autoLinkTrackAlbum(trackId: Long, suggestion: AlbumMatchSuggestion): Boolean =
+        applyTrackAlbumSuggestion(trackId, suggestion, automatic = true)
 
     /** Sélection unique, vérifiée par liste de pistes et corroborée par deux catalogues minimum. */
     private fun automaticAlbumSuggestion(suggestions: List<AlbumMatchSuggestion>): AlbumMatchSuggestion? {
@@ -666,6 +678,103 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
     data class BatchResult(val processed: Int, val found: Int, val remaining: Int)
 
+    /* ------------------------------------------------------------------ */
+    /*  Passe « albums manquants »                                         */
+    /* ------------------------------------------------------------------ */
+
+    data class AlbumFillResult(val processed: Int, val found: Int, val remaining: Int)
+
+    /**
+     * Répare les albums des titres qui n'en ont pas — ou dont l'album est un nom factice envoyé par le
+     * lecteur (« Unknown », « Unknown Album », « Cover », « Inconnu »…).
+     *
+     * Deux verrous sautaient auparavant :
+     *  1. un faux album occupe `tracks.album_id`, donc [findTrackAlbumCandidates] sortait immédiatement
+     *     (album déjà présent) et ces titres n'étaient jamais réparés ;
+     *  2. la règle stricte de la cascade (proposition unique, ≥ 95 %, 2 catalogues) est inatteignable pour
+     *     un album sorti quelques jours plus tôt.
+     *
+     * Ici : le faux album est d'abord détaché (titre, liens, écoutes), puis la recherche normale est relancée
+     * et n'accepte que les propositions vérifiées par liste de pistes ([AlbumAutoLinkPolicy]).
+     * L'association reste datée ([AlbumAssociationPolicy]) : les écoutes antérieures ne sont jamais réécrites.
+     */
+    suspend fun fillMissingAlbums(limit: Int = 20): AlbumFillResult {
+        EnrichmentState.start(mode = "Albums manquants")
+        return try {
+            fillMissingAlbumsPass(limit)
+        } finally {
+            EnrichmentState.stop()
+        }
+    }
+
+    /** Cœur de la passe, réutilisable dans un lot déjà démarré (sans toucher à [EnrichmentState]). */
+    private suspend fun fillMissingAlbumsPass(limit: Int): AlbumFillResult {
+        var processed = 0; var found = 0
+        val placeholders = TitleNormalizer.PLACEHOLDER_ALBUM_TITLES
+        val candidates = runCatchingCancellable { db.trackDao().tracksNeedingAlbum(System.currentTimeMillis(), placeholders, limit) }
+            .getOrDefault(emptyList())
+        candidates.forEach { track ->
+            EnrichmentState.current("💿 ${track.title}")
+            val ok = runCatchingCancellable { fillAlbumFor(track) }
+                .getOrElse { EnrichmentState.log("⚠️ Album de ${track.title} : ${it.message}"); false }
+            processed++; if (ok) found++
+            EnrichmentState.done(ok)
+        }
+        if (found > 0) {
+            try {
+                onAlbumsAttached?.invoke(found)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                EnrichmentState.log("⚠️ Recalcul après albums : ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+        val remaining = runCatchingCancellable {
+            db.trackDao().tracksNeedingAlbumCount(System.currentTimeMillis(), placeholders)
+        }.getOrDefault(0)
+        EnrichmentState.log(
+            "Albums manquants : $processed titre${if (processed > 1) "s" else ""} examiné${if (processed > 1) "s" else ""}, " +
+                "$found rattaché${if (found > 1) "s" else ""}${if (remaining > 0) ", $remaining en attente (nouvel essai dans 7 jours)" else ""}"
+        )
+        return AlbumFillResult(processed, found, remaining)
+    }
+
+    /** Un titre → un album : détache un éventuel faux album, puis laisse la cascade proposer et vérifier. */
+    private suspend fun fillAlbumFor(track: TrackEntity): Boolean {
+        val artist = db.artistDao().getById(track.artistId)?.name
+        if (artist.isNullOrBlank() || ReviewRules.isUnknown(artist)) return false
+        detachPlaceholderAlbum(track)
+        val suggestions = findTrackAlbumCandidates(track.trackId)
+        if (suggestions.isEmpty()) return false
+        val best = suggestions
+            .sortedWith(compareByDescending<AlbumMatchSuggestion> { it.tracklistVerified }.thenByDescending { it.confidence })
+            .firstOrNull { AlbumAutoLinkPolicy.shouldAutoLink(it.confidence, it.tracklistVerified, it.kind) }
+            ?: run {
+                val preview = suggestions.take(3).joinToString(" · ") { "${it.albumTitle} (${it.confidence} %)" }
+                EnrichmentState.log("🔎 Propositions d'album pour « ${track.title} » : $preview — confirmation requise")
+                return false
+            }
+        return autoLinkTrackAlbum(track.trackId, best)
+    }
+
+    /**
+     * Détache un album factice (« Unknown », « Cover »…) : plus de lien titre → album ni d'écoute → album,
+     * puis l'album est supprimé s'il ne sert plus. Corrige au passage l'historique fautif, sans toucher aux
+     * vrais albums.
+     */
+    private suspend fun detachPlaceholderAlbum(track: TrackEntity) {
+        val albumId = track.albumId ?: return
+        val album = db.albumDao().getById(albumId) ?: return
+        if (!TitleNormalizer.isPlaceholderAlbum(album.title)) return
+        db.withTransaction {
+            db.trackDao().setAlbumAssociation(track.trackId, null, null)
+            db.trackLinkDao().unlinkTrackAlbum(track.trackId, albumId)
+            db.scrobbleDao().setAlbumForTrack(track.trackId, null)
+        }
+        db.albumDao().deleteIfUnused(albumId)
+        EnrichmentState.log("🧹 ${track.title} : faux album « ${album.title} » détaché")
+    }
+
     suspend fun runBatch(artists: Int = 10, albums: Int = 10, tracks: Int = 25): BatchResult {
         val now = System.currentTimeMillis()
         var processed = 0; var found = 0
@@ -685,6 +794,11 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                 val ok = runCatchingCancellable { enrichAlbum(al, artist) }.getOrElse { EnrichmentState.log("⚠️ ${al.title} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)
             }
+            // Réparation des faux albums (« Unknown », « Cover ») : sinon ces titres restent bloqués
+            // hors de missingAlbumAssociation, qui exige tracks.album_id IS NULL.
+            val repaired = runCatchingCancellable { fillMissingAlbumsPass(minOf(tracks, 5)) }
+                .getOrElse { EnrichmentState.log("⚠️ Albums manquants : ${it.message}"); null }
+            if (repaired != null) { processed += repaired.processed; found += repaired.found }
             db.trackDao().missingAlbumAssociation(now, minOf(tracks, 5)).forEach { track ->
                 EnrichmentState.current("💿 Recherche d'album · ${track.title}")
                 val suggestions = runCatchingCancellable { findTrackAlbumCandidates(track.trackId) }

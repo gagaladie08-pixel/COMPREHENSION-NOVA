@@ -63,4 +63,17 @@ class AlbumPlaceholderTest {
         assertEquals("I ONE - EP", TitleNormalizer.normalizeAlbumTitle("I ONE - EP"))
         assertEquals("Greatest Hits Vol. 2", TitleNormalizer.normalizeAlbumTitle("Greatest Hits Vol. 2"))
     }
+
+    @Test
+    fun `un rattachement automatique exige une liste de pistes verifiee`() {
+        assertTrue(AlbumAutoLinkPolicy.shouldAutoLink(92, tracklistVerified = true, kind = AlbumReleaseKind.EP))
+        assertFalse(AlbumAutoLinkPolicy.shouldAutoLink(92, tracklistVerified = false, kind = AlbumReleaseKind.EP))
+        assertTrue(AlbumAutoLinkPolicy.shouldAutoLink(96, tracklistVerified = false, kind = AlbumReleaseKind.ALBUM))
+    }
+
+    @Test
+    fun `compilations et type inconnu restent en confirmation manuelle`() {
+        assertFalse(AlbumAutoLinkPolicy.shouldAutoLink(100, tracklistVerified = true, kind = AlbumReleaseKind.COMPILATION))
+        assertFalse(AlbumAutoLinkPolicy.shouldAutoLink(100, tracklistVerified = true, kind = AlbumReleaseKind.UNKNOWN))
+    }
 }

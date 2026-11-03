@@ -130,6 +130,57 @@ interface TrackDao {
     )
     suspend fun missingAlbumAssociation(now: Long, limit: Int): List<TrackEntity>
 
+    /**
+     * Titres à réparer côté album : album absent **ou** nom d'album factice (« Unknown », « Cover »…).
+     * Même exclusions que [missingAlbumAssociation] (pas de tentative récente : cache `ALBUM_MATCH`).
+     * [placeholders] : [com.novastats.app.domain.TitleNormalizer.PLACEHOLDER_ALBUM_TITLES] en minuscules.
+     */
+    @Query(
+        """
+        SELECT t.* FROM tracks t
+        WHERE (
+                t.album_id IS NULL
+                OR t.album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders))
+              )
+          AND t.play_count > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM api_cache c
+              WHERE c.entity_type = 'TRACK' AND c.entity_id = t.track_id
+                AND c.data_type = 'ALBUM_MATCH' AND c.expires_at > :now
+          )
+        ORDER BY t.play_count DESC, t.track_id LIMIT :limit
+        """
+    )
+    suspend fun tracksNeedingAlbum(now: Long, placeholders: List<String>, limit: Int): List<TrackEntity>
+
+    /** Combien de titres restent à réparer, hors tentatives récentes (fin de lot). */
+    @Query(
+        """
+        SELECT COUNT(*) FROM tracks t
+        WHERE (
+                t.album_id IS NULL
+                OR t.album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders))
+              )
+          AND t.play_count > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM api_cache c
+              WHERE c.entity_type = 'TRACK' AND c.entity_id = t.track_id
+                AND c.data_type = 'ALBUM_MATCH' AND c.expires_at > :now
+          )
+        """
+    )
+    suspend fun tracksNeedingAlbumCount(now: Long, placeholders: List<String>): Int
+
+    /** Compteur pour l'interface (Réglages → APIs), cache de tentatives inclus. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM tracks t
+        WHERE t.album_id IS NULL
+           OR t.album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders))
+        """
+    )
+    fun albumlessCount(placeholders: List<String>): Flow<Int>
+
     /** Contexte bibliothèque (vérification des pochettes) : titres connus d'un artiste / d'un album. */
     @Query("SELECT title FROM tracks WHERE artist_id = :artistId") suspend fun titlesOfArtist(artistId: Long): List<String>
     /** Titres où l'artiste est crédité (principal ou featuring) + titres des fiches homonymes (« X feat. Rihanna », « Rihanna, Y »). */
