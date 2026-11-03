@@ -217,7 +217,12 @@ object TitleNormalizer {
         "unknown genre"
     )
 
-    private val placeholderAlbumKeys: Set<String> = PLACEHOLDER_ALBUM_TITLES.map { normalizeKey(it) }.toSet()
+    // `by lazy` obligatoire : normalizeKey() utilise spaceRegex, déclaré plus bas dans l'objet.
+    // Une initialisation immédiate lèverait une NullPointerException dans l'initialiseur de TitleNormalizer
+    // (et ferait échouer toutes les classes de tests avec ExceptionInInitializerError).
+    private val placeholderAlbumKeys: Set<String> by lazy {
+        PLACEHOLDER_ALBUM_TITLES.map { normalizeKey(it) }.toSet()
+    }
 
     /** `true` si le nom d'album est vide ou factice (« Unknown », « Cover », « null »…). */
     fun isPlaceholderAlbum(album: String?): Boolean {
