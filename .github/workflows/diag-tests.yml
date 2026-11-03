@@ -1,7 +1,7 @@
 name: Diag tests
 
 # Diagnostic temporaire : les journaux Actions ne sont pas lisibles depuis l'agent,
-# on publie donc le rapport de tests directement dans le dépôt.
+# on publie donc la sortie des tests directement dans le dépôt.
 on:
   push:
     paths:
@@ -28,50 +28,23 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Tests unitaires
-        run: gradle :app:testDebugUnitTest --no-daemon --continue || true
-
-      - name: Extraire le rapport
-        if: always()
+      - name: Tests unitaires (sortie complète conservée)
         run: |
-          set -o pipefail
-          OUT="$GITHUB_WORKSPACE/ci-test-report.txt"
+          gradle :app:testDebugUnitTest --no-daemon --continue --console=plain > /tmp/tests.log 2>&1 || true
           {
-            echo "Rapport de tests — $(date -u +%FT%TZ) — commit ${GITHUB_SHA}"
+            echo "Rapport de tests — commit ${GITHUB_SHA}"
             echo "=================================================="
-            echo "--- Résumés par classe ---"
-            find app/build/test-results -name "TEST-*.xml" -print0 2>/dev/null \
-              | xargs -0 -r grep -o '<testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' || true
+            echo "--- Classes en échec ---"
+            grep -E "FAILED|> There were failing tests" /tmp/tests.log || echo "(aucun échec détecté dans la sortie Gradle)"
             echo
-            echo "--- Échecs (nom + message) ---"
-            python3 - <<'PY'
-import glob, xml.etree.ElementTree as ET
-for f in sorted(glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True)):
-    try:
-        root = ET.parse(f).getroot()
-    except Exception as e:
-        print(f"[illisible] {f}: {e}")
-        continue
-    for tc in root.iter("testcase"):
-        for kind in ("failure", "error"):
-            n = tc.find(kind)
-            if n is not None:
-                msg = (n.get("message") or "").strip().splitlines()[:6]
-                print(f"### {tc.get('classname')}.{tc.get('name')}")
-                for line in msg:
-                    print("    " + line)
-                text = (n.text or "").strip().splitlines()
-                for line in text[:25]:
-                    print("    | " + line)
-                print()
-PY
-          } > "$OUT" 2>&1
-          cat "$OUT"
+            echo "--- Extrait (200 dernières lignes utiles) ---"
+            grep -vE "^\s*$" /tmp/tests.log | tail -n 200
+          } > "$GITHUB_WORKSPACE/ci-test-report.txt"
+          tail -n 40 "$GITHUB_WORKSPACE/ci-test-report.txt"
 
       - name: Publier le rapport
         if: always()
         run: |
-          cp "$GITHUB_WORKSPACE/ci-test-report.txt" "$GITHUB_WORKSPACE/ci-test-report.txt" 2>/dev/null || true
           cd "$GITHUB_WORKSPACE"
           git config user.name "ci-diag"
           git config user.email "ci-diag@users.noreply.github.com"
