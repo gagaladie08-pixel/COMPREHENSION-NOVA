@@ -1,0 +1,232 @@
+Rapport de tests — commit d289772eb5870933123f75a70535cbfbaca281d7
+==================================================
+--- Classes en échec ---
+AlbumOwnershipTest > albums partages de la regle 12 non concernes FAILED
+AlbumPlaceholderTest > les placeholders des lecteurs sont reconnus FAILED
+AlbumPlaceholderTest > les editions sont fusionnees avec l'album principal FAILED
+AlbumPlaceholderTest > realAlbumOrNull conserve le nom exact FAILED
+AlbumPlaceholderTest > les vrais albums ne sont pas touches FAILED
+AlbumPlaceholderTest > un mot-cle court ne coupe plus un titre au milieu d'un mot FAILED
+AlbumPlaceholderTest > les suffixes qui ne sont pas des editions sont conserves FAILED
+AlbumPlaceholderTest > un album vide ou null est factice FAILED
+AlbumSharingTest > mots-cles du titre, insensibles a la casse et aux accents FAILED
+AlbumSharingTest > various artists = album partage, pas une compilation FAILED
+AlbumSharingTest > marquage manuel prime sur la detection FAILED
+AlbumSharingTest > album normal avec featurings inchange FAILED
+ArtistExceptionsTest > protectedNameInsideListIsKept FAILED
+ArtistExceptionsTest > editableListTakesEffectImmediately FAILED
+ArtistExceptionsTest > featInTitleStillExtracted FAILED
+ArtistExceptionsTest > unprotectedNamesStillSplit FAILED
+ArtistExceptionsTest > protectedNameIsNotSplit FAILED
+MetadataMatchingTest > anomalies — pas d'image et durée suspecte pénalisées FAILED
+MetadataMatchingTest > consensus — deux sources d'accord sur l'artiste ET l'album ou la durée FAILED
+MetadataMatchingTest > score artiste et album FAILED
+MetadataMatchingTest > similarité tolère accents, casse et feat FAILED
+MetadataMatchingTest > garde-fous 0_8_5 — durée différente pénalisée, artiste approximatif plafonné à 69 FAILED
+MetadataMatchingTest > contexte bibliothèque — bonus, pénalité, titre absent, non vérifiable FAILED
+MetadataMatchingTest > score piste — exact avec durée ±3 s et album = 90, consensus = 100 FAILED
+MetadataMatchingTest > score piste — mauvais artiste rejeté, titre générique rejeté FAILED
+ReviewRulesTest > unknown words detection FAILED
+ReviewRulesTest > notification without artist is 50 - artiste manquant FAILED
+ReviewRulesTest > media session complete is 100 and not reviewed FAILED
+ReviewRulesTest > complete notification is 70 and NOT in the list FAILED
+ReviewRulesTest > unknown title even from media session is reviewed FAILED
+TitleNormalizerTest > variantes feat normalisees et multiples FAILED
+TitleNormalizerTest > afterhours reste un titre tant quil nest pas lie manuellement FAILED
+TitleNormalizerTest > editions d'album fusionnees FAILED
+TitleNormalizerTest > variantes solo membre et suffixe remix nus sont normalisees FAILED
+TitleNormalizerTest > remix avec featuring signale comme version FAILED
+TitleNormalizerTest > levenshtein FAILED
+TitleNormalizerTest > emojis conserves et marques commerciales nettoyees sans couper un vrai titre FAILED
+TitleNormalizerTest > parentheses non-version conservees FAILED
+TitleNormalizerTest > compilations jamais creditees FAILED
+TitleNormalizerTest > cle normalisee FAILED
+TitleNormalizerTest > feat extrait du titre FAILED
+TitleNormalizerTest > split artistes multiples FAILED
+TitleNormalizerTest > versions fusionnees invisiblement FAILED
+> Task :app:testDebugUnitTest FAILED
+> There were failing tests. See the report at: file:///home/runner/work/COMPREHENSION-NOVA/COMPREHENSION-NOVA/NovaStats/app/build/reports/tests/testDebugUnitTest/index.html
+BUILD FAILED in 3m 27s
+
+--- Extrait (200 dernières lignes utiles) ---
+Welcome to Gradle 8.9!
+Here are the highlights of this release:
+ - Enhanced Error and Warning Messages
+ - IDE Integration Improvements
+ - Daemon JVM Information
+For more details see https://docs.gradle.org/8.9/release-notes.html
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResValues
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:javaPreCompileDebug
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/COMPREHENSION-NOVA/COMPREHENSION-NOVA/NovaStats/app/src/main/java/com/novastats/app/ui/screens/HomeScreen.kt:136:43 Condition is always 'true'.
+w: file:///home/runner/work/COMPREHENSION-NOVA/COMPREHENSION-NOVA/NovaStats/app/src/main/java/com/novastats/app/ui/screens/HomeScreen.kt:158:35 Condition is always 'true'.
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:kspDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+AlbumOwnershipTest > albums partages de la regle 12 non concernes FAILED
+    java.lang.ExceptionInInitializerError at AlbumOwnershipTest.kt:72
+        Caused by: java.lang.NullPointerException at AlbumOwnershipTest.kt:72
+AlbumPlaceholderTest > les placeholders des lecteurs sont reconnus FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:20
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumPlaceholderTest > les editions sont fusionnees avec l'album principal FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:45
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumPlaceholderTest > realAlbumOrNull conserve le nom exact FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:39
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumPlaceholderTest > les vrais albums ne sont pas touches FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:34
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumPlaceholderTest > un mot-cle court ne coupe plus un titre au milieu d'un mot FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:54
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumPlaceholderTest > les suffixes qui ne sont pas des editions sont conserves FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:63
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumPlaceholderTest > un album vide ou null est factice FAILED
+    java.lang.NoClassDefFoundError at AlbumPlaceholderTest.kt:25
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumSharingTest > mots-cles du titre, insensibles a la casse et aux accents FAILED
+    java.lang.NoClassDefFoundError at AlbumSharingTest.kt:17
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumSharingTest > various artists = album partage, pas une compilation FAILED
+    java.lang.NoClassDefFoundError at AlbumSharingTest.kt:31
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumSharingTest > marquage manuel prime sur la detection FAILED
+    java.lang.NoClassDefFoundError at AlbumSharingTest.kt:42
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+AlbumSharingTest > album normal avec featurings inchange FAILED
+    java.lang.NoClassDefFoundError at AlbumSharingTest.kt:23
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ArtistExceptionsTest > protectedNameInsideListIsKept FAILED
+    java.lang.NoClassDefFoundError at ArtistExceptionsTest.kt:22
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ArtistExceptionsTest > editableListTakesEffectImmediately FAILED
+    java.lang.NoClassDefFoundError at ArtistExceptionsTest.kt:39
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ArtistExceptionsTest > featInTitleStillExtracted FAILED
+    java.lang.NoClassDefFoundError at ArtistExceptionsTest.kt:48
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ArtistExceptionsTest > unprotectedNamesStillSplit FAILED
+    java.lang.NoClassDefFoundError at ArtistExceptionsTest.kt:31
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ArtistExceptionsTest > protectedNameIsNotSplit FAILED
+    java.lang.NoClassDefFoundError at ArtistExceptionsTest.kt:13
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > anomalies — pas d'image et durée suspecte pénalisées FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:52
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > consensus — deux sources d'accord sur l'artiste ET l'album ou la durée FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:70
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > score artiste et album FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:59
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > similarité tolère accents, casse et feat FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:16
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > garde-fous 0_8_5 — durée différente pénalisée, artiste approximatif plafonné à 69 FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:35
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > contexte bibliothèque — bonus, pénalité, titre absent, non vérifiable FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:109
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > score piste — exact avec durée ±3 s et album = 90, consensus = 100 FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:25
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+MetadataMatchingTest > score piste — mauvais artiste rejeté, titre générique rejeté FAILED
+    java.lang.NoClassDefFoundError at MetadataMatchingTest.kt:45
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ReviewRulesTest > unknown words detection FAILED
+    java.lang.NoClassDefFoundError at ReviewRulesTest.kt:31
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ReviewRulesTest > notification without artist is 50 - artiste manquant FAILED
+    java.lang.NoClassDefFoundError at ReviewRulesTest.kt:21
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ReviewRulesTest > media session complete is 100 and not reviewed FAILED
+    java.lang.NoClassDefFoundError at ReviewRulesTest.kt:11
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ReviewRulesTest > complete notification is 70 and NOT in the list FAILED
+    java.lang.NoClassDefFoundError at ReviewRulesTest.kt:16
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+ReviewRulesTest > unknown title even from media session is reviewed FAILED
+    java.lang.NoClassDefFoundError at ReviewRulesTest.kt:26
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > variantes feat normalisees et multiples FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:57
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > afterhours reste un titre tant quil nest pas lie manuellement FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:36
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > editions d'album fusionnees FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:85
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > variantes solo membre et suffixe remix nus sont normalisees FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:28
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > remix avec featuring signale comme version FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:68
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > levenshtein FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:124
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > emojis conserves et marques commerciales nettoyees sans couper un vrai titre FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:104
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > parentheses non-version conservees FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:43
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > compilations jamais creditees FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:92
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > cle normalisee FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:118
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > feat extrait du titre FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:48
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > split artistes multiples FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:111
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+TitleNormalizerTest > versions fusionnees invisiblement FAILED
+    java.lang.NoClassDefFoundError at TitleNormalizerTest.kt:16
+        Caused by: java.lang.ExceptionInInitializerError at Rules.kt:362
+148 tests completed, 43 failed
+> Task :app:testDebugUnitTest FAILED
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1793691094526.json
+FAILURE: Build failed with an exception.
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/runner/work/COMPREHENSION-NOVA/COMPREHENSION-NOVA/NovaStats/app/build/reports/tests/testDebugUnitTest/index.html
+* Try:
+> Run with --scan to get full insights.
+BUILD FAILED in 3m 27s
+26 actionable tasks: 26 executed
