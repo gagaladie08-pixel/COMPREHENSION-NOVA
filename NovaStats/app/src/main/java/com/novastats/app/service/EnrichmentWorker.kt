@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
 /**
- * Enrichissement en arrière-plan : traite un lot (10 artistes + 10 albums + 25 titres), puis se replanifie
+ * Enrichissement en arrière-plan : traite un lot (10 artistes + 10 albums manquants + 10 albums + 25 titres), puis se replanifie
  * tant qu'il reste des entités sans image. Respecte les limites de débit de chaque API via les RateLimiter.
  */
 class EnrichmentWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {

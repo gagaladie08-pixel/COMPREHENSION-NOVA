@@ -112,6 +112,44 @@ interface TrackDao {
     suspend fun missingCover(now: Long, limit: Int): List<TrackEntity>
 
     @Query("SELECT COUNT(*) FROM tracks WHERE cover_url IS NULL") fun missingCoverCount(): Flow<Int>
+
+    /**
+     * Titres dont l'album est absent **ou factice** (« Unknown », « Cover »…), hors tentatives récentes
+     * (cache négatif `api_cache` data_type = 'ALBUM'). Les plus écoutés d'abord.
+     *
+     * [placeholders] : titres d'album factices en minuscules ([com.novastats.app.domain.TitleNormalizer.PLACEHOLDER_ALBUM_TITLES]).
+     */
+    @Query(
+        """
+        SELECT * FROM tracks
+        WHERE (album_id IS NULL OR album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders)))
+          AND track_id NOT IN
+            (SELECT entity_id FROM api_cache WHERE entity_type = 'TRACK' AND data_type = 'ALBUM' AND expires_at > :now)
+        ORDER BY play_count DESC LIMIT :limit
+        """
+    )
+    suspend fun missingAlbum(now: Long, placeholders: List<String>, limit: Int): List<TrackEntity>
+
+    /** Combien de titres restent à rattacher, hors cache négatif — sert à savoir si un nouveau lot est utile. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM tracks
+        WHERE (album_id IS NULL OR album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders)))
+          AND track_id NOT IN
+            (SELECT entity_id FROM api_cache WHERE entity_type = 'TRACK' AND data_type = 'ALBUM' AND expires_at > :now)
+        """
+    )
+    suspend fun missingAlbumCountNow(now: Long, placeholders: List<String>): Int
+
+    /** Même compteur pour l'interface (Réglages → APIs), cache négatif inclus. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM tracks
+        WHERE album_id IS NULL OR album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders))
+        """
+    )
+    fun missingAlbumCount(placeholders: List<String>): Flow<Int>
+
     /** Contexte bibliothèque (vérification des pochettes) : titres connus d'un artiste / d'un album. */
     @Query("SELECT title FROM tracks WHERE artist_id = :artistId") suspend fun titlesOfArtist(artistId: Long): List<String>
     /** Titres où l'artiste est crédité (principal ou featuring) + titres des fiches homonymes (« X feat. Rihanna », « Rihanna, Y »). */

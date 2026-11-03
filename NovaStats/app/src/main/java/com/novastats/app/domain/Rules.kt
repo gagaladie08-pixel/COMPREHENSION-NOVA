@@ -165,18 +165,31 @@ object TitleNormalizer {
     )
 
     /**
+     * Détection d'un marqueur d'édition **par mot entier**.
+     *
+     * L'ancien `keyword.contains(it)` déclenchait des faux positifs sur les mots-clés courts :
+     * « Immortal (Music from the Cirque du Soleil Show) » était raccourci à cause du « us » de « music »,
+     * « (Beautiful Tour Version) » à cause de « tour ». Ici « us », « eu », « uk », « tour » ne valent
+     * que s'ils forment un mot à part entière.
+     */
+    private val editionMarkerRegex: Regex by lazy {
+        val alternatives = ALBUM_EDITION_KEYWORDS.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
+        Regex("""(?<![\p{L}\p{N}])($alternatives)(?![\p{L}\p{N}])""")
+    }
+
+    fun hasEditionMarker(text: String): Boolean = editionMarkerRegex.containsMatchIn(text.lowercase())
+
+    /**
      * Normalise un titre d'album : "Born Pink (Japan Edition)" / "Born Pink - Deluxe" → "Born Pink".
      * Les suffixes qui NE sont PAS des marqueurs d'édition ("Vol. 2", "Part 1") sont conservés.
      */
     fun normalizeAlbumTitle(raw: String): String {
         var title = raw.trim()
         title = bracketRegex.replace(title) { m ->
-            val inner = m.groupValues[1].lowercase()
-            if (ALBUM_EDITION_KEYWORDS.any { inner.contains(it) }) "" else m.value
+            if (hasEditionMarker(m.groupValues[1])) "" else m.value
         }
         dashSuffixRegex.find(title)?.let { m ->
-            val suffix = m.groupValues[1].lowercase()
-            if (ALBUM_EDITION_KEYWORDS.any { suffix.contains(it) }) title = title.removeSuffix(m.value)
+            if (hasEditionMarker(m.groupValues[1])) title = title.removeSuffix(m.value)
         }
         // Suffixe sans séparateur : "Born Pink Deluxe Edition", "Thriller 25th Anniversary"
         val words = title.split(' ').toMutableList()
@@ -187,6 +200,35 @@ object TitleNormalizer {
         title = spaceRegex.replace(words.joinToString(" "), " ").trim()
         return title.ifBlank { raw.trim() }
     }
+
+    /* ---------- Noms d'album factices envoyés par certains lecteurs ---------- */
+
+    /**
+     * Valeurs d'album qui ne désignent **aucun** album réel : lecteurs sans métadonnées (YouTube, navigateurs,
+     * webradios) qui envoient « Unknown », « Unknown Album », « Cover »… Ces valeurs ne doivent jamais créer
+     * d'album en base (sinon un faux album apparaît dans les charts et le vrai n'est jamais cherché).
+     * Liste brute en minuscules, telle qu'elle peut être stockée en base (utilisée aussi par les requêtes SQL).
+     */
+    val PLACEHOLDER_ALBUM_TITLES: List<String> = listOf(
+        "unknown", "unknown album", "album unknown", "unknown album name",
+        "inconnu", "album inconnu", "inconnue",
+        "<unknown>", "n/a", "na", "none", "null", "-", "—", "?",
+        "cover", "covers", "cover songs", "no album", "sans album", "aucun album",
+        "unknown genre"
+    )
+
+    private val placeholderAlbumKeys: Set<String> = PLACEHOLDER_ALBUM_TITLES.map { normalizeKey(it) }.toSet()
+
+    /** `true` si le nom d'album est vide ou factice (« Unknown », « Cover », « null »…). */
+    fun isPlaceholderAlbum(album: String?): Boolean {
+        if (album.isNullOrBlank()) return true
+        val key = normalizeKey(album)
+        return key.isBlank() || key in placeholderAlbumKeys
+    }
+
+    /** Nom d'album utilisable, ou `null` si vide / factice. */
+    fun realAlbumOrNull(album: String?): String? =
+        album?.trim()?.takeIf { it.isNotEmpty() && !isPlaceholderAlbum(it) }
 
     // Les mots de version officiels sont déjà retirés par les suffixes (« Official Video/Audio »).
     // Ne jamais supprimer « official » en plein milieu d'un vrai titre (ex. « Officially Missing You »).

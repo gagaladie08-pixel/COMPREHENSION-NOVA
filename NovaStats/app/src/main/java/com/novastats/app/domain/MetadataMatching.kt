@@ -49,6 +49,9 @@ enum class ApiSource(
 object DataType {
     const val COVER = "COVER"
     const val PHOTO = "PHOTO"
+
+    /** Recherche d'album (api_cache) : cache négatif des titres dont l'album reste introuvable. */
+    const val ALBUM = "ALBUM"
 }
 
 /** Résultat brut renvoyé par une source, quel que soit le type d'entité. */

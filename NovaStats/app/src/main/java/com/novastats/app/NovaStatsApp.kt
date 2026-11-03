@@ -38,6 +38,10 @@ class NovaStatsApp : Application() {
             enricher.onTrackFlagged = { trackId, title, artist, proposal, score ->
                 com.novastats.app.service.ReviewNotifier.notifyFlagged(this@NovaStatsApp, trackId, title, artist, proposal, score)
             }
+            // Un album rattaché après coup change les agrégats Albums (charts, certifications) → recalcul.
+            enricher.onAlbumsAttached = { count ->
+                if (count > 0) runCatching { rebuilder.rebuildAll(onProgress = { }) }
+            }
         }
     }
     val editor: DataEditorManager by lazy { DataEditorManager(database, rebuilder, library) }

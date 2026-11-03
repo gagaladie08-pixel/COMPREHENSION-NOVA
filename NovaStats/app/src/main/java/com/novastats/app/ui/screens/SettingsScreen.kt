@@ -1047,6 +1047,11 @@ private fun ApisPage() {
     val missingTracks by app.database.trackDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
     val missingArtists by app.database.artistDao().missingPhotoCount().collectAsStateWithLifecycle(initialValue = 0)
     val missingAlbums by app.database.albumDao().missingCoverCount().collectAsStateWithLifecycle(initialValue = 0)
+    // Titres sans album (ou avec un faux album « Unknown » / « Cover ») : la passe qui les rattache est manuelle ici.
+    val albumless by app.database.trackDao()
+        .missingAlbumCount(com.novastats.app.domain.TitleNormalizer.PLACEHOLDER_ALBUM_TITLES)
+        .collectAsStateWithLifecycle(initialValue = 0)
+    var albumFillStatus by remember { mutableStateOf<String?>(null) }
     val reliability by app.database.apiCacheDao().reliability().collectAsStateWithLifecycle(initialValue = emptyList())
     val sources = remember { app.enricher.configuredSources() }
     var confirmAll by remember { mutableStateOf(false) }
@@ -1076,6 +1081,29 @@ private fun ApisPage() {
                     onClick = { EnrichmentWorker.enqueue(context, manual = true) }, enabled = !enrich.running,
                     colors = ButtonDefaults.buttonColors(containerColor = theme.primary), modifier = Modifier.fillMaxWidth()
                 ) { Text(if (enrich.running) "Enrichissement en cours…" else "🌐 Enrichir maintenant") }
+                Spacer(Modifier.height(6.dp))
+                // Album manquant : les sources ne cherchaient jusqu'ici que des pochettes.
+                OutlinedButton(
+                    onClick = {
+                        albumFillStatus = "Recherche des albums…"
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) { app.enricher.fillMissingAlbums(limit = 40) }
+                            albumFillStatus = if (r.found > 0)
+                                "✅ ${r.found} album(s) rattaché(s)${if (r.remaining > 0) " · ${r.remaining} restant(s)" else ""}"
+                            else
+                                "Aucun album trouvé pour ${r.processed} titre(s)${if (r.remaining > 0) " · ${r.remaining} restant(s)" else ""} · nouvel essai dans 7 jours"
+                        }
+                    },
+                    enabled = !enrich.running, modifier = Modifier.fillMaxWidth()
+                ) { Text("💿 Compléter les albums manquants ($albumless)", maxLines = 1) }
+                Text(
+                    albumFillStatus ?: "Titres écoutés sans album (lecteur qui n'envoie pas le nom, ou « Unknown » / « Cover ») : " +
+                        "le nom d'album est cherché par titre, puis vérifié dans la liste de pistes de l'album candidat. " +
+                        "$albumless titre(s) concerné(s) aujourd'hui.",
+                    color = if (albumFillStatus == null) theme.textSecondary else theme.primary,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
                 Spacer(Modifier.height(6.dp))
                 // Ré-enrichissement forcé : tout, ou une sélection (page dédiée)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -1,6 +1,7 @@
 package com.novastats.app.data.api
 
 import android.util.Log
+import androidx.room.withTransaction
 import com.novastats.app.data.ApiKeys
 import com.novastats.app.data.api.HttpJson.HttpException
 import com.novastats.app.data.db.NovaDatabase
@@ -8,7 +9,9 @@ import com.novastats.app.data.db.entity.AlbumEntity
 import com.novastats.app.data.db.entity.ApiCacheEntity
 import com.novastats.app.data.db.entity.ApiReliabilityEntity
 import com.novastats.app.data.db.entity.ArtistEntity
+import com.novastats.app.data.db.entity.EditHistoryEntity
 import com.novastats.app.data.db.entity.EntityType
+import com.novastats.app.data.db.entity.TrackAlbumEntity
 import com.novastats.app.data.db.entity.TrackEntity
 import com.novastats.app.data.repository.SettingsRepository
 import com.novastats.app.domain.ApiSource
@@ -16,6 +19,7 @@ import com.novastats.app.domain.DataType
 import com.novastats.app.domain.Dates
 import com.novastats.app.domain.MetaCandidate
 import com.novastats.app.domain.MetadataMatching
+import com.novastats.app.domain.ReviewRules
 import com.novastats.app.domain.ScoredCandidate
 import com.novastats.app.util.runCatchingCancellable
 import com.novastats.app.domain.TitleNormalizer
@@ -118,6 +122,13 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
     /** 🟡 Correspondance acceptée avec flag (70-89) → notification discrète (branché par NovaStatsApp). */
     var onTrackFlagged: (suspend (trackId: Long, title: String, artist: String, proposal: String, score: Int) -> Unit)? = null
+
+    /**
+     * Appelé quand des albums viennent d'être rattachés à des titres (passe « album manquant ») :
+     * les agrégats (`daily_plays.album_id`, `albums.play_count`) doivent être recalculés pour que les
+     * charts Albums et les certifications voient le nouveau rattachement (branché par NovaStatsApp).
+     */
+    var onAlbumsAttached: (suspend (count: Int) -> Unit)? = null
 
     private val musicBrainz = MusicBrainzApi()
     private val apis: Map<ApiSource, MusicApi> = listOf(
@@ -262,7 +273,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
 
     data class BatchResult(val processed: Int, val found: Int, val remaining: Int)
 
-    suspend fun runBatch(artists: Int = 10, albums: Int = 10, tracks: Int = 25): BatchResult {
+    suspend fun runBatch(artists: Int = 10, albums: Int = 10, tracks: Int = 25, albumsToFill: Int = 10): BatchResult {
         val now = System.currentTimeMillis()
         var processed = 0; var found = 0
         EnrichmentState.start()
@@ -271,6 +282,13 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                 EnrichmentState.current("🎤 ${a.name}")
                 val ok = runCatchingCancellable { enrichArtist(a) }.getOrElse { EnrichmentState.log("⚠️ ${a.name} : ${it.message}"); false }
                 processed++; if (ok) found++; EnrichmentState.done(ok)
+            }
+            // Album manquant : jusqu'ici les sources ne cherchaient que des pochettes. On rattache d'abord les albums
+            // absents ou factices, puis la pochette du nouvel album est traitée par la boucle ci-dessous.
+            if (albumsToFill > 0) {
+                val fill = runCatchingCancellable { fillMissingAlbumsPass(albumsToFill) }
+                    .getOrElse { EnrichmentState.log("⚠️ Albums manquants : ${it.message}"); null }
+                if (fill != null) { processed += fill.processed; found += fill.found }
             }
             db.albumDao().missingCover(now, albums).forEach { al ->
                 // Album partagé (BO…) : recherche avec l'artiste principal du titre le plus écouté
@@ -292,7 +310,8 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             EnrichmentState.stop()
         }
         val later = System.currentTimeMillis()
-        val remaining = db.artistDao().missingPhoto(later, 1).size + db.albumDao().missingCover(later, 1).size + db.trackDao().missingCover(later, 1).size
+        val remaining = db.artistDao().missingPhoto(later, 1).size + db.albumDao().missingCover(later, 1).size +
+            db.trackDao().missingCover(later, 1).size + db.trackDao().missingAlbumCountNow(later, TitleNormalizer.PLACEHOLDER_ALBUM_TITLES)
         EnrichmentState.log("Lot terminé : $processed traités, $found enrichis${if (remaining > 0) ", suite à venir" else ""}")
         return BatchResult(processed, found, remaining)
     }
@@ -357,6 +376,9 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
      * (source USER) sont conservées ; les URL rejetées restent en liste noire.
      */
     suspend fun refreshAll(): BatchResult {
+        // Les albums absents/factices d'abord : un titre rattaché à son album hérite ensuite de sa pochette.
+        runCatchingCancellable { fillMissingAlbumsPass(limit = 40) }
+            .onFailure { EnrichmentState.log("⚠️ Albums manquants : ${it.message}") }
         val targets = db.artistDao().idsForRefresh().map { RefreshTarget(EntityType.ARTIST, it) } +
             db.albumDao().idsForRefresh().map { RefreshTarget(EntityType.ALBUM, it) } +
             db.trackDao().idsForRefresh().map { RefreshTarget(EntityType.TRACK, it) }
@@ -393,6 +415,148 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                 ?.firstOrNull { MetadataMatching.similarity(it.name, a.name) >= 0.85 && !it.bio.isNullOrBlank() }?.bio
             if (bio != null) { db.artistDao().getById(a.artistId)?.let { db.artistDao().update(it.copy(bio = bio)) }; return }
         }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Passe « album manquant »                                           */
+    /* ------------------------------------------------------------------ */
+
+    data class AlbumFillResult(val processed: Int, val found: Int, val remaining: Int)
+
+    /**
+     * Cherche aux APIs l'album des titres qui n'en ont pas — ou dont l'album est un nom factice
+     * (« Unknown », « Cover »…). C'était le chaînon manquant : [enrichTrack] n'écrit que des pochettes,
+     * et [enrichAlbum] ne sait interroger qu'un album **déjà** en base : un titre sans album n'était donc
+     * jamais un travail à faire pour les sources.
+     *
+     * Règle d'acceptation : le nom d'album proposé n'est retenu que si la source confirme que le titre
+     * figure dans cet album (liste de pistes). Sans liste disponible, il faut un score ≥ [MetadataMatching.TRUSTED].
+     */
+    suspend fun fillMissingAlbums(limit: Int = 20): AlbumFillResult {
+        EnrichmentState.start(mode = "Albums manquants")
+        return try {
+            fillMissingAlbumsPass(limit)
+        } finally {
+            EnrichmentState.stop()
+        }
+    }
+
+    /** Cœur de la passe, sans toucher à l'état global (utilisable dans un lot déjà démarré). */
+    private suspend fun fillMissingAlbumsPass(limit: Int): AlbumFillResult {
+        var processed = 0; var found = 0
+        val now = System.currentTimeMillis()
+        val candidates = runCatchingCancellable {
+            db.trackDao().missingAlbum(now, TitleNormalizer.PLACEHOLDER_ALBUM_TITLES, limit)
+        }.getOrDefault(emptyList())
+        candidates.forEach { t ->
+            val artist = runCatchingCancellable { db.artistDao().getById(t.artistId)?.name }.getOrNull()
+            if (artist.isNullOrBlank() || ReviewRules.isUnknown(artist)) {
+                // Artiste inconnu : aucune recherche fiable possible, on ne réessaie pas tout de suite.
+                negativeCache(EntityType.TRACK, t.trackId, DataType.ALBUM)
+                return@forEach
+            }
+            EnrichmentState.current("💿 ${t.title}")
+            val ok = runCatchingCancellable { fillAlbumFor(t, artist) }
+                .getOrElse { EnrichmentState.log("⚠️ ${t.title} : ${it.message}"); false }
+            processed++; if (ok) found++
+            EnrichmentState.done(ok)
+        }
+        if (found > 0) {
+            try {
+                onAlbumsAttached?.invoke(found)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                EnrichmentState.log("⚠️ Recalcul après albums : ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+        val remaining = runCatchingCancellable {
+            db.trackDao().missingAlbumCountNow(System.currentTimeMillis(), TitleNormalizer.PLACEHOLDER_ALBUM_TITLES)
+        }.getOrDefault(0)
+        EnrichmentState.log(
+            "Albums manquants : $processed titre${if (processed > 1) "s" else ""} examiné${if (processed > 1) "s" else ""}, " +
+                "$found rattaché${if (found > 1) "s" else ""}${if (remaining > 0) ", $remaining restant${if (remaining > 1) "s" else ""}" else ""}"
+        )
+        return AlbumFillResult(processed, found, remaining)
+    }
+
+    /** Un titre → un album : recherche par titre, puis vérification par la liste de pistes du candidat. */
+    private suspend fun fillAlbumFor(t: TrackEntity, artistName: String): Boolean {
+        val sources = ApiSource.entries
+            .filter { !it.retired && !it.isLastResort && it.trackPriority > 0 && hasKey(it) && apis.containsKey(it) }
+            .sortedBy { it.trackPriority }.take(6)
+        if (sources.isEmpty()) return false
+        val results: List<MetaCandidate> = coroutineScope {
+            sources.map { s ->
+                async {
+                    kotlinx.coroutines.withTimeoutOrNull(8_000L) {
+                        runCatchingCancellable { apis.getValue(s).searchTrack(t.title, artistName) }.getOrDefault(emptyList())
+                    } ?: emptyList()
+                }
+            }.map { it.await() }
+        }.flatten()
+        if (results.isEmpty()) { negativeCache(EntityType.TRACK, t.trackId, DataType.ALBUM); return false }
+
+        val consensus = MetadataMatching.consensusSet(results)
+        val ranked = results
+            .filter { !TitleNormalizer.isPlaceholderAlbum(it.album) }
+            .map { c -> MetadataMatching.scoreTrack(c, t.title, artistName, null, t.durationMs, c in consensus) }
+            .filter { it.score >= MetadataMatching.ACCEPT }
+            .sortedByDescending { it.score }
+            .distinctBy { TitleNormalizer.normalizeKey(it.candidate.album ?: "") + "|" + TitleNormalizer.normalizeKey(it.candidate.artist ?: "") }
+            .take(3)
+        if (ranked.isEmpty()) { negativeCache(EntityType.TRACK, t.trackId, DataType.ALBUM); return false }
+
+        val wantedKey = TitleNormalizer.normalizeKey(t.title)
+        for (sc in ranked) {
+            val albumName = sc.candidate.album?.trim().orEmpty()
+            if (albumName.isEmpty()) continue
+            val list = tracklistOf(sc.candidate)
+            val confirmed = when {
+                // Liste de pistes indisponible chez cette source → seul un score très sûr est accepté.
+                list.isNullOrEmpty() -> sc.score >= MetadataMatching.TRUSTED
+                else -> list.any { MetadataMatching.titlesMatch(TitleNormalizer.normalizeKey(it), wantedKey) }
+            }
+            if (confirmed && attachAlbum(t, albumName, sc.candidate.source.label, sc.score)) return true
+        }
+        negativeCache(EntityType.TRACK, t.trackId, DataType.ALBUM)
+        return false
+    }
+
+    /** Crée (ou réutilise) l'album, le rattache au titre et à ses écoutes, puis journalise l'opération. */
+    private suspend fun attachAlbum(t: TrackEntity, albumName: String, sourceLabel: String, score: Int): Boolean {
+        val title = TitleNormalizer.normalizeAlbumTitle(albumName)
+        if (title.isBlank()) return false
+        val previousAlbumId = t.albumId
+        val previousTitle = previousAlbumId?.let { runCatchingCancellable { db.albumDao().getById(it)?.title }.getOrNull() }
+        val albumId = db.withTransaction {
+            val found = db.albumDao().findByTitleAndArtist(title, t.artistId)?.albumId
+                ?: db.albumDao().insert(AlbumEntity(title = title, titleRaw = albumName, artistId = t.artistId))
+            db.trackDao().setAlbum(t.trackId, found)
+            if (previousAlbumId != null && previousAlbumId != found) db.trackLinkDao().unlinkTrackAlbum(t.trackId, previousAlbumId)
+            db.trackLinkDao().insertTrackAlbum(TrackAlbumEntity(trackId = t.trackId, albumId = found))
+            // Les écoutes déjà enregistrées suivent, sinon les charts Albums resteraient vides.
+            db.scrobbleDao().setAlbumForTrack(t.trackId, found)
+            db.editorDao().insertEdit(
+                EditHistoryEntity(
+                    type = "API_ALBUM_MATCH", entityType = "TRACK", entityId = t.trackId,
+                    before = previousTitle ?: "Aucun album", after = title,
+                    extraData = "$sourceLabel · $score"
+                )
+            )
+            found
+        }
+        // Un faux album (« Unknown », « Cover ») vidé de ses titres ne doit plus apparaître nulle part.
+        if (previousAlbumId != null && previousAlbumId != albumId) runCatchingCancellable { db.albumDao().deleteIfUnused(previousAlbumId) }
+        // Pochette déjà connue de l'album (autre titre du même album) → appliquée tout de suite au titre.
+        runCatchingCancellable { db.albumDao().getById(albumId) }.getOrNull()?.let { al ->
+            al.coverUrl?.let { db.trackDao().applyAlbumCoverIfMissing(t.trackId, it, al.coverSource) }
+        }
+        EnrichmentState.log(
+            "💿 ${t.title} → album « $title » ($sourceLabel · $score)" +
+                (previousTitle?.takeIf { it != title }?.let { ", avant « $it »" } ?: "")
+        )
+        return true
     }
 
     /**
