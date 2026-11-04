@@ -682,7 +682,11 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
     /*  Passe « albums manquants »                                         */
     /* ------------------------------------------------------------------ */
 
-    data class AlbumFillResult(val processed: Int, val found: Int, val remaining: Int)
+    /**
+     * [waiting] : titres dont l'album a déjà été cherché sans succès (cache négatif encore valable).
+     * Un appui sur le bouton force un nouvel essai pour eux.
+     */
+    data class AlbumFillResult(val processed: Int, val found: Int, val remaining: Int, val waiting: Int = 0)
 
     /**
      * Répare les albums des titres qui n'en ont pas — ou dont l'album est un nom factice envoyé par le
@@ -698,24 +702,31 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
      * et n'accepte que les propositions vérifiées par liste de pistes ([AlbumAutoLinkPolicy]).
      * L'association reste datée ([AlbumAssociationPolicy]) : les écoutes antérieures ne sont jamais réécrites.
      */
-    suspend fun fillMissingAlbums(limit: Int = 20): AlbumFillResult {
-        EnrichmentState.start(mode = "Albums manquants")
+    suspend fun fillMissingAlbums(limit: Int = 40, force: Boolean = true): AlbumFillResult {
+        EnrichmentState.start(mode = if (force) "Albums manquants · nouvel essai" else "Albums manquants")
         return try {
-            fillMissingAlbumsPass(limit)
+            fillMissingAlbumsPass(limit, force)
         } finally {
             EnrichmentState.stop()
         }
     }
 
-    /** Cœur de la passe, réutilisable dans un lot déjà démarré (sans toucher à [EnrichmentState]). */
-    private suspend fun fillMissingAlbumsPass(limit: Int): AlbumFillResult {
+    /**
+     * Cœur de la passe, réutilisable dans un lot déjà démarré (sans toucher à [EnrichmentState]).
+     *
+     * [force] = demande explicite de l'utilisateur : le cache « rien trouvé » (7 jours) est ignoré et
+     * chaque titre est réinterrogé. Sans [force] (lots automatiques), le cache protège les quotas.
+     */
+    private suspend fun fillMissingAlbumsPass(limit: Int, force: Boolean = false): AlbumFillResult {
         var processed = 0; var found = 0
         val placeholders = TitleNormalizer.PLACEHOLDER_ALBUM_TITLES
-        val candidates = runCatchingCancellable { db.trackDao().tracksNeedingAlbum(System.currentTimeMillis(), placeholders, limit) }
-            .getOrDefault(emptyList())
+        val candidates = runCatchingCancellable {
+            if (force) db.trackDao().tracksNeedingAlbumIgnoringCache(placeholders, limit)
+            else db.trackDao().tracksNeedingAlbum(System.currentTimeMillis(), placeholders, limit)
+        }.getOrDefault(emptyList())
         candidates.forEach { track ->
             EnrichmentState.current("💿 ${track.title}")
-            val ok = runCatchingCancellable { fillAlbumFor(track) }
+            val ok = runCatchingCancellable { fillAlbumFor(track, force) }
                 .getOrElse { EnrichmentState.log("⚠️ Album de ${track.title} : ${it.message}"); false }
             processed++; if (ok) found++
             EnrichmentState.done(ok)
@@ -732,20 +743,32 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
         val remaining = runCatchingCancellable {
             db.trackDao().tracksNeedingAlbumCount(System.currentTimeMillis(), placeholders)
         }.getOrDefault(0)
+        val waiting = runCatchingCancellable {
+            db.apiCacheDao().pendingIds(DataType.ALBUM_MATCH).size
+        }.getOrDefault(0)
         EnrichmentState.log(
-            "Albums manquants : $processed titre${if (processed > 1) "s" else ""} examiné${if (processed > 1) "s" else ""}, " +
-                "$found rattaché${if (found > 1) "s" else ""}${if (remaining > 0) ", $remaining en attente (nouvel essai dans 7 jours)" else ""}"
+            when {
+                processed == 0 -> "Albums manquants : aucun titre à traiter (tous rattachés)"
+                found > 0 -> "Albums manquants : $processed titre${if (processed > 1) "s" else ""} examiné${if (processed > 1) "s" else ""}, " +
+                    "$found rattaché${if (found > 1) "s" else ""}${if (remaining > 0) ", $remaining en attente" else ""}"
+                else -> "Albums manquants : $processed titre${if (processed > 1) "s" else ""} examiné${if (processed > 1) "s" else ""}, " +
+                    "aucune proposition assez sûre${if (waiting > 0) " · $waiting titre${if (waiting > 1) "s" else ""} réessayé${if (waiting > 1) "s" else ""} automatiquement demain" else ""}"
+            }
         )
-        return AlbumFillResult(processed, found, remaining)
+        return AlbumFillResult(processed, found, remaining, waiting)
     }
 
     /** Un titre → un album : détache un éventuel faux album, puis laisse la cascade proposer et vérifier. */
-    private suspend fun fillAlbumFor(track: TrackEntity): Boolean {
+    private suspend fun fillAlbumFor(track: TrackEntity, force: Boolean = false): Boolean {
         val artist = db.artistDao().getById(track.artistId)?.name
         if (artist.isNullOrBlank() || ReviewRules.isUnknown(artist)) return false
         detachPlaceholderAlbum(track)
-        val suggestions = findTrackAlbumCandidates(track.trackId)
-        if (suggestions.isEmpty()) return false
+        // force = demande explicite : on ignore le cache « rien trouvé » (7 jours) propre à la cascade.
+        val suggestions = findTrackAlbumCandidates(track.trackId, forceRefresh = force)
+        if (suggestions.isEmpty()) {
+            if (force) awaitingRetryLater(track.trackId)
+            return false
+        }
         val best = suggestions
             .sortedWith(compareByDescending<AlbumMatchSuggestion> { it.tracklistVerified }.thenByDescending { it.confidence })
             .firstOrNull { AlbumAutoLinkPolicy.shouldAutoLink(it.confidence, it.tracklistVerified, it.kind) }
@@ -754,7 +777,22 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
                 EnrichmentState.log("🔎 Propositions d'album pour « ${track.title} » : $preview — confirmation requise")
                 return false
             }
-        return autoLinkTrackAlbum(track.trackId, best)
+        val linked = autoLinkTrackAlbum(track.trackId, best)
+        if (!linked && force) awaitingRetryLater(track.trackId)
+        return linked
+    }
+
+    /**
+     * Après une demande explicite restée sans résultat, on ramène l'attente automatique de 7 jours à 24 h :
+     * le titre revient vite dans les lots suivants sans marteler les APIs.
+     */
+    private suspend fun awaitingRetryLater(trackId: Long) {
+        runCatchingCancellable {
+            db.apiCacheDao().shorten(
+                entityType = EntityType.TRACK, entityId = trackId, dataType = DataType.ALBUM_MATCH,
+                expiresAt = System.currentTimeMillis() + 24L * 3_600_000
+            )
+        }
     }
 
     /**
@@ -796,7 +834,7 @@ class MetadataEnricher(private val db: NovaDatabase, private val settings: Setti
             }
             // Réparation des faux albums (« Unknown », « Cover ») : sinon ces titres restent bloqués
             // hors de missingAlbumAssociation, qui exige tracks.album_id IS NULL.
-            val repaired = runCatchingCancellable { fillMissingAlbumsPass(minOf(tracks, 5)) }
+            val repaired = runCatchingCancellable { fillMissingAlbumsPass(minOf(tracks, 5), force = false) }
                 .getOrElse { EnrichmentState.log("⚠️ Albums manquants : ${it.message}"); null }
             if (repaired != null) { processed += repaired.processed; found += repaired.found }
             db.trackDao().missingAlbumAssociation(now, minOf(tracks, 5)).forEach { track ->

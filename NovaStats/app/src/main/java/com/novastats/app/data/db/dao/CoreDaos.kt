@@ -153,6 +153,24 @@ interface TrackDao {
     )
     suspend fun tracksNeedingAlbum(now: Long, placeholders: List<String>, limit: Int): List<TrackEntity>
 
+    /**
+     * Même sélection mais **sans** le cache de tentative : sert à la demande explicite de l'utilisateur
+     * (« 💿 Compléter les albums manquants »), qui doit réinterroger les sources même si un essai récent
+     * n'a rien donné (cache négatif de 7 jours).
+     */
+    @Query(
+        """
+        SELECT t.* FROM tracks t
+        WHERE (
+                t.album_id IS NULL
+                OR t.album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders))
+              )
+          AND t.play_count > 0
+        ORDER BY t.play_count DESC, t.track_id LIMIT :limit
+        """
+    )
+    suspend fun tracksNeedingAlbumIgnoringCache(placeholders: List<String>, limit: Int): List<TrackEntity>
+
     /** Combien de titres restent à réparer, hors tentatives récentes (fin de lot). */
     @Query(
         """
@@ -170,6 +188,19 @@ interface TrackDao {
         """
     )
     suspend fun tracksNeedingAlbumCount(now: Long, placeholders: List<String>): Int
+
+    /** Titres à réparer, cache de tentative compris (ce que le bouton traiterait en forçant). */
+    @Query(
+        """
+        SELECT COUNT(*) FROM tracks t
+        WHERE (
+                t.album_id IS NULL
+                OR t.album_id IN (SELECT a.album_id FROM albums a WHERE LOWER(TRIM(a.title)) IN (:placeholders))
+              )
+          AND t.play_count > 0
+        """
+    )
+    suspend fun tracksNeedingAlbumCountAll(placeholders: List<String>): Int
 
     /** Compteur pour l'interface (Réglages → APIs), cache de tentatives inclus. */
     @Query(

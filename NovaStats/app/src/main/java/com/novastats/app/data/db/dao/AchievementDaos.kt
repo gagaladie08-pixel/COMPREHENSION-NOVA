@@ -402,6 +402,17 @@ interface ApiCacheDao {
     suspend fun blacklistedUrls(entityType: String, entityId: Long): List<String>
     @Query("DELETE FROM api_cache WHERE entity_type = :entityType AND entity_id = :entityId AND data_type = :dataType AND is_blacklisted = 0")
     suspend fun clearEntity(entityType: String, entityId: Long, dataType: String)
+    /**
+     * Raccourcit l'attente d'une nouvelle tentative (échec après une demande explicite de l'utilisateur) :
+     * un « rien trouvé » reste en cache 7 jours, ce qui donne l'impression que le bouton ne fait rien.
+     */
+    @Query("UPDATE api_cache SET expires_at = :expiresAt WHERE entity_type = :entityType AND entity_id = :entityId AND data_type = :dataType AND is_blacklisted = 0")
+    suspend fun shorten(entityType: String, entityId: Long, dataType: String, expiresAt: Long)
+    /** Titres dont l'album a déjà été cherché sans succès (cache « NONE » encore valable). */
+    @Query("SELECT COUNT(DISTINCT entity_id) FROM api_cache WHERE entity_type = 'TRACK' AND data_type = :dataType AND source = 'NONE' AND expires_at > :now AND is_blacklisted = 0")
+    fun pendingCount(dataType: String, now: Long = System.currentTimeMillis()): Flow<Int>
+    @Query("SELECT DISTINCT entity_id FROM api_cache WHERE entity_type = 'TRACK' AND data_type = :dataType AND source = 'NONE' AND expires_at > :now AND is_blacklisted = 0")
+    suspend fun pendingIds(dataType: String, now: Long = System.currentTimeMillis()): List<Long>
     @Query("SELECT COUNT(*) FROM api_cache WHERE is_rejected = 0 AND source != 'NONE' AND expires_at > :now") fun cachedCount(now: Long = System.currentTimeMillis()): Flow<Int>
 }
 

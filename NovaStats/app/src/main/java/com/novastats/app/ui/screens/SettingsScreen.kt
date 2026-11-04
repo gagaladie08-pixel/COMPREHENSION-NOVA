@@ -1155,11 +1155,16 @@ private fun ApisPage() {
                     onClick = {
                         albumFillStatus = "Recherche des albums…"
                         scope.launch {
-                            val r = withContext(Dispatchers.IO) { app.enricher.fillMissingAlbums(limit = 40) }
-                            albumFillStatus = if (r.found > 0)
-                                "✅ ${r.found} album(s) rattaché(s)${if (r.remaining > 0) " · ${r.remaining} restant(s)" else ""}"
-                            else
-                                "Aucun album trouvé pour ${r.processed} titre(s)${if (r.remaining > 0) " · ${r.remaining} restant(s)" else ""} · nouvel essai dans 7 jours"
+                            // force = true : un appui explicite réinterroge les sources même si un essai
+                            // récent n'a rien donné (sinon le cache « rien trouvé » bloque 7 jours).
+                            val r = withContext(Dispatchers.IO) { app.enricher.fillMissingAlbums(limit = 40, force = true) }
+                            albumFillStatus = when {
+                                r.processed == 0 -> "✅ Aucun titre sans album à traiter"
+                                r.found > 0 -> "✅ ${r.found} album(s) rattaché(s)${if (r.remaining > 0) " · ${r.remaining} restant(s)" else ""}"
+                                else -> "Aucune proposition assez sûre pour ${r.processed} titre(s)" +
+                                    (if (r.waiting > 0) " · ${r.waiting} seront réessayés demain" else "") +
+                                    " — tu peux relancer quand tu veux, ce bouton force la recherche"
+                            }
                         }
                     },
                     enabled = !enrich.running, modifier = Modifier.fillMaxWidth()
@@ -1167,6 +1172,7 @@ private fun ApisPage() {
                 Text(
                     albumFillStatus ?: "Titres écoutés sans album (lecteur qui n'envoie pas le nom, ou « Unknown » / « Cover ») : " +
                         "le nom d'album est cherché par titre, puis vérifié dans la liste de pistes de l'album candidat. " +
+                        "Ce bouton force un nouvel essai (il ignore l'attente de 7 jours des lots automatiques). " +
                         "$albumless titre(s) concerné(s) aujourd'hui.",
                     color = if (albumFillStatus == null) theme.textSecondary else theme.primary,
                     style = MaterialTheme.typography.bodySmall,
